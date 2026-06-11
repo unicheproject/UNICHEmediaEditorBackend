@@ -1,0 +1,425 @@
+{
+  "info": {
+    "name": "UNICHE Media Editor — MVP Backend",
+    "description": "End-to-end collection for the UNICHE Media Editor backend.\n\nVariables (set on the collection, override per-environment if you like):\n- base_url: http://localhost:8000\n- project_id / asset_id / audio_asset_id / job_id: auto-captured by the request test scripts.\n\nSuggested order to exercise the full flow:\n1. System > Health\n2. Projects > Create Project        (saves project_id)\n3. Assets > Upload Image Asset       (saves asset_id — pick a .jpg/.png file)\n4. Assets > List Project Assets\n5. Capabilities > List Capabilities\n6. Jobs > Create image.caption Job   (saves job_id)\n7. Jobs > Get Job                    (status: queued -> running -> succeeded)\n8. Assets > Upload Audio Asset + Jobs > Create audio.transcribe Job",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "project_id", "value": "", "type": "string" },
+    { "key": "asset_id", "value": "", "type": "string" },
+    { "key": "audio_asset_id", "value": "", "type": "string" },
+    { "key": "job_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "Create Project",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Heritage Reel\",\n  \"description\": \"1950s archive footage\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('project_id', id);",
+                  "console.log('project_id =', id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Projects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects"]
+            }
+          }
+        },
+        {
+          "name": "Get Project",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Project",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Project (soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Assets",
+      "item": [
+        {
+          "name": "Upload Image Asset",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pick a .jpg/.jpeg/.png/.webp/.tiff file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/assets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}", "assets"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('asset_id', id);",
+                  "console.log('asset_id =', id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload Audio Asset",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pick a .mp3/.wav/.m4a/.flac/.ogg file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/assets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}", "assets"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('audio_asset_id', id);",
+                  "console.log('audio_asset_id =', id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Project Assets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/assets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}", "assets"]
+            }
+          }
+        },
+        {
+          "name": "Get Asset Metadata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets/{{asset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets", "{{asset_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Download Asset",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets/{{asset_id}}/download",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets", "{{asset_id}}", "download"]
+            }
+          }
+        },
+        {
+          "name": "Delete Asset (soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets/{{asset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets", "{{asset_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capabilities",
+      "item": [
+        {
+          "name": "List Capabilities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/capabilities",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "capabilities"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('14 capabilities', () => pm.expect(pm.response.json().length).to.eql(14));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Capability (image.caption)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/capabilities/image.caption",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "capabilities", "image.caption"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Create image.caption Job",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"image.caption\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('job_id', id);",
+                  "console.log('job_id =', id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create audio.transcribe Job",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"audio.transcribe\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{audio_asset_id}}\",\n  \"input\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('job_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create not_implemented Job (image.upscale)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"image.upscale\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('job_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Job",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs", "{{job_id}}"]
+            }
+          }
+        },
+        {
+          "name": "List Jobs for Project",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}", "jobs"]
+            }
+          }
+        },
+        {
+          "name": "Job Events (SSE)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "text/event-stream" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs/{{job_id}}/events",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs", "{{job_id}}", "events"]
+            },
+            "description": "Server-Sent Events stream of job status/progress until terminal. Note: standard Postman shows this as a single response once the stream closes; use the SSE/curl client for live streaming."
+          }
+        }
+      ]
+    }
+  ]
+}

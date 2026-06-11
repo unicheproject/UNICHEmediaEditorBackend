@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: uniche
+      POSTGRES_PASSWORD: uniche
+      POSTGRES_DB: uniche
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uniche -d uniche"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    # --reload-dir scopes the watcher to source only, so .venv / caches mounted
+    # via the bind volume don't trigger constant "changes detected" churn.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
+    env_file: .env
+    environment:
+      # Override compose-internal hostnames in case .env points elsewhere
+      DATABASE_URL: postgresql+asyncpg://uniche:uniche@postgres:5432/uniche
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/storage
+      PYTHONPATH: /app
+    volumes:
+      - .:/app
+      - storage:/data/storage
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: arq app.workers.worker.WorkerSettings
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://uniche:uniche@postgres:5432/uniche
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/storage
+      PYTHONPATH: /app
+    volumes:
+      - .:/app
+      - storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---- Future: S3-compatible object storage (swap StorageService impl) ----
+  # minio:
+  #   image: minio/minio:latest
+  #   profiles: ["objectstore"]
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minio
+  #     MINIO_ROOT_PASSWORD: minio12345
+  #   volumes:
+  #     - miniodata:/data
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+
+volumes:
+  pgdata:
+  storage:
+  # miniodata:
