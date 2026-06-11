@@ -508,15 +508,20 @@
           }
         },
         {
-          "name": "List Jobs for Project",
+          "name": "List Jobs for Project (paginated)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/jobs",
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/jobs?limit=50&offset=0",
               "host": ["{{base_url}}"],
-              "path": ["api", "v1", "projects", "{{project_id}}", "jobs"]
-            }
+              "path": ["api", "v1", "projects", "{{project_id}}", "jobs"],
+              "query": [
+                { "key": "limit", "value": "50", "description": "max 200, default 50" },
+                { "key": "offset", "value": "0", "description": "skip N (newest first)" }
+              ]
+            },
+            "description": "Returns a page envelope: { items, total, limit, offset }."
           }
         },
         {

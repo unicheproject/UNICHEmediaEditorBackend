@@ -71,4 +71,31 @@ async def test_list_jobs_for_project(client: AsyncClient) -> None:
     )
     resp = await client.get(f"{API}/projects/{pid}/jobs")
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    page = resp.json()
+    assert page["total"] == 1
+    assert page["limit"] == 50
+    assert page["offset"] == 0
+    assert len(page["items"]) == 1
+
+
+async def test_list_jobs_pagination(client: AsyncClient) -> None:
+    pid, aid = await _project_with_asset(client, "pic.png", "image/png")
+    for _ in range(5):
+        await client.post(
+            f"{API}/jobs",
+            json={"capability_id": "image.caption", "project_id": pid, "asset_id": aid},
+        )
+
+    # First page of 2.
+    page1 = (await client.get(f"{API}/projects/{pid}/jobs?limit=2&offset=0")).json()
+    assert page1["total"] == 5
+    assert page1["limit"] == 2
+    assert len(page1["items"]) == 2
+
+    # Second page; ids don't overlap the first.
+    page2 = (await client.get(f"{API}/projects/{pid}/jobs?limit=2&offset=2")).json()
+    assert len(page2["items"]) == 2
+    assert {j["id"] for j in page1["items"]}.isdisjoint(j["id"] for j in page2["items"])
+
+    # limit above the cap is rejected.
+    assert (await client.get(f"{API}/projects/{pid}/jobs?limit=999")).status_code == 422

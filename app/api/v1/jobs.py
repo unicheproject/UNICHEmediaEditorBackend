@@ -7,12 +7,13 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.database import async_session_factory, get_session
 from app.models.enums import JobStatus
+from app.schemas.common import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, Page
 from app.schemas.job import JobCreate, JobRead
 from app.services import jobs as svc
 from app.workers.queue import enqueue_job
@@ -50,12 +51,22 @@ async def get_job(
     return JobRead.model_validate(job)
 
 
-@router.get("/projects/{project_id}/jobs", response_model=list[JobRead])
+@router.get("/projects/{project_id}/jobs", response_model=Page[JobRead])
 async def list_project_jobs(
-    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-) -> list[JobRead]:
-    jobs = await svc.list_jobs_for_project(session, project_id)
-    return [JobRead.model_validate(j) for j in jobs]
+    project_id: uuid.UUID,
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> Page[JobRead]:
+    jobs, total = await svc.list_jobs_for_project(
+        session, project_id, limit=limit, offset=offset
+    )
+    return Page[JobRead](
+        items=[JobRead.model_validate(j) for j in jobs],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/jobs/{job_id}/events")

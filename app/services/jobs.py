@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
@@ -65,15 +65,22 @@ async def get_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
 
 
 async def list_jobs_for_project(
-    session: AsyncSession, project_id: uuid.UUID
-) -> list[Job]:
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    limit: int,
+    offset: int,
+) -> tuple[list[Job], int]:
+    """Return one page of a project's jobs (newest first) plus the total count."""
     await get_project(session, project_id)
-    result = await session.execute(
-        select(Job)
-        .where(Job.project_id == project_id)
-        .order_by(Job.created_at.desc())
+    base = select(Job).where(Job.project_id == project_id)
+    total = await session.scalar(
+        select(func.count()).select_from(base.subquery())
     )
-    return list(result.scalars().all())
+    result = await session.execute(
+        base.order_by(Job.created_at.desc()).limit(limit).offset(offset)
+    )
+    return list(result.scalars().all()), int(total or 0)
 
 
 async def _build_job_context(

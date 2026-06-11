@@ -132,7 +132,11 @@ curl -s -X POST $BASE/jobs \
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
 | Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `GET /api/v1/assets/{id}/download` · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
-| Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` · `GET /api/v1/jobs/{id}/events` (SSE) |
+| Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
+
+`GET /api/v1/projects/{id}/jobs` is paginated: `?limit=` (default 50, max 200)
+and `?offset=`, newest first. It returns a page envelope:
+`{ "items": [...], "total": N, "limit": 50, "offset": 0 }`.
 
 Project and asset deletes are **soft** (`deleted_at`). Uploads validate file
 extension (415 if unsupported) and size against `MAX_UPLOAD_SIZE_MB` (413 if
