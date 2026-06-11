@@ -1,19 +1,30 @@
-FROM python:3.12-slim
+# Base image pinned by tag + digest for reproducible builds (Python 3.12.13).
+FROM python:3.12-slim-bookworm@sha256:76d4b7b6305788c6b4c6a19d6a22a3921bf802e9af4d5e1e5bd771208dba74bf
 
-# Faster, reproducible installs via uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# uv pinned by exact version (not :latest) for reproducible installs.
+COPY --from=ghcr.io/astral-sh/uv:0.11.20 /uv /usr/local/bin/uv
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_SYSTEM_PYTHON=1 \
     UV_LINK_MODE=copy
 
+# System tools for deterministic media capabilities, pinned to bookworm versions.
+# ffmpeg -> all video + audio ops; imagemagick -> image ops (`convert` CLI).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg=7:5.1.9-0+deb12u1 \
+        imagemagick=8:6.9.11.60+dfsg-1.6+deb12u10 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy project metadata + source, then install (project + dev deps) into the system env.
-# Installing the project itself (not just deps) keeps `app` importable for api/worker/tests.
+# Install dependencies from the fully-pinned lockfile (with hashes), then the
+# project itself so `app` is importable for api/worker/tests regardless of cwd.
+COPY requirements.lock pyproject.toml ./
+RUN uv pip install --system --require-hashes -r requirements.lock
 COPY . .
-RUN uv pip install --system ".[dev]"
+RUN uv pip install --system --no-deps .
 
 # Storage dir is mounted as a volume in compose; create a default for standalone runs
 RUN mkdir -p /data/storage

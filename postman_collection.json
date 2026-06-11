@@ -9,6 +9,7 @@
     { "key": "project_id", "value": "", "type": "string" },
     { "key": "asset_id", "value": "", "type": "string" },
     { "key": "audio_asset_id", "value": "", "type": "string" },
+    { "key": "video_asset_id", "value": "", "type": "string" },
     { "key": "job_id", "value": "", "type": "string" }
   ],
   "item": [
@@ -205,6 +206,43 @@
           ]
         },
         {
+          "name": "Upload Video Asset",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pick a .mp4/.mov/.webm/.mkv file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/projects/{{project_id}}/assets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "projects", "{{project_id}}", "assets"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('video_asset_id', id);",
+                  "console.log('video_asset_id =', id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "List Project Assets",
           "request": {
             "method": "GET",
@@ -378,6 +416,81 @@
                 "exec": [
                   "pm.collectionVariables.set('job_id', pm.response.json().id);"
                 ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create image.resize Job (tool → derived asset)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"image.resize\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": { \"width\": 640, \"height\": 480 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create video.thumbnail Job (tool → derived image)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"video.thumbnail\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{video_asset_id}}\",\n  \"input\": { \"timestamp\": 1 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create audio.trim Job (tool → derived audio)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"audio.trim\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{audio_asset_id}}\",\n  \"input\": { \"start\": 0, \"end\": 5 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
               }
             }
           ]

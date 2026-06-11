@@ -20,6 +20,7 @@ class AssetRead(ORMModel):
     size_bytes: int
     storage_path: str
     checksum_sha256: str
+    source_asset_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

@@ -46,6 +46,13 @@ class ProviderError(AppError):
     code = "provider_error"
 
 
+class ToolError(AppError):
+    """Raised when a local CLI tool (ffmpeg/imagemagick) fails."""
+
+    status_code = 500
+    code = "tool_error"
+
+
 def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 

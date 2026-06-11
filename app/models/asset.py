@@ -34,6 +34,11 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
+    # Provenance: null = uploaded original; set = derived from a capability job.
+    source_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("assets.id"), nullable=True, index=True
+    )
+
     project: Mapped[Project] = relationship(
         back_populates="assets", lazy="noload"
     )

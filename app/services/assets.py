@@ -120,3 +120,48 @@ async def soft_delete_asset(session: AsyncSession, asset_id: uuid.UUID) -> None:
     asset = await get_asset(session, asset_id)
     asset.deleted_at = datetime.now(UTC)
     await session.commit()
+
+
+async def create_derived_asset(
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    source_asset_id: uuid.UUID | None,
+    src_path: Path,
+    filename: str,
+    media_type: MediaType,
+) -> Asset:
+    """Register a tool-produced file as a new (derived) Asset.
+
+    Trusted output: skips the upload-size cap and allowed-extension gate that
+    apply to user uploads. Sets source_asset_id for provenance / chaining.
+    """
+    stored_name = safe_filename(filename)
+    extension = Path(filename).suffix.lstrip(".").lower()
+    asset_id = uuid.uuid4()
+    storage = get_storage()
+
+    with src_path.open("rb") as src:
+        storage_path, size_bytes = storage.save_upload(
+            project_id, asset_id, stored_name, src
+        )
+    checksum = storage.calculate_checksum(storage_path)
+    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    asset = Asset(
+        id=asset_id,
+        project_id=project_id,
+        filename=stored_name,
+        original_filename=filename,
+        media_type=media_type,
+        mime_type=mime_type,
+        extension=extension,
+        size_bytes=size_bytes,
+        storage_path=storage_path,
+        checksum_sha256=checksum,
+        source_asset_id=source_asset_id,
+    )
+    session.add(asset)
+    await session.commit()
+    await session.refresh(asset)
+    return asset

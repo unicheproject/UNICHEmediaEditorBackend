@@ -171,16 +171,42 @@ Key boundaries:
 - **Provider selection happens in exactly one place**:
   `app/providers/factory.py`, driven by `INFERENCE_PROVIDER`.
 
-### Capability handlers in the MVP
+### Capability handlers
 
-Two capabilities are wired to the provider abstraction:
+There are three handler families behind one uniform interface
+(`CapabilityHandler.run(ctx: JobContext) -> HandlerResult`):
 
-- `image.caption`
-- `audio.transcribe`
+1. **Provider-backed** (AI, JSON output) — route to the configured inference
+   provider: `image.caption`, `audio.transcribe`.
+2. **Deterministic local tools** (`cost_class=deterministic`, **file output**) —
+   run FFmpeg / ImageMagick and register each produced file as a new **derived
+   Asset**:
 
-All other registered capabilities resolve to `NotImplementedHandler`, whose
-jobs **succeed** with `{"status": "not_implemented", "message": ...}`. This
-keeps the registry complete without integrating every provider at once.
+   | family | capabilities | tool |
+   |--------|--------------|------|
+   | video | `video.trim` `video.split` `video.concat` `video.transcode` `video.mute` `video.crop` `video.resize` `video.thumbnail` | FFmpeg |
+   | image | `image.resize` `image.crop` `image.format` `image.colour.adjust` | ImageMagick |
+   | audio | `audio.trim` `audio.concat` `audio.gain` `audio.normalize` `audio.fade` `audio.transcode` | FFmpeg |
+
+3. **Not-implemented fallback** — every other registered capability resolves to
+   `NotImplementedHandler`, whose jobs **succeed** with
+   `{"status": "not_implemented", ...}`, keeping the registry complete without
+   integrating every provider at once.
+
+**Derived assets & chaining.** Local-tool jobs write outputs under
+`job.output.outputs[] = {asset_id, filename, media_type, size_bytes,
+download_path}`. Each is a first-class `Asset` (downloadable via
+`GET /assets/{id}/download`) with `source_asset_id` set to its input — so one
+operation's output `asset_id` can feed straight into the next operation as input
+(`input.asset_ids` for multi-input ops like `*.concat`). This composability is
+what a future agentic planner will use to chain capabilities as tools.
+
+**Audio uses FFmpeg** (not SoX) so every accepted format — including m4a/AAC —
+works; the handler layer stays modular if a SoX backend is wanted later.
+
+System binaries (`ffmpeg`, `imagemagick`) are installed in the Docker image (shared
+by api + worker). Tool jobs only run where those binaries exist; tests that
+execute them are skipped if the binaries are absent.
 
 ## Inference providers
 
@@ -215,9 +241,15 @@ restart the `worker` (and `api`). No code changes.
    (id, title, description, input/output JSON schema, supported media types,
    `cost_class`, `enabled`). It is now listed by `GET /capabilities`.
 2. If it should do real work, create a handler in
-   `app/capabilities/handlers/` (subclass `ProviderBackedHandler` to route to
-   the configured provider, or `CapabilityHandler` for custom logic) and
-   register it in `_HANDLERS` in `app/capabilities/registry.py`.
+   `app/capabilities/handlers/` and register it in `_HANDLERS` in
+   `app/capabilities/registry.py`:
+   - **AI / hosted inference** → subclass `ProviderBackedHandler`.
+   - **Deterministic local tool** → subclass `LocalToolHandler`, implement
+     `process(ctx)`: read inputs from `ctx.input_path` / `ctx.input_paths` and
+     params from `ctx.params`, write outputs into `ctx.work_dir`, and return a
+     `HandlerResult` with `OutputFile` entries (the job service registers them as
+     derived assets). Put the subprocess call in `app/tools/`.
+   - **Custom logic** → subclass `CapabilityHandler` directly.
 3. If the capability uses the HTTP provider, add its endpoint-path setting in
    `app/core/config.py` and map it in `HTTPInferenceProvider._paths`.
 
@@ -246,8 +278,9 @@ app/
   models/                 SQLAlchemy: project, asset, job, enums, base
   schemas/                Pydantic v2 request/response models
   services/               projects, assets, storage, jobs (business logic)
-  capabilities/           definitions, registry, handlers/
+  capabilities/           definitions, registry, context, handlers/
   providers/              base, mock, http, factory
+  tools/                  runner, ffmpeg, imagemagick (subprocess wrappers)
   workers/                worker (arq), tasks, queue (enqueue helper)
 alembic/                  async migration env + versions
 tests/                    pytest suite (SQLite, eager jobs, mock provider)
@@ -258,7 +291,8 @@ frontend/index.html       placeholder page
 
 - Replace `LocalStorageService` with an S3/MinIO implementation (interface is
   ready; a commented `minio` service exists in `docker-compose.yml`).
-- Add deterministic local tools (FFmpeg/ImageMagick/SoX) as a new provider /
-  handler family (`cost_class=deterministic`).
-- Wire the remaining capabilities to real hosted endpoints.
+- An **agentic AI planner** that orchestrates the registered capabilities as
+  tools (the deterministic tool family + derived-asset chaining are built for
+  exactly this).
+- Wire the remaining AI capabilities to real hosted endpoints.
 - Authentication / multi-tenancy and a full editing UI.

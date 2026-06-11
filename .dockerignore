@@ -11,5 +11,4 @@ storage
 *.sqlite3
 *.db
 .env
-README.md
-frontend
+postman_collection.json

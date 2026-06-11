@@ -41,6 +41,177 @@ def _def(
     )
 
 
+# Output schema shared by all file-producing deterministic capabilities.
+_FILE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "outputs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "asset_id": {"type": "string", "format": "uuid"},
+                    "filename": {"type": "string"},
+                    "media_type": {"type": "string"},
+                    "size_bytes": {"type": "integer"},
+                    "download_path": {"type": "string"},
+                },
+            },
+        }
+    },
+}
+
+_NUM = {"type": "number"}
+_INT = {"type": "integer"}
+_STR = {"type": "string"}
+_IDS = {"type": "array", "items": {"type": "string", "format": "uuid"}}
+_V, _A, _I = [MediaType.video], [MediaType.audio], [MediaType.image]
+
+# Declarative specs for the deterministic local-tool capabilities.
+_DETERMINISTIC_SPECS: list[dict] = [
+    {
+        "id": "video.trim",
+        "title": "Video Trim",
+        "description": "Trim a video clip to a start/end time range (seconds).",
+        "media": _V,
+        "properties": {"start": _NUM, "end": _NUM},
+        "required": ["start", "end"],
+    },
+    {
+        "id": "video.split",
+        "title": "Video Split",
+        "description": "Split a video into segments at the given time markers (seconds).",
+        "media": _V,
+        "properties": {"markers": {"type": "array", "items": _NUM}},
+        "required": ["markers"],
+    },
+    {
+        "id": "video.concat",
+        "title": "Video Concatenate",
+        "description": "Concatenate multiple video clips into one (input.asset_ids).",
+        "media": _V,
+        "properties": {"asset_ids": _IDS},
+        "required": ["asset_ids"],
+    },
+    {
+        "id": "video.transcode",
+        "title": "Video Transcode",
+        "description": "Transcode a video to a target container/codec.",
+        "media": _V,
+        "properties": {"format": _STR, "video_codec": _STR, "audio_codec": _STR},
+        "required": ["format"],
+    },
+    {
+        "id": "video.mute",
+        "title": "Video Mute",
+        "description": "Remove the audio track from a video.",
+        "media": _V,
+        "properties": {},
+    },
+    {
+        "id": "video.crop",
+        "title": "Video Crop",
+        "description": "Crop a video to a rectangle (x, y, width, height).",
+        "media": _V,
+        "properties": {"x": _INT, "y": _INT, "width": _INT, "height": _INT},
+        "required": ["x", "y", "width", "height"],
+    },
+    {
+        "id": "video.resize",
+        "title": "Video Resize",
+        "description": "Resize a video to the given dimensions.",
+        "media": _V,
+        "properties": {"width": _INT, "height": _INT},
+        "required": ["width", "height"],
+    },
+    {
+        "id": "video.thumbnail",
+        "title": "Video Thumbnail",
+        "description": "Extract a single frame at a timestamp as an image.",
+        "media": _V,
+        "properties": {"timestamp": _NUM},
+        "required": ["timestamp"],
+    },
+    {
+        "id": "image.resize",
+        "title": "Image Resize",
+        "description": "Resize an image to the given dimensions.",
+        "media": _I,
+        "properties": {"width": _INT, "height": _INT},
+        "required": ["width", "height"],
+    },
+    {
+        "id": "image.crop",
+        "title": "Image Crop",
+        "description": "Crop an image to a rectangle (x, y, width, height).",
+        "media": _I,
+        "properties": {"x": _INT, "y": _INT, "width": _INT, "height": _INT},
+        "required": ["x", "y", "width", "height"],
+    },
+    {
+        "id": "image.format",
+        "title": "Image Format Convert",
+        "description": "Convert an image between formats (jpeg/png/webp/tiff).",
+        "media": _I,
+        "properties": {"format": _STR},
+        "required": ["format"],
+    },
+    {
+        "id": "image.colour.adjust",
+        "title": "Image Colour Adjust",
+        "description": "Adjust brightness, contrast and saturation of an image.",
+        "media": _I,
+        "properties": {"brightness": _INT, "contrast": _INT, "saturation": _INT},
+    },
+    {
+        "id": "audio.trim",
+        "title": "Audio Trim",
+        "description": "Trim an audio clip to a start/end time range (seconds).",
+        "media": _A,
+        "properties": {"start": _NUM, "end": _NUM},
+        "required": ["start", "end"],
+    },
+    {
+        "id": "audio.concat",
+        "title": "Audio Concatenate",
+        "description": "Concatenate multiple audio clips into one (input.asset_ids).",
+        "media": _A,
+        "properties": {"asset_ids": _IDS},
+        "required": ["asset_ids"],
+    },
+    {
+        "id": "audio.gain",
+        "title": "Audio Gain",
+        "description": "Adjust the gain of an audio clip (gain_db).",
+        "media": _A,
+        "properties": {"gain_db": _NUM},
+        "required": ["gain_db"],
+    },
+    {
+        "id": "audio.normalize",
+        "title": "Audio Normalize",
+        "description": "Normalize loudness to a target integrated level (LUFS).",
+        "media": _A,
+        "properties": {"target_i": _NUM},
+    },
+    {
+        "id": "audio.fade",
+        "title": "Audio Fade",
+        "description": "Apply fade-in and/or fade-out (seconds) to an audio clip.",
+        "media": _A,
+        "properties": {"fade_in": _NUM, "fade_out": _NUM},
+    },
+    {
+        "id": "audio.transcode",
+        "title": "Audio Transcode",
+        "description": "Transcode audio to a target container/codec.",
+        "media": _A,
+        "properties": {"format": _STR, "codec": _STR},
+        "required": ["format"],
+    },
+]
+
+
 CAPABILITIES: list[CapabilityDef] = [
     _def(
         id="audio.transcribe",
@@ -183,6 +354,25 @@ CAPABILITIES: list[CapabilityDef] = [
         media=[MediaType.video],
         cost_class=CostClass.future_gpu,
         output_schema={"type": "object", "properties": {"video_url": {"type": "string"}}},
+    ),
+    # --- Deterministic local-tool capabilities (FFmpeg / ImageMagick) ---
+    # All produce one or more output files, registered as derived Assets and
+    # listed under output.outputs[{asset_id, filename, media_type, ...}].
+    *(
+        _def(
+            id=spec["id"],
+            title=spec["title"],
+            description=spec["description"],
+            media=spec["media"],
+            cost_class=CostClass.deterministic,
+            input_schema={
+                "type": "object",
+                "properties": spec["properties"],
+                "required": spec.get("required", []),
+            },
+            output_schema=_FILE_OUTPUT_SCHEMA,
+        )
+        for spec in _DETERMINISTIC_SPECS
     ),
 ]
 

@@ -1,15 +1,18 @@
 """Capability handler interface.
 
-A handler encapsulates how a capability turns a Job into output. Handlers
-delegate hosted-inference work to the provider abstraction, so swapping
-providers never touches handler call sites in the API.
+A handler turns a JobContext into a HandlerResult. Two base families:
+- ProviderBackedHandler: routes to the configured inference provider (JSON out).
+- LocalToolHandler: runs a deterministic local CLI tool (file output).
+
+Provider selection / subprocess details live below the handler boundary, so the
+API and job-creation code never change when capabilities are added or swapped.
 """
 
 from __future__ import annotations
 
 import abc
-from typing import Any
 
+from app.capabilities.context import HandlerResult, JobContext
 from app.providers.base import InferenceRequest
 from app.providers.factory import get_provider
 
@@ -18,13 +21,35 @@ class CapabilityHandler(abc.ABC):
     capability_id: str
 
     @abc.abstractmethod
-    async def run(self, request: InferenceRequest) -> dict[str, Any]:
+    async def run(self, ctx: JobContext) -> HandlerResult:
         raise NotImplementedError
 
 
 class ProviderBackedHandler(CapabilityHandler):
-    """Handler that simply routes to the configured inference provider."""
+    """Handler that routes to the configured inference provider."""
 
-    async def run(self, request: InferenceRequest) -> dict[str, Any]:
+    async def run(self, ctx: JobContext) -> HandlerResult:
         provider = get_provider()
-        return await provider.infer(request)
+        request = InferenceRequest(
+            capability_id=ctx.capability_id,
+            payload=ctx.params,
+            file_path=ctx.input_path,
+            asset_meta=ctx.input_asset_meta,
+        )
+        data = await provider.infer(request)
+        return HandlerResult(data=data, outputs=[])
+
+
+class LocalToolHandler(CapabilityHandler):
+    """Base for deterministic local-tool handlers (ffmpeg / imagemagick).
+
+    Subclasses implement `process` and may write files into `ctx.work_dir`,
+    returning them as OutputFile entries on the HandlerResult.
+    """
+
+    @abc.abstractmethod
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        raise NotImplementedError
+
+    async def run(self, ctx: JobContext) -> HandlerResult:
+        return await self.process(ctx)
