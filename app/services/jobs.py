@@ -114,15 +114,28 @@ async def _build_job_context(
             }
             project_id = project_id or asset.project_id
 
+    # Resolve named secondary inputs: any param key ending in "_asset_id"
+    # (e.g. subtitle_asset_id, music_asset_id, audio_asset_id) -> file path.
+    named_input_paths: dict[str, str] = {}
+    for key, value in (job.input or {}).items():
+        if key.endswith("_asset_id") and value:
+            named_asset = await get_asset(session, uuid.UUID(str(value)))
+            named_input_paths[key] = str(storage.get_path(named_asset.storage_path))
+            project_id = project_id or named_asset.project_id
+
+    # Provenance anchor: the primary asset, else the first input segment.
+    source_asset_id = asset_ids[0] if asset_ids else None
+
     return JobContext(
         capability_id=job.capability_id,
         params=dict(job.input or {}),
         input_path=input_path,
         input_asset_meta=input_asset_meta,
         input_paths=input_paths,
+        named_input_paths=named_input_paths,
         work_dir=work_dir,
         project_id=project_id,
-        source_asset_id=job.asset_id,
+        source_asset_id=source_asset_id,
     )
 
 

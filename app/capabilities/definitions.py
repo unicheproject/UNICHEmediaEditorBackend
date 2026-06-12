@@ -65,7 +65,9 @@ _NUM = {"type": "number"}
 _INT = {"type": "integer"}
 _STR = {"type": "string"}
 _IDS = {"type": "array", "items": {"type": "string", "format": "uuid"}}
+_UUID = {"type": "string", "format": "uuid"}
 _V, _A, _I = [MediaType.video], [MediaType.audio], [MediaType.image]
+_VA = [MediaType.video, MediaType.audio]
 
 # Declarative specs for the deterministic local-tool capabilities.
 _DETERMINISTIC_SPECS: list[dict] = [
@@ -208,6 +210,91 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "media": _A,
         "properties": {"format": _STR, "codec": _STR},
         "required": ["format"],
+    },
+    # --- Composition capabilities ---
+    {
+        "id": "image.slideshow",
+        "title": "Image Slideshow",
+        "description": (
+            "Build a video slideshow from images (input.asset_ids, in order), "
+            "showing each for seconds_per_image."
+        ),
+        "media": _I,
+        "properties": {
+            "asset_ids": _IDS,
+            "seconds_per_image": _NUM,
+            "width": _INT,
+            "height": _INT,
+        },
+        "required": ["asset_ids"],
+    },
+    {
+        "id": "media.titlecard",
+        "title": "Title Card",
+        "description": (
+            "Generate a title-card video clip from text (no input asset needed). "
+            "Use as an intro/section card to feed into video.compose."
+        ),
+        "media": _V,
+        "properties": {
+            "text": _STR,
+            "duration": _NUM,
+            "width": _INT,
+            "height": _INT,
+            "background": _STR,
+            "foreground": _STR,
+        },
+        "required": ["text"],
+    },
+    {
+        "id": "video.subtitle.embed",
+        "title": "Embed Subtitles",
+        "description": (
+            "Embed a subtitle asset (input.subtitle_asset_id) into a video. "
+            "mode 'soft' muxes a selectable track; 'burn' renders into the picture."
+        ),
+        "media": _V,
+        "properties": {
+            "subtitle_asset_id": _UUID,
+            "mode": {"type": "string", "enum": ["soft", "burn"]},
+        },
+        "required": ["subtitle_asset_id"],
+    },
+    {
+        "id": "audio.mix",
+        "title": "Mix Background Audio",
+        "description": (
+            "Mix a background music/narration asset (input.music_asset_id) under a "
+            "video or audio asset. mode: mix | duck | replace."
+        ),
+        "media": _VA,
+        "properties": {
+            "music_asset_id": _UUID,
+            "music_volume": _NUM,
+            "mode": {"type": "string", "enum": ["mix", "duck", "replace"]},
+        },
+        "required": ["music_asset_id"],
+    },
+    {
+        "id": "video.compose",
+        "title": "Compose / Export Timeline",
+        "description": (
+            "Render a final video from ordered video segments (input.asset_ids) "
+            "normalized to width/height, with an optional audio bed "
+            "(input.audio_asset_id, audio_mode) and optional burned subtitles "
+            "(input.subtitle_asset_id)."
+        ),
+        "media": _V,
+        "properties": {
+            "asset_ids": _IDS,
+            "width": _INT,
+            "height": _INT,
+            "audio_asset_id": _UUID,
+            "audio_mode": {"type": "string", "enum": ["mix", "duck", "replace"]},
+            "music_volume": _NUM,
+            "subtitle_asset_id": _UUID,
+        },
+        "required": ["asset_ids"],
     },
 ]
 

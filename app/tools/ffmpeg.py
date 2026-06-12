@@ -176,3 +176,151 @@ def segment_outputs(dst_pattern: str) -> list[Path]:
     # Translate a printf-style pattern's directory + a glob of the stem.
     stem = p.name.split("%")[0]
     return sorted(p.parent.glob(f"{stem}*{p.suffix}"))
+
+
+# --- composition ---------------------------------------------------------
+#
+# Composition clips carry a uniform silent stereo audio track and yuv420p video,
+# so heterogeneous segments (title cards, slideshows, plain clips) concatenate
+# cleanly. `compose` lays an optional single audio bed over the whole timeline.
+
+FPS = 30
+_SAR = "setsar=1"
+_PIX = ["-pix_fmt", "yuv420p"]
+_ANULL = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+
+
+def _scale_pad(width: int, height: int) -> str:
+    w, h = _num(width, "width"), _num(height, "height")
+    return (
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,{_SAR},fps={FPS}"
+    )
+
+
+async def still_to_clip(image: str, dst: str, duration: float, width: int, height: int) -> None:
+    """A still image -> a video clip of `duration` with a silent audio track."""
+    await runner.run(
+        [
+            *_BASE,
+            "-loop", "1", "-t", _num(duration, "duration"), "-i", image,
+            *_ANULL,
+            "-vf", _scale_pad(width, height),
+            *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+        ]
+    )
+
+
+async def slideshow(
+    images: list[str], dst: str, seconds_per_image: float, width: int, height: int
+) -> None:
+    """Concatenate still images into one video clip (+ silent audio)."""
+    args = [*_BASE]
+    for img in images:
+        args += ["-loop", "1", "-t", _num(seconds_per_image, "seconds_per_image"), "-i", img]
+    args += _ANULL
+    n = len(images)
+    sp = _scale_pad(width, height)
+    chains = "".join(f"[{i}:v]{sp}[v{i}];" for i in range(n))
+    concat_in = "".join(f"[v{i}]" for i in range(n))
+    filt = f"{chains}{concat_in}concat=n={n}:v=1:a=0[v]"
+    args += [
+        "-filter_complex", filt,
+        "-map", "[v]", "-map", f"{n}:a",
+        *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+    ]
+    await runner.run(args)
+
+
+def _escape_subs(path: str) -> str:
+    # The subtitles filter needs ':' and '\' escaped inside the filter string.
+    return path.replace("\\", "\\\\").replace(":", "\\:")
+
+
+async def subtitle_embed(video: str, subtitle: str, dst: str, mode: str = "soft") -> None:
+    if mode == "burn":
+        await runner.run(
+            [*_BASE, "-i", video, "-vf", f"subtitles='{_escape_subs(subtitle)}'", *_PIX, dst]
+        )
+    else:  # soft mux
+        await runner.run(
+            [*_BASE, "-i", video, "-i", subtitle, "-c", "copy", "-c:s", "mov_text", dst]
+        )
+
+
+async def audio_mix(
+    media: str, music: str, dst: str, music_volume: float = 0.3, mode: str = "mix"
+) -> None:
+    """Lay `music` under `media`'s audio. mode: mix | duck (≈low mix) | replace."""
+    vol = music_volume if mode != "duck" else min(music_volume, 0.2)
+    if mode == "replace":
+        await runner.run(
+            [*_BASE, "-i", media, "-i", music,
+             "-map", "0:v?", "-map", "1:a", "-c:v", "copy", "-shortest", dst]
+        )
+        return
+    filt = f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[a]"
+    await runner.run(
+        [*_BASE, "-i", media, "-i", music,
+         "-filter_complex", filt, "-map", "0:v?", "-map", "[a]",
+         "-c:v", "copy", dst]
+    )
+
+
+async def _normalize_segment(src: str, dst: str, width: int, height: int) -> None:
+    """Re-encode a segment to uniform params (silent audio) for safe concat."""
+    await runner.run(
+        [
+            *_BASE, "-i", src, *_ANULL,
+            "-map", "0:v", "-map", "1:a",
+            "-vf", _scale_pad(width, height),
+            *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+        ]
+    )
+
+
+async def compose(
+    segments: list[str],
+    dst: str,
+    *,
+    width: int,
+    height: int,
+    work_dir: Path,
+    audio_path: str | None = None,
+    audio_mode: str = "mix",
+    music_volume: float = 0.3,
+    subtitle_path: str | None = None,
+) -> None:
+    """Timeline render: normalize -> concat -> optional audio bed -> optional burn."""
+    # 1. normalize each segment to identical codec/params
+    normalized: list[Path] = []
+    for i, seg in enumerate(segments):
+        out = work_dir / f"_norm_{i:03d}.mp4"
+        await _normalize_segment(seg, str(out), width, height)
+        normalized.append(out)
+
+    # 2. concat via the demuxer (copy; params already identical)
+    listing = work_dir / "_concat.txt"
+    listing.write_text("".join(f"file '{p}'\n" for p in normalized), encoding="utf-8")
+    concat = work_dir / "_concat.mp4"
+    await runner.run(
+        [*_BASE, "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(concat)]
+    )
+
+    current = concat
+    # 3. optional audio bed over the whole timeline
+    if audio_path:
+        with_audio = work_dir / "_audio.mp4"
+        await audio_mix(str(current), audio_path, str(with_audio),
+                        music_volume=music_volume, mode=audio_mode)
+        current = with_audio
+
+    # 4. optional subtitle burn-in (final re-encode)
+    if subtitle_path:
+        burned = work_dir / "_subs.mp4"
+        await subtitle_embed(str(current), subtitle_path, str(burned), mode="burn")
+        current = burned
+
+    # 5. move final result to dst
+    if str(current) != dst:
+        await runner.run([*_BASE, "-i", str(current), "-c", "copy", dst])

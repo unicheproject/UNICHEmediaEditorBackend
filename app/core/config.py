@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     allowed_image_extensions: set[str] = {"jpg", "jpeg", "png", "webp", "tiff"}
     allowed_audio_extensions: set[str] = {"mp3", "wav", "m4a", "flac", "ogg"}
     allowed_video_extensions: set[str] = {"mp4", "mov", "webm", "mkv"}
+    allowed_subtitle_extensions: set[str] = {"srt", "vtt"}
 
 
 @lru_cache

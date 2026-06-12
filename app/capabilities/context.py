@@ -26,6 +26,9 @@ class JobContext:
     input_asset_meta: dict[str, Any] = field(default_factory=dict)
     # All resolved input paths (primary first, then extras for multi-input ops).
     input_paths: list[str] = field(default_factory=list)
+    # Named secondary inputs resolved from any `*_asset_id` param
+    # (e.g. subtitle_asset_id, music_asset_id, audio_asset_id) -> file path.
+    named_input_paths: dict[str, str] = field(default_factory=dict)
     # Per-job scratch directory for tool output files.
     work_dir: Path | None = None
     project_id: uuid.UUID | None = None

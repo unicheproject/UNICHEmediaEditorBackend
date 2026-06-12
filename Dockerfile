@@ -15,6 +15,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg=7:5.1.9-0+deb12u1 \
         imagemagick=8:6.9.11.60+dfsg-1.6+deb12u10 \
+        fonts-dejavu-core=2.37-6 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

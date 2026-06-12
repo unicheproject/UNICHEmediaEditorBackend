@@ -9,6 +9,7 @@ class MediaType(enum.StrEnum):
     image = "image"
     audio = "audio"
     video = "video"
+    subtitle = "subtitle"
     unknown = "unknown"
 
 

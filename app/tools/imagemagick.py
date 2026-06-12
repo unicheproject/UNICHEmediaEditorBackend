@@ -7,6 +7,9 @@ from app.tools import runner
 
 CONVERT = "convert"
 
+# Bundled in the Docker image via fonts-dejavu-core.
+DEFAULT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
 
 def _int(value: object, name: str) -> str:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -47,4 +50,24 @@ async def colour_adjust(
     if contrast:
         args += ["-brightness-contrast", f"0x{_int(contrast, 'contrast')}"]
     args.append(dst)
+    await runner.run(args)
+
+
+async def render_text_card(
+    dst: str,
+    text: str,
+    *,
+    width: int,
+    height: int,
+    background: str = "#101418",
+    foreground: str = "#ffffff",
+    font: str | None = DEFAULT_FONT,
+) -> None:
+    """Render centered, word-wrapped text onto a solid background PNG."""
+    # `caption:` auto-wraps and auto-sizes text to the given canvas size.
+    args = [CONVERT, "-size", f"{_int(width, 'width')}x{_int(height, 'height')}"]
+    args += ["-background", background, "-fill", foreground, "-gravity", "center"]
+    if font:
+        args += ["-font", font]
+    args += [f"caption:{text}", dst]
     await runner.run(args)

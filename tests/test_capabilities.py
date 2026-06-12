@@ -11,7 +11,8 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     # A representative sample of the registered capabilities (14 AI + 18 tools).
     assert {"image.caption", "audio.transcribe", "video.upscale"} <= ids
     assert {"video.trim", "image.resize", "audio.normalize"} <= ids
-    assert len(caps) == 32
+    assert {"image.slideshow", "media.titlecard", "video.compose"} <= ids
+    assert len(caps) == 37
 
 
 async def test_get_capability_detail(client: AsyncClient) -> None:

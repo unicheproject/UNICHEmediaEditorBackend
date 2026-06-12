@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.capabilities.definitions import CAPABILITIES, CAPABILITIES_BY_ID, CapabilityDef
-from app.capabilities.handlers import audio_ops, image_ops, video_ops
+from app.capabilities.handlers import audio_ops, compose_ops, image_ops, video_ops
 from app.capabilities.handlers.audio_transcribe import AudioTranscribeHandler
 from app.capabilities.handlers.base import CapabilityHandler
 from app.capabilities.handlers.image_caption import ImageCaptionHandler
@@ -30,6 +30,11 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
     audio_ops.AudioNormalizeHandler(),
     audio_ops.AudioFadeHandler(),
     audio_ops.AudioTranscodeHandler(),
+    compose_ops.ImageSlideshowHandler(),
+    compose_ops.MediaTitlecardHandler(),
+    compose_ops.VideoSubtitleEmbedHandler(),
+    compose_ops.AudioMixHandler(),
+    compose_ops.VideoComposeHandler(),
 ]
 
 # Capabilities with a real handler (provider-backed or local-tool). Everything

@@ -31,6 +31,8 @@ def _resolve_media_type(extension: str) -> MediaType:
         return MediaType.audio
     if ext in settings.allowed_video_extensions:
         return MediaType.video
+    if ext in settings.allowed_subtitle_extensions:
+        return MediaType.subtitle
     return MediaType.unknown
 
 
@@ -39,6 +41,7 @@ def _allowed_extensions() -> set[str]:
         settings.allowed_image_extensions
         | settings.allowed_audio_extensions
         | settings.allowed_video_extensions
+        | settings.allowed_subtitle_extensions
     )
 
 
