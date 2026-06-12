@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.api.v1 import health
@@ -19,6 +20,17 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="MVP backend for the UNICHE Media Editor.",
+)
+
+# CORS — wide open by default for local frontend development. Note: when origins
+# is "*", credentials must be disabled (browsers reject "*" + credentials).
+_origins = settings.cors_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 register_exception_handlers(app)

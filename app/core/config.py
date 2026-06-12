@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     app_name: str = "UNICHE Media Editor API"
     api_v1_prefix: str = "/api/v1"
     log_level: str = "INFO"
+    # Comma-separated allowed origins, or "*" to allow any (dev default).
+    cors_allow_origins: str = "*"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        raw = self.cors_allow_origins.strip()
+        if raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://uniche:uniche@localhost:5432/uniche"
