@@ -41,9 +41,13 @@ async def upload_asset(
 
 @router.get("/projects/{project_id}/assets", response_model=list[AssetRead])
 async def list_assets(
-    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    project_id: uuid.UUID,
+    include_intermediate: bool = True,
+    session: AsyncSession = Depends(get_session),
 ) -> list[AssetRead]:
-    assets = await svc.list_assets(session, project_id)
+    assets = await svc.list_assets(
+        session, project_id, include_intermediate=include_intermediate
+    )
     return [AssetRead.model_validate(a) for a in assets]
 
 

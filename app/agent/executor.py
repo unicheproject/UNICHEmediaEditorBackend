@@ -16,6 +16,7 @@ from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.models.agent import AgentPlan, AgentSession
+from app.models.asset import Asset
 from app.models.enums import AgentPlanStatus, JobStatus
 from app.schemas.job import JobCreate
 from app.services import jobs as jobs_svc
@@ -51,6 +52,20 @@ def _build_job_input(
         job_input["asset_ids"] = [_resolve(a, outputs) for a in step.assets]
     asset_id = uuid.UUID(primary) if primary else None
     return asset_id, job_input
+
+
+def _consumed_step_ids(plan: Plan) -> set[str]:
+    """Step ids whose output is referenced (@stepN) by another step.
+
+    Their produced assets are intermediate; the rest are plan deliverables.
+    """
+    consumed: set[str] = set()
+    for step in plan.steps:
+        candidates = [step.asset, *step.assets, *step.params.values()]
+        for value in candidates:
+            if is_step_ref(value):
+                consumed.add(step_ref_id(value))  # type: ignore[arg-type]
+    return consumed
 
 
 async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
@@ -99,9 +114,21 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
             if job.status == JobStatus.failed:
                 raise RuntimeError(f"Step '{step.id}' failed: {job.error}")
 
+        # Outputs consumed by a later step are intermediate; leaves are finals.
+        consumed = _consumed_step_ids(plan)
+        finals: list[str] = []
+        for run in step_runs:
+            out_asset = run["output_asset_id"]
+            if not out_asset:
+                continue
+            if run["step_id"] in consumed:
+                asset = await session.get(Asset, uuid.UUID(out_asset))
+                if asset is not None:
+                    asset.is_intermediate = True
+            else:
+                finals.append(out_asset)
         plan_row.status = AgentPlanStatus.succeeded
-        last = step_runs[-1]["output_asset_id"] if step_runs else None
-        plan_row.result_asset_ids = [a for a in [last] if a]
+        plan_row.result_asset_ids = finals
     except Exception as exc:  # noqa: BLE001 - record failure on the plan
         logger.exception("Plan %s failed", plan_id)
         plan_row.status = AgentPlanStatus.failed

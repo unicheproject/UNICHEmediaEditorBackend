@@ -167,9 +167,29 @@ async def test_agent_end_to_end_slideshow(client: AsyncClient, tmp_path) -> None
     assert final["status"] == "succeeded", final.get("error")
     assert final["result_asset_ids"]
 
-    # final output is a downloadable video derived asset
+    # one deliverable (the compose output); title card + slideshow are intermediate
+    assert len(final["result_asset_ids"]) == 1
     out_id = final["result_asset_ids"][0]
     meta = (await client.get(f"{API}/assets/{out_id}")).json()
     assert meta["media_type"] == "video"
+    assert meta["is_intermediate"] is False
     dl = await client.get(f"{API}/assets/{out_id}/download")
     assert dl.status_code == 200 and len(dl.content) > 0
+
+    # the consumed step outputs (title, slides) are marked intermediate
+    consumed = {r["output_asset_id"] for r in final["step_runs"]
+                if r["step_id"] in ("title", "slides")}
+    for aid in consumed:
+        assert (await client.get(f"{API}/assets/{aid}")).json()["is_intermediate"] is True
+
+    # the default list shows everything; filtered list hides intermediates
+    pid = (await client.get(f"{API}/agent/sessions/{sess['id']}")).json()["project_id"]
+    all_assets = (await client.get(f"{API}/projects/{pid}/assets")).json()
+    finals_only = (
+        await client.get(f"{API}/projects/{pid}/assets?include_intermediate=false")
+    ).json()
+    all_ids = {a["id"] for a in all_assets}
+    final_ids = {a["id"] for a in finals_only}
+    assert consumed <= all_ids                 # intermediates present in full list
+    assert consumed.isdisjoint(final_ids)      # but hidden when filtered
+    assert out_id in final_ids                 # deliverable remains

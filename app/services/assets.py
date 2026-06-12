@@ -102,13 +102,19 @@ async def create_asset(
     return asset
 
 
-async def list_assets(session: AsyncSession, project_id: uuid.UUID) -> list[Asset]:
+async def list_assets(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    include_intermediate: bool = True,
+) -> list[Asset]:
     await get_project(session, project_id)
-    result = await session.execute(
-        select(Asset)
-        .where(Asset.project_id == project_id, Asset.deleted_at.is_(None))
-        .order_by(Asset.created_at.desc())
+    stmt = select(Asset).where(
+        Asset.project_id == project_id, Asset.deleted_at.is_(None)
     )
+    if not include_intermediate:
+        stmt = stmt.where(Asset.is_intermediate.is_(False))
+    result = await session.execute(stmt.order_by(Asset.created_at.desc()))
     return list(result.scalars().all())
 
 

@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Enum, ForeignKey, String
+from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import false as sa_false
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 from app.models.enums import MediaType
@@ -37,6 +38,11 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     # Provenance: null = uploaded original; set = derived from a capability job.
     source_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assets.id"), nullable=True, index=True
+    )
+    # True when produced as an intermediate step of an agent plan (consumed by a
+    # later step). Finals/originals are False. Lets the UI hide scaffolding.
+    is_intermediate: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_false(), index=True
     )
 
     project: Mapped[Project] = relationship(

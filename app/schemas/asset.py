@@ -21,6 +21,7 @@ class AssetRead(ORMModel):
     storage_path: str
     checksum_sha256: str
     source_asset_id: uuid.UUID | None
+    is_intermediate: bool
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
