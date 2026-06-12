@@ -52,11 +52,12 @@ Worker entrypoint: `arq app.workers.worker.WorkerSettings`.
   human-readable ranges. After changing deps in `pyproject.toml`, regenerate the
   lock. The Dockerfile also pins the base image (tag+digest), uv, and apt
   package versions — keep these reproducible.
-- **Tests use SQLite + run jobs eagerly** (no Redis/arq). `tests/conftest.py`
-  sets env vars (DATABASE_URL, STORAGE_DIR, INFERENCE_PROVIDER=mock) **before**
-  importing the app, and overrides the `get_enqueuer` dependency so a job runs
-  synchronously in-process on creation. Tool-execution tests are
-  `skipif`-guarded on `shutil.which("ffmpeg"/"convert")`.
+- **Tests use SQLite + run jobs/plans eagerly** (no Redis/arq). `tests/conftest.py`
+  sets env vars (DATABASE_URL, STORAGE_DIR, INFERENCE_PROVIDER=mock,
+  AGENT_PROVIDER=mock) **before** importing the app, and overrides the
+  `get_enqueuer` / `get_plan_enqueuer` dependencies so a job/plan runs
+  synchronously in-process. Execution tests that shell out are `skipif`-guarded on
+  `shutil.which("ffmpeg"/"convert")` (+ the DejaVu font for title cards).
 - The cross-dialect `JSONType` (JSONB on Postgres, JSON on SQLite) and `sa.Uuid`
   let the same models run under both Postgres (prod) and SQLite (tests).
 
@@ -108,13 +109,33 @@ real hosted endpoint is env-only (`INFERENCE_PROVIDER=http`, `INFERENCE_BASE_URL
 `INFERENCE_API_KEY`, per-capability path vars). Add a provider by subclassing
 `BaseInferenceProvider` and registering it in the factory.
 
+### Agent (`app/agent/`)
+
+Natural-language → ordered **plan** of capability calls → approve → chained
+execution. **Registry-driven**: `catalog.py` builds the planner's tool catalog
+from `registry.list_enabled()`, so new capabilities extend the agent for free.
+- `llm.py` `propose()` runs a backend (`AGENT_PROVIDER` = `mock` rule-based,
+  default | `openrouter` LLM), parses a `Plan`|`Clarification`, and for LLM
+  backends loops validation→repair. OpenRouter messages preserve
+  `reasoning_details` across turns.
+- `planner.py` `validate_plan()` checks each step against the registry
+  (capability enabled, params satisfy `input_schema` via `jsonschema`, `@stepN`
+  refs resolve, literal assets in scope, primary media type matches).
+- `executor.py` `execute_plan()` reuses `services.jobs.create_job` + `execute_job`
+  per step; `@stepN` asset refs resolve to the prior step's output asset. Runs as
+  arq `run_plan` (worker) or eagerly in tests.
+- Models `AgentSession` (scope + full transcript incl. reasoning_details) and
+  `AgentPlan` (steps + per-step `step_runs` + `result_asset_ids`). Routes under
+  `/api/v1/agent/*`; plan execution enqueued via the overridable
+  `get_plan_enqueuer` dependency (mirrors jobs' `get_enqueuer`).
+
 ### Assets, storage, derived outputs
 
 - `Asset.source_asset_id` (self-FK) records provenance: `null` = uploaded
   original, set = derived from a job. This makes operations **composable** — one
   job's output `asset_id` feeds the next job as input (e.g. `*.concat` via
-  `input.asset_ids`). This composability is the foundation for a future agentic
-  planner that uses capabilities as tools.
+  `input.asset_ids`). This composability is what the agent (below) relies on to
+  chain capabilities via `@stepN` references.
 - `app/services/storage.py` `StorageService` (local impl) is intentionally narrow
   (`save_upload`/`get_path`/`open_for_read`/`delete_asset`/`calculate_checksum`)
   so S3/MinIO can replace it. Layout: `projects/{pid}/assets/{aid}/original/{name}`.

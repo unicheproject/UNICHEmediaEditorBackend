@@ -14,6 +14,7 @@ from arq.connections import ArqRedis, RedisSettings
 from app.core.config import settings
 
 RUN_JOB_TASK = "run_job"
+RUN_PLAN_TASK = "run_plan"
 
 
 def redis_settings() -> RedisSettings:
@@ -28,5 +29,13 @@ async def enqueue_job(job_id: uuid.UUID) -> None:
     pool = await get_arq_pool()
     try:
         await pool.enqueue_job(RUN_JOB_TASK, str(job_id))
+    finally:
+        await pool.aclose()
+
+
+async def enqueue_plan(plan_id: uuid.UUID) -> None:
+    pool = await get_arq_pool()
+    try:
+        await pool.enqueue_job(RUN_PLAN_TASK, str(plan_id))
     finally:
         await pool.aclose()

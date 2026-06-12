@@ -10,7 +10,9 @@
     { "key": "asset_id", "value": "", "type": "string" },
     { "key": "audio_asset_id", "value": "", "type": "string" },
     { "key": "video_asset_id", "value": "", "type": "string" },
-    { "key": "job_id", "value": "", "type": "string" }
+    { "key": "job_id", "value": "", "type": "string" },
+    { "key": "agent_session_id", "value": "", "type": "string" },
+    { "key": "agent_plan_id", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -535,6 +537,106 @@
               "path": ["api", "v1", "jobs", "{{job_id}}", "events"]
             },
             "description": "Server-Sent Events stream of job status/progress until terminal. Note: standard Postman shows this as a single response once the stream closes; use the SSE/curl client for live streaming."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agent",
+      "item": [
+        {
+          "name": "Create Agent Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"project_id\": \"{{project_id}}\",\n  \"asset_ids\": [\"{{asset_id}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/agent/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "agent", "sessions"]
+            },
+            "description": "Scope a conversation to a project and a set of asset ids."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('agent_session_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message (propose plan)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Make a slideshow, 4 seconds each, with a title card 'Museum Highlights' at the start, export as 1080p mp4\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/agent/sessions/{{agent_session_id}}/messages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "agent", "sessions", "{{agent_session_id}}", "messages"]
+            },
+            "description": "Returns {type:'clarification', question, missing} or {type:'plan', plan}. If a plan, agent_plan_id is captured."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "if (b.type === 'plan' && b.plan) { pm.collectionVariables.set('agent_plan_id', b.plan.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve Plan (execute)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/agent/plans/{{agent_plan_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "agent", "plans", "{{agent_plan_id}}", "approve"]
+            },
+            "description": "Approve the proposed plan; the worker runs the chained job sequence."
+          }
+        },
+        {
+          "name": "Get Plan (status + results)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/agent/plans/{{agent_plan_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "agent", "plans", "{{agent_plan_id}}"]
+            },
+            "description": "Poll until status=succeeded; result_asset_ids holds the final output asset(s)."
+          }
+        },
+        {
+          "name": "Get Session (transcript)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/agent/sessions/{{agent_session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "agent", "sessions", "{{agent_session_id}}"]
+            }
           }
         }
       ]

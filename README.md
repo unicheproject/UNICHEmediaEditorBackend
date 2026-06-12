@@ -133,6 +133,7 @@ curl -s -X POST $BASE/jobs \
 | Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `GET /api/v1/assets/{id}/download` · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
+| Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
 
 `GET /api/v1/projects/{id}/jobs` is paginated: `?limit=` (default 50, max 200)
 and `?offset=`, newest first. It returns a page envelope:
@@ -260,6 +261,41 @@ restart the `worker` (and `api`). No code changes.
 Until a handler is registered, the capability is fully usable end-to-end via
 `NotImplementedHandler`.
 
+## Conversational agent
+
+The agent turns a natural-language request into an ordered **plan** of capability
+calls, asks for missing parameters, and — after you approve — executes the
+sequence, chaining each step's output asset into the next.
+
+It is **registry-driven**: the planner's tool catalog is built from
+`registry.list_enabled()`, so adding a capability automatically extends what the
+agent can do — no agent code changes.
+
+Flow:
+
+```
+POST /agent/sessions            {project_id, asset_ids}      -> session (scope)
+POST /agent/sessions/{id}/messages {content}                 -> {type: clarification|plan}
+POST /agent/plans/{id}/approve                                -> enqueues execution
+GET  /agent/plans/{id}                                        -> status + per-step jobs + result_asset_ids
+GET  /agent/sessions/{id}                                     -> transcript + scope
+```
+
+A plan step references inputs by uploaded `asset_id` or by `@stepN` (a prior
+step's output). The executor reuses the normal Job path, so every step is a
+tracked Job producing a derived asset. The final asset id(s) land in the plan's
+`result_asset_ids` (download via `GET /assets/{id}/download`).
+
+**Planner backends** (env `AGENT_PROVIDER`):
+- `mock` (default) — deterministic, rule-based; works offline and in tests.
+- `openrouter` — plans via an OpenRouter LLM (`OPENROUTER_API_KEY`,
+  `OPENROUTER_MODEL`, …), preserving reasoning across clarification turns.
+
+Proposed plans are validated against the registry (capability exists, params
+satisfy the capability `input_schema`, asset refs resolve, media types match)
+before being shown; with an LLM backend, validation errors trigger a bounded
+repair retry. API routes and job creation never know which backend planned.
+
 ## How to add a new inference provider
 
 1. Subclass `BaseInferenceProvider` in `app/providers/` and implement
@@ -285,6 +321,7 @@ app/
   capabilities/           definitions, registry, context, handlers/
   providers/              base, mock, http, factory
   tools/                  runner, ffmpeg, imagemagick (subprocess wrappers)
+  agent/                  catalog, schemas, planner (validation), llm, executor
   workers/                worker (arq), tasks, queue (enqueue helper)
 alembic/                  async migration env + versions
 tests/                    pytest suite (SQLite, eager jobs, mock provider)
@@ -295,8 +332,7 @@ frontend/index.html       placeholder page
 
 - Replace `LocalStorageService` with an S3/MinIO implementation (interface is
   ready; a commented `minio` service exists in `docker-compose.yml`).
-- An **agentic AI planner** that orchestrates the registered capabilities as
-  tools (the deterministic tool family + derived-asset chaining are built for
-  exactly this).
+- Lower-third caption overlays and brand-kit styling as new capabilities (the
+  agent will offer them automatically once registered).
 - Wire the remaining AI capabilities to real hosted endpoints.
 - Authentication / multi-tenancy and a full editing UI.

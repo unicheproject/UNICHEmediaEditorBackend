@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.core.logging import configure_logging
 from app.workers.queue import redis_settings
-from app.workers.tasks import run_job
+from app.workers.tasks import run_job, run_plan
 
 
 async def startup(ctx: dict) -> None:
@@ -12,8 +12,8 @@ async def startup(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [run_job]
+    functions = [run_job, run_plan]
     redis_settings = redis_settings()
     on_startup = startup
     max_jobs = 10
-    job_timeout = 600
+    job_timeout = 1800

@@ -26,3 +26,11 @@ class CostClass(enum.StrEnum):
     hosted_ai = "hosted_ai"
     future_gpu = "future_gpu"
     deterministic = "deterministic"
+
+
+class AgentPlanStatus(enum.StrEnum):
+    proposed = "proposed"
+    approved = "approved"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"

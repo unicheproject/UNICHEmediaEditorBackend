@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     inference_image_caption_path: str = "/image/caption"
     inference_audio_transcribe_path: str = "/audio/transcribe"
 
+    # --- Agent planner ---
+    agent_provider: str = "mock"  # "mock" | "openrouter"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "qwen/qwen3.6-flash"
+    agent_timeout_seconds: float = 120.0
+    agent_max_repair_retries: int = 2
+
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
