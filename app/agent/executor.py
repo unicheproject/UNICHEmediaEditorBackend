@@ -48,8 +48,13 @@ def _build_job_input(
 ) -> tuple[uuid.UUID | None, dict]:
     primary = _resolve(step.asset, outputs) if step.asset else None
     job_input = _resolve_params(step.params, outputs)
-    if step.assets:
-        job_input["asset_ids"] = [_resolve(a, outputs) for a in step.assets]
+    # Multi-input ops take their ordered inputs from `step.assets`; tolerate
+    # planners that instead place them in `params.asset_ids`.
+    raw_ids = step.assets
+    if not raw_ids and isinstance(step.params.get("asset_ids"), list):
+        raw_ids = step.params["asset_ids"]
+    if raw_ids:
+        job_input["asset_ids"] = [_resolve(a, outputs) for a in raw_ids]
     asset_id = uuid.UUID(primary) if primary else None
     return asset_id, job_input
 
