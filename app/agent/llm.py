@@ -193,7 +193,10 @@ async def propose(
         result = _parse(raw)
         new_messages.append({"role": "assistant", "content": json.dumps(raw)})
         if isinstance(result, Plan):
-            validate_plan(result, assets_by_id)  # surfaces as error if the mock is wrong
+            # surfaces as error if the mock is wrong
+            validate_plan(
+                result, assets_by_id, deterministic_only=settings.agent_deterministic_only
+            )
         return result, new_messages
 
     backend = OpenRouterBackend(settings)
@@ -226,7 +229,10 @@ async def propose(
             continue
         if isinstance(result, Plan):
             try:
-                validate_plan(result, assets_by_id)
+                validate_plan(
+                    result, assets_by_id,
+                    deterministic_only=settings.agent_deterministic_only,
+                )
             except PlanValidationError as exc:
                 last_error = str(exc)
                 continue

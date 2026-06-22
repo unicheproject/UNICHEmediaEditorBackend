@@ -10,12 +10,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.capabilities import registry
+from app.core.config import settings
+from app.models.enums import CostClass
 
 
 def build_catalog() -> list[dict[str, Any]]:
-    """A compact, model-friendly description of every enabled capability."""
+    """A compact, model-friendly description of every enabled capability.
+
+    When ``agent_deterministic_only`` is set, hosted-AI / GPU capabilities are
+    excluded so the planner can only choose deterministic local-tool ops.
+    """
+    caps = registry.list_enabled()
+    if settings.agent_deterministic_only:
+        caps = [c for c in caps if c.cost_class == CostClass.deterministic]
     catalog = []
-    for cap in registry.list_enabled():
+    for cap in caps:
         catalog.append(
             {
                 "capability_id": cap.id,

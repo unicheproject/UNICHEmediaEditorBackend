@@ -15,6 +15,7 @@ import jsonschema
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities import registry
 from app.core.errors import NotFoundError
+from app.models.enums import CostClass
 
 
 class PlanValidationError(Exception):
@@ -38,8 +39,13 @@ def _refs_in_step(step: PlanStep) -> list[str]:
     return refs
 
 
-def validate_plan(plan: Plan, assets_by_id: dict[str, str]) -> None:
+def validate_plan(
+    plan: Plan, assets_by_id: dict[str, str], *, deterministic_only: bool = False
+) -> None:
     """Validate a plan. `assets_by_id` maps in-scope asset id -> media_type.
+
+    When `deterministic_only` is set, any hosted-AI / GPU capability is rejected
+    with a repairable message (defence-in-depth alongside the filtered catalog).
 
     Raises PlanValidationError with a concrete message on the first problem.
     """
@@ -55,6 +61,11 @@ def validate_plan(plan: Plan, assets_by_id: dict[str, str]) -> None:
             raise PlanValidationError(str(exc)) from exc
         if not cap.enabled:
             raise PlanValidationError(f"Capability '{step.capability_id}' is disabled.")
+        if deterministic_only and cap.cost_class != CostClass.deterministic:
+            raise PlanValidationError(
+                f"Capability '{step.capability_id}' is not available to the agent; "
+                "only deterministic (local-tool) capabilities may be used."
+            )
 
         # params + derived asset_ids validate against the capability schema
         try:

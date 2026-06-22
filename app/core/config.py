@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     openrouter_model: str = "qwen/qwen3.6-flash"
     agent_timeout_seconds: float = 120.0
     agent_max_repair_retries: int = 2
+    # Restrict the agent to deterministic (local-tool) capabilities only,
+    # excluding hosted-AI / GPU ops from the planner catalog and validation.
+    agent_deterministic_only: bool = True
 
     @property
     def max_upload_size_bytes(self) -> int:
