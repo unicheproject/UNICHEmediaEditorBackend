@@ -63,13 +63,14 @@ class VideoConcatHandler(LocalToolHandler):
     async def process(self, ctx: JobContext) -> HandlerResult:
         if len(ctx.input_paths) < 2:
             raise ValidationError("video.concat needs at least 2 input assets (input.asset_ids)")
+        assert ctx.work_dir is not None
         ext = input_ext(ctx)
         out = OutputFile(
             path=ctx.out_path(f"{input_stem(ctx)}_concat.{ext}"),
             filename=f"{input_stem(ctx)}_concat.{ext}",
             media_type=MediaType.video,
         )
-        await ffmpeg.video_concat(ctx.input_paths, str(out.path))
+        await ffmpeg.video_concat(ctx.input_paths, str(out.path), ctx.work_dir)
         return HandlerResult(
             data={"operation": "video.concat", "inputs": len(ctx.input_paths)},
             outputs=[out],

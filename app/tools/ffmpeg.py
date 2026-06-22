@@ -75,15 +75,76 @@ async def video_split(src: str, dst_pattern: str, markers: list[float]) -> None:
     )
 
 
-async def video_concat(sources: list[str], dst: str) -> None:
-    args = [*_BASE]
-    for s in sources:
-        args += ["-i", s]
-    n = len(sources)
-    streams = "".join(f"[{i}:v][{i}:a]" for i in range(n))
-    filt = f"{streams}concat=n={n}:v=1:a=1[v][a]"
-    args += ["-filter_complex", filt, "-map", "[v]", "-map", "[a]", dst]
+async def probe_video_size(path: str) -> tuple[int, int]:
+    """Return (width, height) of the first video stream via ffprobe."""
+    out = await runner.run_stdout(
+        [
+            FFPROBE, "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", path,
+        ],
+        timeout=60,
+    )
+    try:
+        stream = json.loads(out)["streams"][0]
+        return int(stream["width"]), int(stream["height"])
+    except (json.JSONDecodeError, KeyError, IndexError, ValueError, TypeError):
+        return 0, 0
+
+
+async def _has_audio(path: str) -> bool:
+    out = await runner.run_stdout(
+        [
+            FFPROBE, "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "csv=p=0", path,
+        ],
+        timeout=60,
+    )
+    return bool(out.strip())
+
+
+async def _concat_normalize(src: str, dst: str, width: int, height: int) -> None:
+    """Re-encode a clip to uniform video + audio params for safe concatenation.
+
+    The clip's own audio is preserved; a silent track is synthesised only when
+    the source has none, so heterogeneous inputs (different sizes / with or
+    without sound) still concat with matching stream parameters.
+    """
+    has_audio = await _has_audio(src)
+    args = [*_BASE, "-i", src]
+    if not has_audio:
+        args += _ANULL
+    audio_in = "0:a:0" if has_audio else "1:a:0"
+    args += [
+        "-vf", _scale_pad(width, height),
+        "-map", "0:v:0", "-map", audio_in,
+        "-ar", "44100", "-ac", "2",
+        *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+    ]
     await runner.run(args)
+
+
+async def video_concat(sources: list[str], dst: str, work_dir: Path) -> None:
+    """Concatenate video clips, normalizing each to the first clip's resolution.
+
+    The ffmpeg `concat` filter/demuxer require identical stream parameters
+    across inputs, so each clip is first scaled/padded to a common size and
+    re-encoded to uniform codecs before a stream-copy concat.
+    """
+    width, height = await probe_video_size(sources[0])
+    if width <= 0 or height <= 0:
+        width, height = 1920, 1080
+
+    normalized: list[Path] = []
+    for i, src in enumerate(sources):
+        out = work_dir / f"_concat_norm_{i:03d}.mp4"
+        await _concat_normalize(src, str(out), width, height)
+        normalized.append(out)
+
+    listing = work_dir / "_concat_list.txt"
+    listing.write_text("".join(f"file '{p}'\n" for p in normalized), encoding="utf-8")
+    await runner.run(
+        [*_BASE, "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", dst]
+    )
 
 
 async def video_transcode(
