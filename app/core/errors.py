@@ -19,6 +19,20 @@ class AppError(Exception):
             self.code = code
 
 
+class UnauthorizedError(AppError):
+    """Missing or invalid authentication (no/invalid bearer token)."""
+
+    status_code = 401
+    code = "unauthorized"
+
+
+class ForbiddenError(AppError):
+    """Authenticated, but not permitted (catalogue authorization denied)."""
+
+    status_code = 403
+    code = "forbidden"
+
+
 class NotFoundError(AppError):
     status_code = 404
     code = "not_found"

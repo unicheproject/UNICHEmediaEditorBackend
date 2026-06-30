@@ -43,7 +43,14 @@ def _make_audio(path: str) -> None:
 
 
 async def _project(client: AsyncClient) -> str:
-    return (await client.post(f"{API}/projects", json={"name": "compose"})).json()["id"]
+    from tests.conftest import DEFAULT_ORG_ID
+
+    resp = await client.post(
+        f"{API}/projects",
+        json={"name": "compose", "slug": "compose-proj", "org_id": DEFAULT_ORG_ID},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
 
 
 async def _upload(client: AsyncClient, pid: str, path: str, name: str, mime: str) -> str:

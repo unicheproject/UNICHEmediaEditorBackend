@@ -1,4 +1,9 @@
-"""Asset endpoints: upload, list, metadata, download, soft delete."""
+"""Asset endpoints: upload, list, metadata, download, soft delete.
+
+Every route is project-scoped: routes with ``project_id`` in the path guard via
+``require_project``; asset-id routes resolve the owning project via
+``require_asset_access``. Both lazy-provision + authorize through the catalogue.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +13,11 @@ from fastapi import APIRouter, Depends, File, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_asset_access, require_project
 from app.core.database import get_session
 from app.core.errors import ValidationError
+from app.models.asset import Asset
+from app.models.project import Project
 from app.schemas.asset import AssetRead
 from app.services import assets as svc
 from app.services.storage import get_storage
@@ -26,6 +34,7 @@ async def upload_asset(
     project_id: uuid.UUID,
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
 ) -> AssetRead:
     if not file.filename:
         raise ValidationError("An uploaded file with a filename is required")
@@ -44,6 +53,7 @@ async def list_assets(
     project_id: uuid.UUID,
     include_intermediate: bool = True,
     session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
 ) -> list[AssetRead]:
     assets = await svc.list_assets(
         session, project_id, include_intermediate=include_intermediate
@@ -52,18 +62,14 @@ async def list_assets(
 
 
 @router.get("/assets/{asset_id}", response_model=AssetRead)
-async def get_asset(
-    asset_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-) -> AssetRead:
-    asset = await svc.get_asset(session, asset_id)
+async def get_asset(asset: Asset = Depends(require_asset_access)) -> AssetRead:
     return AssetRead.model_validate(asset)
 
 
 @router.get("/assets/{asset_id}/download")
 async def download_asset(
-    asset_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    asset: Asset = Depends(require_asset_access),
 ) -> FileResponse:
-    asset = await svc.get_asset(session, asset_id)
     path = get_storage().get_path(asset.storage_path)
     return FileResponse(
         path,
@@ -74,6 +80,7 @@ async def download_asset(
 
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset(
-    asset_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    asset: Asset = Depends(require_asset_access),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
-    await svc.soft_delete_asset(session, asset_id)
+    await svc.soft_delete_asset(session, asset.id)

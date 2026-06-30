@@ -26,6 +26,19 @@ class Settings(BaseSettings):
             return ["*"]
         return [o.strip() for o in raw.split(",") if o.strip()]
 
+    # --- Auth (Keycloak resource server) + Catalogue integration ---
+    # Issuer string MUST equal what the browser sees and what the catalogue
+    # validates against, e.g. https://idp.uniche-eccch.eu/realms/uniche.
+    idp_issuer_uri: str = ""
+    required_audience: str = "uniche-platform"
+    # JWKS are cached for this long (seconds) before refetch.
+    auth_jwks_cache_seconds: int = 3600
+    # Base URL of the catalogue (authorization authority), no trailing /api/v1.
+    catalogue_base_url: str = ""
+    catalogue_timeout_seconds: float = 10.0
+    # This tool's slug in the catalogue's authoring_tools registry.
+    tool_slug: str = "media-editor"
+
     # --- Database ---
     database_url: str = "postgresql+asyncpg://uniche:uniche@localhost:5432/uniche"
 

@@ -5,8 +5,10 @@ from httpx import AsyncClient
 API = "/api/v1"
 
 
-async def _project_with_asset(client: AsyncClient, name: str, mime: str) -> tuple[str, str]:
-    pid = (await client.post(f"{API}/projects", json={"name": "Jobs"})).json()["id"]
+async def _project_with_asset(
+    client: AsyncClient, make_project, name: str, mime: str
+) -> tuple[str, str]:
+    pid = await make_project("Jobs")
     files = {"file": (name, io.BytesIO(b"bytes"), mime)}
     aid = (
         await client.post(f"{API}/projects/{pid}/assets", files=files)
@@ -14,8 +16,8 @@ async def _project_with_asset(client: AsyncClient, name: str, mime: str) -> tupl
     return pid, aid
 
 
-async def test_image_caption_job_succeeds(client: AsyncClient) -> None:
-    pid, aid = await _project_with_asset(client, "pic.png", "image/png")
+async def test_image_caption_job_succeeds(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
     resp = await client.post(
         f"{API}/jobs",
         json={"capability_id": "image.caption", "project_id": pid, "asset_id": aid},
@@ -32,8 +34,8 @@ async def test_image_caption_job_succeeds(client: AsyncClient) -> None:
     assert job["output"]["provider"] == "mock"
 
 
-async def test_audio_transcribe_job_succeeds(client: AsyncClient) -> None:
-    pid, aid = await _project_with_asset(client, "clip.mp3", "audio/mpeg")
+async def test_audio_transcribe_job_succeeds(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "clip.mp3", "audio/mpeg")
     resp = await client.post(
         f"{API}/jobs",
         json={"capability_id": "audio.transcribe", "project_id": pid, "asset_id": aid},
@@ -44,8 +46,10 @@ async def test_audio_transcribe_job_succeeds(client: AsyncClient) -> None:
     assert "text" in job["output"]
 
 
-async def test_not_implemented_capability_returns_payload(client: AsyncClient) -> None:
-    pid = (await client.post(f"{API}/projects", json={"name": "NI"})).json()["id"]
+async def test_not_implemented_capability_returns_payload(
+    client: AsyncClient, make_project
+) -> None:
+    pid = await make_project("NI")
     resp = await client.post(
         f"{API}/jobs",
         json={"capability_id": "image.upscale", "project_id": pid, "input": {}},
@@ -63,8 +67,8 @@ async def test_invalid_capability_rejected(client: AsyncClient) -> None:
     assert resp.status_code == 404
 
 
-async def test_list_jobs_for_project(client: AsyncClient) -> None:
-    pid, aid = await _project_with_asset(client, "pic.png", "image/png")
+async def test_list_jobs_for_project(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
     await client.post(
         f"{API}/jobs",
         json={"capability_id": "image.caption", "project_id": pid, "asset_id": aid},
@@ -78,8 +82,8 @@ async def test_list_jobs_for_project(client: AsyncClient) -> None:
     assert len(page["items"]) == 1
 
 
-async def test_list_jobs_pagination(client: AsyncClient) -> None:
-    pid, aid = await _project_with_asset(client, "pic.png", "image/png")
+async def test_list_jobs_pagination(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
     for _ in range(5):
         await client.post(
             f"{API}/jobs",

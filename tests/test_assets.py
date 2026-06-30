@@ -5,13 +5,10 @@ from httpx import AsyncClient
 API = "/api/v1"
 
 
-async def _make_project(client: AsyncClient) -> str:
-    resp = await client.post(f"{API}/projects", json={"name": "P"})
-    return resp.json()["id"]
-
-
-async def test_upload_list_get_download_delete(client: AsyncClient) -> None:
-    pid = await _make_project(client)
+async def test_upload_list_get_download_delete(
+    client: AsyncClient, make_project
+) -> None:
+    pid = await make_project()
 
     files = {"file": ("photo.png", io.BytesIO(b"fake-image-bytes"), "image/png")}
     resp = await client.post(f"{API}/projects/{pid}/assets", files=files)
@@ -44,16 +41,16 @@ async def test_upload_list_get_download_delete(client: AsyncClient) -> None:
     assert resp.status_code == 404
 
 
-async def test_upload_rejects_bad_extension(client: AsyncClient) -> None:
-    pid = await _make_project(client)
+async def test_upload_rejects_bad_extension(client: AsyncClient, make_project) -> None:
+    pid = await make_project()
     files = {"file": ("malware.exe", io.BytesIO(b"x"), "application/octet-stream")}
     resp = await client.post(f"{API}/projects/{pid}/assets", files=files)
     assert resp.status_code == 415
     assert resp.json()["error"]["code"] == "unsupported_media_type"
 
 
-async def test_upload_rejects_oversize(client: AsyncClient) -> None:
-    pid = await _make_project(client)
+async def test_upload_rejects_oversize(client: AsyncClient, make_project) -> None:
+    pid = await make_project()
     # MAX_UPLOAD_SIZE_MB=5 in tests -> exceed it.
     big = b"0" * (6 * 1024 * 1024)
     files = {"file": ("big.wav", io.BytesIO(big), "audio/wav")}
@@ -62,8 +59,8 @@ async def test_upload_rejects_oversize(client: AsyncClient) -> None:
     assert resp.json()["error"]["code"] == "payload_too_large"
 
 
-async def test_audio_and_video_media_types(client: AsyncClient) -> None:
-    pid = await _make_project(client)
+async def test_audio_and_video_media_types(client: AsyncClient, make_project) -> None:
+    pid = await make_project()
     for name, mime, expected in [
         ("clip.mp3", "audio/mpeg", "audio"),
         ("clip.mp4", "video/mp4", "video"),

@@ -91,15 +91,17 @@ def test_out_of_scope_asset_rejected() -> None:
 # --- session flow via API (no binaries) ------------------------------------
 
 
-async def _project_with_image(client: AsyncClient) -> tuple[str, str]:
-    pid = (await client.post(f"{API}/projects", json={"name": "agent"})).json()["id"]
+async def _project_with_image(client: AsyncClient, make_project) -> tuple[str, str]:
+    pid = await make_project("agent")
     files = {"file": ("p.png", io.BytesIO(b"img"), "image/png")}
     aid = (await client.post(f"{API}/projects/{pid}/assets", files=files)).json()["id"]
     return pid, aid
 
 
-async def test_session_clarification_when_params_missing(client: AsyncClient) -> None:
-    pid = (await client.post(f"{API}/projects", json={"name": "agent"})).json()["id"]
+async def test_session_clarification_when_params_missing(
+    client: AsyncClient, make_project
+) -> None:
+    pid = await make_project("agent")
     files = {"file": ("v.mp4", io.BytesIO(b"vid"), "video/mp4")}
     vid = (await client.post(f"{API}/projects/{pid}/assets", files=files)).json()["id"]
 
@@ -115,8 +117,8 @@ async def test_session_clarification_when_params_missing(client: AsyncClient) ->
     assert "start" in body["missing"]
 
 
-async def test_session_proposes_plan(client: AsyncClient) -> None:
-    pid, img = await _project_with_image(client)
+async def test_session_proposes_plan(client: AsyncClient, make_project) -> None:
+    pid, img = await _project_with_image(client, make_project)
     sess = (await client.post(f"{API}/agent/sessions",
             json={"project_id": pid, "asset_ids": [img]})).json()
     resp = await client.post(
@@ -139,10 +141,12 @@ async def test_session_proposes_plan(client: AsyncClient) -> None:
 
 
 @pytest.mark.skipif(not NEED_ALL, reason="needs ffmpeg + convert + font")
-async def test_agent_end_to_end_slideshow(client: AsyncClient, tmp_path) -> None:
+async def test_agent_end_to_end_slideshow(
+    client: AsyncClient, make_project, tmp_path
+) -> None:
     import subprocess
 
-    pid = (await client.post(f"{API}/projects", json={"name": "agent-e2e"})).json()["id"]
+    pid = await make_project("agent-e2e")
     img_ids = []
     for i, color in enumerate(["red", "green"]):
         p = tmp_path / f"i{i}.png"

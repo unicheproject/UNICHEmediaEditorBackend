@@ -54,6 +54,23 @@ The `api` container runs uvicorn with `--reload`; the `worker` container runs
 `arq app.workers.worker.WorkerSettings`. Both share the codebase and the
 `storage` volume. Postgres data persists in the `pgdata` volume.
 
+## Authentication & authorization
+
+The API is a Keycloak resource server; every `/api/v1` route requires a valid bearer token
+(`GET /health` is public). Authorization is delegated to the UNICHE Catalogue — the backend forwards
+the user's token on outbound calls and keeps **companion project rows keyed by the catalogue's
+project UUID**. Relevant env (see `.env.example`):
+
+```
+IDP_ISSUER_URI=https://idp.uniche-eccch.eu/realms/uniche   # MUST match the browser-visible issuer
+REQUIRED_AUDIENCE=uniche-platform
+CATALOGUE_BASE_URL=http://uniche-catalogue.localhost:8080   # no /api/v1 suffix
+TOOL_SLUG=media-editor
+```
+
+No Keycloak client is needed for Phase 1 (the resource server only validates tokens; the deferred
+reconcile sweep is what would need a service account). See `../plans/media-editor-auth-and-sync.md`.
+
 ## Running migrations
 
 ```bash

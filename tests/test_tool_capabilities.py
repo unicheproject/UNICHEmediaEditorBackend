@@ -11,7 +11,21 @@ import subprocess
 import pytest
 from httpx import AsyncClient
 
+from tests.conftest import DEFAULT_ORG_ID
+
 API = "/api/v1"
+
+_slug_counter = {"n": 0}
+
+
+async def _project(client: AsyncClient, name: str) -> str:
+    _slug_counter["n"] += 1
+    resp = await client.post(
+        f"{API}/projects",
+        json={"name": name, "slug": f"tool-{_slug_counter['n']}", "org_id": DEFAULT_ORG_ID},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 HAVE_CONVERT = shutil.which("convert") is not None
@@ -48,7 +62,7 @@ async def test_supported_media_types(client: AsyncClient) -> None:
 
 
 async def test_media_type_mismatch_rejected(client: AsyncClient) -> None:
-    pid = (await client.post(f"{API}/projects", json={"name": "V"})).json()["id"]
+    pid = await _project(client, "V")
     files = {"file": ("photo.png", io.BytesIO(b"img"), "image/png")}
     aid = (
         await client.post(f"{API}/projects/{pid}/assets", files=files)
@@ -112,7 +126,7 @@ async def _run_job(client: AsyncClient, capability: str, asset_id: str, params: 
 async def test_video_thumbnail_execution(client: AsyncClient, tmp_path) -> None:
     src = tmp_path / "v.mp4"
     _make_video(str(src))
-    pid = (await client.post(f"{API}/projects", json={"name": "V"})).json()["id"]
+    pid = await _project(client, "V")
     aid = await _upload(client, pid, str(src), "v.mp4", "video/mp4")
 
     job = await _run_job(client, "video.thumbnail", aid, {"timestamp": 1})
@@ -131,7 +145,7 @@ async def test_video_thumbnail_execution(client: AsyncClient, tmp_path) -> None:
 async def test_image_resize_execution(client: AsyncClient, tmp_path) -> None:
     src = tmp_path / "i.png"
     _make_image(str(src))
-    pid = (await client.post(f"{API}/projects", json={"name": "I"})).json()["id"]
+    pid = await _project(client, "I")
     aid = await _upload(client, pid, str(src), "i.png", "image/png")
 
     job = await _run_job(client, "image.resize", aid, {"width": 32, "height": 24})
@@ -146,7 +160,7 @@ async def test_image_resize_execution(client: AsyncClient, tmp_path) -> None:
 async def test_audio_trim_execution(client: AsyncClient, tmp_path) -> None:
     src = tmp_path / "a.wav"
     _make_audio(str(src))
-    pid = (await client.post(f"{API}/projects", json={"name": "A"})).json()["id"]
+    pid = await _project(client, "A")
     aid = await _upload(client, pid, str(src), "a.wav", "audio/wav")
 
     job = await _run_job(client, "audio.trim", aid, {"start": 0, "end": 1})

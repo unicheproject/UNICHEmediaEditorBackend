@@ -1,4 +1,9 @@
-"""Job endpoints: create (enqueue), retrieve, list-by-project, SSE progress."""
+"""Job endpoints: create (enqueue), retrieve, list-by-project, SSE progress.
+
+Project authorization (via the catalogue) is enforced by the guards in
+``app.api.deps``: create resolves the target project from the body/asset, and
+the id/project routes guard accordingly.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +16,11 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.deps import require_job_access, require_job_create_access, require_project
 from app.core.database import async_session_factory, get_session
 from app.models.enums import JobStatus
+from app.models.job import Job
+from app.models.project import Project
 from app.schemas.common import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, Page
 from app.schemas.job import JobCreate, JobRead
 from app.services import jobs as svc
@@ -34,7 +42,7 @@ _TERMINAL = {JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled}
 
 @router.post("/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)
 async def create_job(
-    data: JobCreate,
+    data: JobCreate = Depends(require_job_create_access),
     session: AsyncSession = Depends(get_session),
     enqueuer: Enqueuer = Depends(get_enqueuer),
 ) -> JobRead:
@@ -44,10 +52,7 @@ async def create_job(
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)
-async def get_job(
-    job_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-) -> JobRead:
-    job = await svc.get_job(session, job_id)
+async def get_job(job: Job = Depends(require_job_access)) -> JobRead:
     return JobRead.model_validate(job)
 
 
@@ -57,6 +62,7 @@ async def list_project_jobs(
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
 ) -> Page[JobRead]:
     jobs, total = await svc.list_jobs_for_project(
         session, project_id, limit=limit, offset=offset
@@ -70,7 +76,11 @@ async def list_project_jobs(
 
 
 @router.get("/jobs/{job_id}/events")
-async def job_events(job_id: uuid.UUID, request: Request) -> EventSourceResponse:
+async def job_events(
+    job_id: uuid.UUID,
+    request: Request,
+    _job: Job = Depends(require_job_access),
+) -> EventSourceResponse:
     """Server-Sent Events stream of a job's status/progress until terminal."""
 
     async def event_stream() -> AsyncGenerator[dict, None]:

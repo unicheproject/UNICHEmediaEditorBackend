@@ -11,6 +11,34 @@ async job runner (arq/Redis) that executes media/AI operations defined in a
 abstraction** (mock by default); deterministic ops shell out to **FFmpeg /
 ImageMagick**. Local filesystem storage behind a swappable abstraction.
 
+## Authentication & Catalogue integration (Phase 1)
+
+The backend is a **Keycloak OAuth2 resource server** and defers all authorization to the
+**UNICHE Catalogue** (the platform authority). It needs **no Keycloak client** — it only validates
+incoming user tokens and forwards the same token on outbound catalogue calls.
+
+- **Token validation** (`app/core/security.py`): JWKS-based RS256 verification of signature,
+  issuer (`IDP_ISSUER_URI`, must equal the browser-visible issuer), expiry, and audience
+  (`REQUIRED_AUDIENCE=uniche-platform`). `get_current_principal` yields a `Principal{subject, token,
+  …}` and is applied to the **entire `/api/v1` router**; `GET /health` stays public.
+- **Catalogue client** (`app/services/catalogue_client.py`): user-token calls only —
+  `get_project`, `list_authorization`, `list_org_projects`, `list_organisations`, `create_project`
+  (always sends `toolSlug=media-editor`), `update_project_name`, `delete_project`. Errors map onto
+  the `AppError` hierarchy (401→Unauthorized, 403→Forbidden, 404→NotFound).
+- **Projects are companion rows keyed by the catalogue UUID** (`projects.id` = catalogue id; no
+  local UUID minting). `app/api/deps.py::require_project_access` is the single access+lazy-JIT gate:
+  one `GET /projects/{id}` with the user token authorizes the request *and* provisions/refreshes the
+  local row; a 404 soft-deletes the stale local row (lazy delete). The picker (`GET /projects`) is
+  built live from `/me/authorization` ∩ each org's projects filtered to `tool.slug==media-editor`.
+  `description` is **editor-local only** (the catalogue has no such field). Edit/delete proxy to the
+  catalogue (manager-only there).
+- **Deferred to Phase 2:** confidential `media-editor-svc` client, the catalogue tool-scoped list
+  endpoint, and the periodic reconcile sweep for storage GC. See
+  `../plans/media-editor-auth-and-sync.md`.
+- **Tests** stub auth + the catalogue: `tests/conftest.py` overrides `get_current_principal` (fixed
+  test principal) and `get_catalogue_client` (in-memory `FakeCatalogueClient`), and exposes a
+  `make_project` fixture. `tests/test_auth.py` covers the real 401 boundary.
+
 ## Commands
 
 The stack runs in Docker; local tooling runs in a venv.

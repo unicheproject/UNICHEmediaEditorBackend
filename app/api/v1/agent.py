@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.schemas import Clarification, Plan
 from app.core.database import get_session
+from app.core.security import Principal, get_current_principal
 from app.models.agent import AgentSession
 from app.schemas.agent import (
     AgentMessageResponse,
@@ -20,6 +21,8 @@ from app.schemas.agent import (
     TranscriptMessage,
 )
 from app.services import agent as svc
+from app.services import projects as projects_svc
+from app.services.catalogue_client import CatalogueClient, get_catalogue_client
 from app.workers.queue import enqueue_plan
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -48,8 +51,15 @@ def _session_read(s: AgentSession) -> AgentSessionRead:
 
 @router.post("/sessions", response_model=AgentSessionRead, status_code=status.HTTP_201_CREATED)
 async def create_session(
-    data: AgentSessionCreate, session: AsyncSession = Depends(get_session)
+    data: AgentSessionCreate,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    catalogue: CatalogueClient = Depends(get_catalogue_client),
 ) -> AgentSessionRead:
+    if data.project_id is not None:
+        await projects_svc.require_project_access(
+            session, catalogue, principal, data.project_id
+        )
     row = await svc.create_session(session, data.project_id, data.asset_ids)
     return _session_read(row)
 
