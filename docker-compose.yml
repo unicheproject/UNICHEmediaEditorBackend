@@ -37,6 +37,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       STORAGE_DIR: /data/storage
       PYTHONPATH: /app
+      # Server-to-server catalogue URL: reach it by its service alias on the
+      # shared external `uniche` network (the browser uses a different URL).
+      CATALOGUE_BASE_URL: http://catalogue:8080
+    networks:
+      - default
+      - uniche
     volumes:
       - .:/app
       - storage:/data/storage
@@ -57,6 +63,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       STORAGE_DIR: /data/storage
       PYTHONPATH: /app
+      CATALOGUE_BASE_URL: http://catalogue:8080
+    networks:
+      - default
+      - uniche
     volumes:
       - .:/app
       - storage:/data/storage
@@ -79,6 +89,15 @@ services:
   #   ports:
   #     - "9000:9000"
   #     - "9001:9001"
+
+networks:
+  # Default network for the media-editor's own services (postgres/redis).
+  default:
+  # Shared network created by the catalogue's compose; lets the api/worker
+  # reach the catalogue by its `catalogue` service alias. Start the catalogue
+  # stack first so this network exists.
+  uniche:
+    external: true
 
 volumes:
   pgdata:
