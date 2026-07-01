@@ -150,16 +150,21 @@ async def list_projects_for_user(
     catalogue: CatalogueClient,
     principal: Principal,
 ) -> list[ProjectListItem]:
-    """Live picker: media-editor projects the user can access (user token)."""
-    ctx = await catalogue.list_authorization(principal.token)
-    org_ids: set[str] = set(ctx.get("managedOrganisations") or [])
-    for membership in ctx.get("projectMemberships") or []:
-        org_id = membership.get("orgId")
-        if org_id:
-            org_ids.add(org_id)
+    """Live picker: media-editor projects the user can access (user token).
+
+    The org set comes from ``GET /organisations`` (the catalogue's ``listVisible``),
+    which already encodes the authorization rule for every role: a platform admin
+    sees all orgs, a manager sees managed orgs, a curator sees the orgs of their
+    project memberships. Each org's project list is then itself scoped by the
+    catalogue to what the caller may see. We filter to this tool's slug.
+    """
+    orgs = await catalogue.list_organisations(principal.token)
 
     found: dict[str, dict] = {}
-    for org_id in org_ids:
+    for org in orgs:
+        org_id = org.get("id")
+        if not org_id:
+            continue
         for project in await catalogue.list_org_projects(org_id, principal.token):
             tool = project.get("tool") or {}
             if tool.get("slug") == settings.tool_slug:
