@@ -496,6 +496,35 @@
           ]
         },
         {
+          "name": "Create audio.tts Job (OpenRouter → derived audio)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"audio.tts\",\n  \"project_id\": \"{{project_id}}\",\n  \"input\": { \"text\": \"Hello! This is a text-to-speech test.\" }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "No asset_id needed -- text-to-speech synthesizes from input.text alone. Requires INFERENCE_PROVIDER=openrouter + OPENROUTER_API_KEY server-side (falls back to a textual mock with no audio output otherwise). Optional input.voice overrides OPENROUTER_TTS_VOICE (voice names are model-specific, e.g. the default Gemini model needs \"Kore\"/\"Puck\", not OpenAI-style names)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('job_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create not_implemented Job (image.upscale)",
           "request": {
             "method": "POST",
