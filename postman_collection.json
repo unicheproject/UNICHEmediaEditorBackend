@@ -406,7 +406,8 @@
               "raw": "{{base_url}}/api/v1/capabilities",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "capabilities"]
-            }
+            },
+            "description": "FRONTEND: most capabilities need an asset selected first, but a capability whose input_schema doesn't list an asset_id property (e.g. audio.tts -- see Jobs > Create audio.tts Job) generates its output from params alone and should stay clickable/visible even with no asset selected."
           },
           "event": [
             {
@@ -509,7 +510,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "jobs"]
             },
-            "description": "No asset_id needed -- text-to-speech synthesizes from input.text alone. Requires INFERENCE_PROVIDER=openrouter + OPENROUTER_API_KEY server-side (falls back to a textual mock with no audio output otherwise). Optional input.voice overrides OPENROUTER_TTS_VOICE (voice names are model-specific, e.g. the default Gemini model needs \"Kore\"/\"Puck\", not OpenAI-style names)."
+            "description": "FRONTEND: this capability must stay available/visible even when the user has no asset selected in the project (unlike most jobs, which need an asset picked first). On click, open a modal for the user to type the text to synthesize, then call this exact request (no asset_id in the body -- text-to-speech synthesizes from input.text alone). Poll `Get Job` (or subscribe to `Job Events (SSE)`) until status is succeeded/failed; on success, job.output.outputs[0] is the new audio asset created in the selected project ({asset_id, filename, media_type, size_bytes, download_path}) -- add it to that project's asset list. Requires INFERENCE_PROVIDER=openrouter + OPENROUTER_API_KEY server-side (falls back to a textual mock with no audio output otherwise). Optional input.voice overrides OPENROUTER_TTS_VOICE (voice names are model-specific, e.g. the default Gemini model needs \"Kore\"/\"Puck\", not OpenAI-style names)."
           },
           "event": [
             {
