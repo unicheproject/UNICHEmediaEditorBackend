@@ -1,11 +1,26 @@
 {
   "info": {
     "name": "UNICHE Media Editor — MVP Backend",
-    "description": "End-to-end collection for the UNICHE Media Editor backend.\n\nVariables (set on the collection, override per-environment if you like):\n- base_url: http://localhost:8000\n- project_id / asset_id / audio_asset_id / job_id: auto-captured by the request test scripts.\n\nSuggested order to exercise the full flow:\n1. System > Health\n2. Projects > Create Project        (saves project_id)\n3. Assets > Upload Image Asset       (saves asset_id — pick a .jpg/.png file)\n4. Assets > List Project Assets\n5. Capabilities > List Capabilities\n6. Jobs > Create image.caption Job   (saves job_id)\n7. Jobs > Get Job                    (status: queued -> running -> succeeded)\n8. Assets > Upload Audio Asset + Jobs > Create audio.transcribe Job",
+    "description": "End-to-end collection for the UNICHE Media Editor backend.\n\nVariables (set on the collection, override per-environment if you like):\n- base_url: http://localhost:8000\n- idp_issuer_uri / idp_client_id / idp_username / idp_password: Keycloak login (see Auth folder)\n- access_token / refresh_token: auto-captured by Auth > Login\n- org_id: a catalogue org UUID you manage (required to create a project)\n- project_id / asset_id / audio_asset_id / job_id: auto-captured by the request test scripts.\n\nEvery /api/v1 route requires a bearer token (GET /health stays public). Run Auth > Login\nfirst — it authenticates against the dev-cli client (Direct Access Grants) and sets\naccess_token collection-wide via a collection-level Bearer auth config.\n\nSuggested order to exercise the full flow:\n0. Auth > Login (Password Grant)     (saves access_token, refresh_token)\n1. System > Health\n2. Projects > Create Project        (saves project_id — needs org_id set first)\n3. Assets > Upload Image Asset       (saves asset_id — pick a .jpg/.png file)\n4. Assets > List Project Assets\n5. Capabilities > List Capabilities\n6. Jobs > Create image.caption Job   (saves job_id)\n7. Jobs > Get Job                    (status: queued -> running -> succeeded)\n8. Assets > Upload Audio Asset + Jobs > Create audio.transcribe Job",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
   },
   "variable": [
     { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    {
+      "key": "idp_issuer_uri",
+      "value": "https://idp.uniche-eccch.eu/realms/uniche",
+      "type": "string"
+    },
+    { "key": "idp_client_id", "value": "dev-cli", "type": "string" },
+    { "key": "idp_username", "value": "", "type": "string" },
+    { "key": "idp_password", "value": "", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "refresh_token", "value": "", "type": "string" },
+    { "key": "org_id", "value": "", "type": "string" },
     { "key": "project_id", "value": "", "type": "string" },
     { "key": "asset_id", "value": "", "type": "string" },
     { "key": "audio_asset_id", "value": "", "type": "string" },
@@ -15,6 +30,90 @@
     { "key": "agent_plan_id", "value": "", "type": "string" }
   ],
   "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (Password Grant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "client_id", "value": "{{idp_client_id}}", "type": "text" },
+                { "key": "username", "value": "{{idp_username}}", "type": "text" },
+                { "key": "password", "value": "{{idp_password}}", "type": "text" },
+                { "key": "scope", "value": "openid", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{idp_issuer_uri}}/protocol/openid-connect/token",
+              "host": ["{{idp_issuer_uri}}"],
+              "path": ["protocol", "openid-connect", "token"]
+            },
+            "description": "Resource Owner Password Credentials grant against the `dev-cli` client (must have 'Direct access grants' enabled in the uniche realm). Set idp_username/idp_password first. Saves access_token/refresh_token for every other request in this collection (via the collection-level Bearer auth)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', b.access_token);",
+                  "pm.collectionVariables.set('refresh_token', b.refresh_token);",
+                  "console.log('access_token set, expires_in =', b.expires_in);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "refresh_token", "type": "text" },
+                { "key": "client_id", "value": "{{idp_client_id}}", "type": "text" },
+                { "key": "refresh_token", "value": "{{refresh_token}}", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{idp_issuer_uri}}/protocol/openid-connect/token",
+              "host": ["{{idp_issuer_uri}}"],
+              "path": ["protocol", "openid-connect", "token"]
+            },
+            "description": "Use once the access_token expires instead of logging in again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refresh ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', b.access_token);",
+                  "pm.collectionVariables.set('refresh_token', b.refresh_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
     {
       "name": "System",
       "item": [
@@ -53,13 +152,14 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Heritage Reel\",\n  \"description\": \"1950s archive footage\"\n}"
+              "raw": "{\n  \"name\": \"Heritage Reel\",\n  \"slug\": \"heritage-reel\",\n  \"org_id\": \"{{org_id}}\",\n  \"description\": \"1950s archive footage\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/projects",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "projects"]
-            }
+            },
+            "description": "org_id must be a catalogue org UUID where the logged-in user is a manager; slug must match ^[a-z0-9][a-z0-9-]{1,62}$."
           },
           "event": [
             {
