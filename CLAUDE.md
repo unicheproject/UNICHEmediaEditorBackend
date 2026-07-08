@@ -132,10 +132,16 @@ tool, put the subprocess call in `app/tools/`.
 ### Provider abstraction (AI)
 
 Selected **only** in `app/providers/factory.py` by `INFERENCE_PROVIDER`
-(`mock`|`http`) — routes and job-creation never know the provider. Swapping to a
-real hosted endpoint is env-only (`INFERENCE_PROVIDER=http`, `INFERENCE_BASE_URL`,
-`INFERENCE_API_KEY`, per-capability path vars). Add a provider by subclassing
-`BaseInferenceProvider` and registering it in the factory.
+(`mock`|`http`|`openrouter`) — routes and job-creation never know the provider.
+Swapping to a real hosted endpoint is env-only (`INFERENCE_PROVIDER=http`,
+`INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, per-capability path vars). Add a
+provider by subclassing `BaseInferenceProvider` and registering it in the
+factory. `openrouter` currently backs only `audio.tts` (OpenRouter's
+`/audio/speech`, e.g. `google/gemini-3.1-flash-tts-preview`) — it returns raw
+audio bytes under a private response key that `AudioTtsHandler`
+(`app/capabilities/handlers/audio_tts.py`) lifts out and writes as an
+`OutputFile`, since (unlike `image.caption`/`audio.transcribe`) a successful
+call produces a derived asset, not just JSON.
 
 ### Agent (`app/agent/`)
 

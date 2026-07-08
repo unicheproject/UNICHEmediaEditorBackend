@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.capabilities.definitions import CAPABILITIES, CAPABILITIES_BY_ID, CapabilityDef
 from app.capabilities.handlers import audio_ops, compose_ops, image_ops, video_ops
 from app.capabilities.handlers.audio_transcribe import AudioTranscribeHandler
+from app.capabilities.handlers.audio_tts import AudioTtsHandler
 from app.capabilities.handlers.base import CapabilityHandler
 from app.capabilities.handlers.image_caption import ImageCaptionHandler
 from app.capabilities.handlers.not_implemented import NotImplementedHandler
@@ -42,6 +43,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
 _HANDLERS: dict[str, CapabilityHandler] = {
     "image.caption": ImageCaptionHandler(),
     "audio.transcribe": AudioTranscribeHandler(),
+    "audio.tts": AudioTtsHandler(),
     **{h.capability_id: h for h in _TOOL_HANDLERS},
 }
 _FALLBACK_HANDLER = NotImplementedHandler()

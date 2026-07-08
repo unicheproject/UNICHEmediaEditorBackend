@@ -37,6 +37,15 @@ class MockInferenceProvider(BaseInferenceProvider):
                 "provider": self.name,
             }
 
+        if request.capability_id == "audio.tts":
+            # No offline synthesis: report what would have been spoken, without
+            # producing an audio file (unlike the "openrouter" provider).
+            return {
+                "text": request.payload.get("text", ""),
+                "voice": request.payload.get("voice", "default"),
+                "provider": self.name,
+            }
+
         # Generic deterministic fallback for any other capability.
         return {
             "result": f"mock output for {request.capability_id} on '{original}'",

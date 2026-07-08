@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 200
 
     # --- Inference provider ---
-    inference_provider: str = "mock"  # "mock" | "http"
+    inference_provider: str = "mock"  # "mock" | "http" | "openrouter"
     inference_base_url: str = ""
     inference_api_key: str = ""
     inference_timeout_seconds: float = 120.0
@@ -64,6 +64,23 @@ class Settings(BaseSettings):
     openrouter_model: str = "qwen/qwen3.6-flash"
     agent_timeout_seconds: float = 120.0
     agent_max_repair_retries: int = 2
+
+    # --- OpenRouter TTS (audio.tts, when INFERENCE_PROVIDER=openrouter) ---
+    # Shares openrouter_api_key / openrouter_base_url above. Voice names are
+    # model-specific and non-obvious: OpenAI-style names like "alloy"/"verse"
+    # 500 on this model — it needs one of Google's native Gemini TTS voices
+    # (e.g. "Kore", "Puck").
+    openrouter_tts_model: str = "google/gemini-3.1-flash-tts-preview"
+    openrouter_tts_voice: str = "Kore"
+    # "mp3" | "pcm" — model-dependent; the default model only accepts "pcm".
+    openrouter_tts_response_format: str = "pcm"
+    # Assumed sample rate (Hz) for headerless "pcm" responses, used to wrap
+    # them in a WAV container. See _wrap_pcm_as_wav in app/providers/openrouter.py.
+    openrouter_tts_pcm_sample_rate: int = 24000
+    # Optional: sent as HTTP-Referer / X-Title on OpenRouter calls (attributes
+    # requests for their public rankings; unrelated to auth).
+    openrouter_site_url: str = ""
+    openrouter_site_name: str = ""
     # Restrict the agent to deterministic (local-tool) capabilities only,
     # excluding hosted-AI / GPU ops from the planner catalog and validation.
     agent_deterministic_only: bool = True

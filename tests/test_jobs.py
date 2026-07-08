@@ -1,6 +1,11 @@
 import io
 
+import pytest
 from httpx import AsyncClient
+
+from app.capabilities.handlers import audio_tts as audio_tts_module
+from app.providers.base import BaseInferenceProvider, InferenceRequest
+from app.providers.openrouter import AUDIO_BYTES_KEY
 
 API = "/api/v1"
 
@@ -44,6 +49,67 @@ async def test_audio_transcribe_job_succeeds(client: AsyncClient, make_project) 
     job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
     assert job["status"] == "succeeded"
     assert "text" in job["output"]
+
+
+async def test_audio_tts_job_succeeds_with_mock_provider(
+    client: AsyncClient, make_project
+) -> None:
+    pid = await make_project("TTS")
+    resp = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "audio.tts",
+            "project_id": pid,
+            "input": {"text": "Hello there", "voice": "alloy"},
+        },
+    )
+    assert resp.status_code == 201
+    job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
+    assert job["status"] == "succeeded"
+    assert job["output"]["provider"] == "mock"
+    assert job["output"]["text"] == "Hello there"
+    # The mock provider doesn't synthesize audio, so no derived asset.
+    assert "outputs" not in job["output"]
+
+
+async def test_audio_tts_job_persists_derived_audio_asset(
+    client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_audio = b"\xff\xfb\x90\x00fake-mp3-bytes"
+
+    class _FakeOpenRouterProvider(BaseInferenceProvider):
+        name = "openrouter"
+
+        async def infer(self, request: InferenceRequest) -> dict:
+            return {
+                AUDIO_BYTES_KEY: fake_audio,
+                "voice": request.payload.get("voice", "alloy"),
+                "provider": self.name,
+            }
+
+    monkeypatch.setattr(audio_tts_module, "get_provider", lambda: _FakeOpenRouterProvider())
+
+    pid = await make_project("TTS Real")
+    resp = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "audio.tts",
+            "project_id": pid,
+            "input": {"text": "Museum highlights"},
+        },
+    )
+    assert resp.status_code == 201
+    job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
+    assert job["status"] == "succeeded", job.get("error")
+    assert job["output"]["provider"] == "openrouter"
+    assert AUDIO_BYTES_KEY not in job["output"]
+    outputs = job["output"]["outputs"]
+    assert len(outputs) == 1
+    assert outputs[0]["media_type"] == "audio"
+
+    download = await client.get(f"{API}/assets/{outputs[0]['asset_id']}/download")
+    assert download.status_code == 200
+    assert download.content == fake_audio
 
 
 async def test_not_implemented_capability_returns_payload(

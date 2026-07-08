@@ -8,6 +8,7 @@ from app.core.errors import ProviderError
 from app.providers.base import BaseInferenceProvider
 from app.providers.http import HTTPInferenceProvider
 from app.providers.mock import MockInferenceProvider
+from app.providers.openrouter import OpenRouterInferenceProvider
 
 
 def get_provider(settings: Settings | None = None) -> BaseInferenceProvider:
@@ -17,4 +18,6 @@ def get_provider(settings: Settings | None = None) -> BaseInferenceProvider:
         return MockInferenceProvider()
     if provider == "http":
         return HTTPInferenceProvider(settings)
+    if provider == "openrouter":
+        return OpenRouterInferenceProvider(settings)
     raise ProviderError(f"Unknown INFERENCE_PROVIDER '{settings.inference_provider}'")
