@@ -82,6 +82,7 @@ def decode_token(token: str) -> dict:
             algorithms=["RS256"],
             audience=settings.required_audience,
             issuer=_issuer(),
+            leeway=settings.auth_leeway_seconds,
             options={"require": ["exp", "iss"]},
         )
     except (jwt.InvalidTokenError, PyJWKClientError) as exc:

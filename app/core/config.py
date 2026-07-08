@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     required_audience: str = "uniche-platform"
     # JWKS are cached for this long (seconds) before refetch.
     auth_jwks_cache_seconds: int = 3600
+    # Clock-skew tolerance (seconds) when validating exp/nbf. Matches the
+    # catalogue's posture so a token accepted there is not rejected here just
+    # because the backend host's clock has drifted (common under WSL2/Docker).
+    auth_leeway_seconds: int = 60
     # Base URL of the catalogue (authorization authority), no trailing /api/v1.
     catalogue_base_url: str = ""
     catalogue_timeout_seconds: float = 10.0
