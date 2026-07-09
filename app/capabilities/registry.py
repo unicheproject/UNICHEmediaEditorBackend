@@ -30,6 +30,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
     audio_ops.AudioGainHandler(),
     audio_ops.AudioNormalizeHandler(),
     audio_ops.AudioFadeHandler(),
+    audio_ops.AudioDenoiseHandler(),
     audio_ops.AudioTranscodeHandler(),
     compose_ops.ImageSlideshowHandler(),
     compose_ops.MediaTitlecardHandler(),

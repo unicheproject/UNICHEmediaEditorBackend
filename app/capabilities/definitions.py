@@ -211,6 +211,13 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "properties": {"format": _STR, "codec": _STR},
         "required": ["format"],
     },
+    {
+        "id": "audio.denoise",
+        "title": "Audio Denoise",
+        "description": "Reduce background noise in an audio recording (RNNoise).",
+        "media": _A,
+        "properties": {"strength": _NUM},
+    },
     # --- Composition capabilities ---
     {
         "id": "image.slideshow",
@@ -343,14 +350,6 @@ CAPABILITIES: list[CapabilityDef] = [
             "properties": {"prompt": {"type": "string"}},
             "required": ["prompt"],
         },
-        output_schema={"type": "object", "properties": {"audio_url": {"type": "string"}}},
-    ),
-    _def(
-        id="audio.denoise",
-        title="Audio Denoise",
-        description="Reduce background noise in an audio asset.",
-        media=[MediaType.audio, MediaType.video],
-        cost_class=CostClass.hosted_ai,
         output_schema={"type": "object", "properties": {"audio_url": {"type": "string"}}},
     ),
     _def(

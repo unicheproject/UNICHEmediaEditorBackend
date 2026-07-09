@@ -628,6 +628,31 @@
           ]
         },
         {
+          "name": "Create audio.denoise Job (tool → derived audio)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"audio.denoise\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{audio_asset_id}}\",\n  \"input\": { \"strength\": 1.0 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
           "name": "Get Job",
           "request": {
             "method": "GET",

@@ -18,6 +18,11 @@ RUN apt-get update \
         fonts-dejavu-core=2.37-6 \
     && rm -rf /var/lib/apt/lists/*
 
+# RNNoise model for the arnndn filter (audio.denoise) — this ffmpeg build has
+# no bundled default model, so one must be vendored. See assets/rnnoise/README.md.
+RUN mkdir -p /usr/share/rnnoise
+COPY assets/rnnoise/sh.rnnn /usr/share/rnnoise/model.rnnn
+
 WORKDIR /app
 
 # Install dependencies from the fully-pinned lockfile (with hashes), then the

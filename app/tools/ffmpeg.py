@@ -223,6 +223,15 @@ async def audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> Non
     await runner.run([*_BASE, "-i", src, "-filter:a", ",".join(filters), dst])
 
 
+DEFAULT_RNNOISE_MODEL = "/usr/share/rnnoise/model.rnnn"
+
+
+async def audio_denoise(src: str, dst: str, strength: float | None) -> None:
+    mix = 1.0 if strength is None else strength
+    filt = f"arnndn=m={DEFAULT_RNNOISE_MODEL}:mix={_num(mix, 'strength')}"
+    await runner.run([*_BASE, "-i", src, "-filter:a", filt, dst])
+
+
 async def audio_transcode(src: str, dst: str, codec: str | None) -> None:
     args = [*_BASE, "-i", src]
     if codec:

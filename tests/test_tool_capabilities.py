@@ -5,12 +5,14 @@ unless ffmpeg/convert are installed (they run for real in the Docker image).
 """
 
 import io
+import os
 import shutil
 import subprocess
 
 import pytest
 from httpx import AsyncClient
 
+from app.tools import ffmpeg
 from tests.conftest import DEFAULT_ORG_ID
 
 API = "/api/v1"
@@ -29,13 +31,14 @@ async def _project(client: AsyncClient, name: str) -> str:
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 HAVE_CONVERT = shutil.which("convert") is not None
+HAVE_RNNOISE_MODEL = os.path.exists(ffmpeg.DEFAULT_RNNOISE_MODEL)
 
 TOOL_IDS = {
     "video.trim", "video.split", "video.concat", "video.transcode", "video.mute",
     "video.crop", "video.resize", "video.thumbnail",
     "image.resize", "image.crop", "image.format", "image.colour.adjust",
     "audio.trim", "audio.concat", "audio.gain", "audio.normalize", "audio.fade",
-    "audio.transcode",
+    "audio.denoise", "audio.transcode",
 }
 
 
@@ -99,6 +102,25 @@ def _make_audio(path: str) -> None:
         "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
         "-i", "sine=frequency=440:duration=2", path,
     ])
+
+
+def _make_noisy_audio(path: str) -> None:
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-f", "lavfi", "-i", "anoisesrc=d=2:c=white:a=0.3",
+        "-filter_complex", "amix=inputs=2:duration=first",
+        path,
+    ])
+
+
+def _rms_level_db(path: str) -> float:
+    proc = subprocess.run(
+        ["ffmpeg", "-i", path, "-af", "astats", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    lines = [ln for ln in proc.stderr.splitlines() if "RMS level dB" in ln]
+    return float(lines[-1].split(":")[-1].strip())
 
 
 def _make_image(path: str) -> None:
@@ -167,3 +189,24 @@ async def test_audio_trim_execution(client: AsyncClient, tmp_path) -> None:
     assert job["status"] == "succeeded", job.get("error")
     out = job["output"]["outputs"][0]
     assert out["media_type"] == "audio"
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+@pytest.mark.skipif(not HAVE_RNNOISE_MODEL, reason="RNNoise model not vendored at expected path")
+async def test_audio_denoise_execution(client: AsyncClient, tmp_path) -> None:
+    src = tmp_path / "noisy.wav"
+    _make_noisy_audio(str(src))
+    pid = await _project(client, "A")
+    aid = await _upload(client, pid, str(src), "noisy.wav", "audio/wav")
+
+    job = await _run_job(client, "audio.denoise", aid, {})
+    assert job["status"] == "succeeded", job.get("error")
+    out = job["output"]["outputs"][0]
+    assert out["media_type"] == "audio"
+
+    dl = await client.get(f"{API}/assets/{out['asset_id']}/download")
+    assert dl.status_code == 200 and len(dl.content) > 0
+    denoised = tmp_path / "denoised.wav"
+    denoised.write_bytes(dl.content)
+
+    assert _rms_level_db(str(denoised)) < _rms_level_db(str(src))

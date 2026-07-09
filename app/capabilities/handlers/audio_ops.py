@@ -86,6 +86,16 @@ class AudioFadeHandler(LocalToolHandler):
         return HandlerResult(data={"operation": "audio.fade"}, outputs=[out])
 
 
+class AudioDenoiseHandler(LocalToolHandler):
+    capability_id = "audio.denoise"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        src = require_input(ctx)
+        out = _audio_out(ctx, "denoise")
+        await ffmpeg.audio_denoise(src, str(out.path), ctx.params.get("strength"))
+        return HandlerResult(data={"operation": "audio.denoise"}, outputs=[out])
+
+
 class AudioTranscodeHandler(LocalToolHandler):
     capability_id = "audio.transcode"
 
