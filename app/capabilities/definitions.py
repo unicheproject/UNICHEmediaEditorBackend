@@ -422,17 +422,6 @@ CAPABILITIES: list[CapabilityDef] = [
         },
     ),
     _def(
-        id="video.shot.detect",
-        title="Shot Detection",
-        description="Detect shot/scene boundaries in a video.",
-        media=[MediaType.video],
-        cost_class=CostClass.hosted_ai,
-        output_schema={
-            "type": "object",
-            "properties": {"shots": {"type": "array", "items": {"type": "object"}}},
-        },
-    ),
-    _def(
         id="video.upscale",
         title="Video Upscale",
         description="Increase video resolution.",
@@ -458,6 +447,37 @@ CAPABILITIES: list[CapabilityDef] = [
             output_schema=_FILE_OUTPUT_SCHEMA,
         )
         for spec in _DETERMINISTIC_SPECS
+    ),
+    # Deterministic, but JSON-only (no output file) so it doesn't fit
+    # _FILE_OUTPUT_SCHEMA / _DETERMINISTIC_SPECS above.
+    _def(
+        id="video.shot.detect",
+        title="Shot Detection",
+        description="Detect shot/scene boundaries in a video (PySceneDetect content-aware cuts).",
+        media=_V,
+        cost_class=CostClass.deterministic,
+        input_schema={
+            "type": "object",
+            "properties": {"threshold": _NUM},
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "shots": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "index": _INT,
+                            "start": _NUM,
+                            "end": _NUM,
+                            "start_frame": _INT,
+                            "end_frame": _INT,
+                        },
+                    },
+                }
+            },
+        },
     ),
 ]
 

@@ -19,6 +19,7 @@ dependencies = [
     "sse-starlette>=2.1",
     "jsonschema>=4.23",
     "pyjwt[crypto]>=2.9",
+    "scenedetect>=0.6.4",
 ]
 
 [project.optional-dependencies]

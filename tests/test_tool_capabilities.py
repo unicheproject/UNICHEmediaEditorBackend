@@ -4,6 +4,7 @@ Registration/validation tests need no binaries. Execution tests are skipped
 unless ffmpeg/convert are installed (they run for real in the Docker image).
 """
 
+import importlib.util
 import io
 import os
 import shutil
@@ -35,10 +36,11 @@ HAVE_RNNOISE_MODEL = os.path.exists(ffmpeg.DEFAULT_RNNOISE_MODEL)
 HAVE_REALESRGAN = os.path.exists(realesrgan.REALESRGAN_BIN) and os.path.exists(
     os.path.join(realesrgan.REALESRGAN_MODELS_DIR, f"{realesrgan.DEFAULT_MODEL}.bin")
 )
+HAVE_SCENEDETECT = importlib.util.find_spec("scenedetect") is not None
 
 TOOL_IDS = {
     "video.trim", "video.split", "video.concat", "video.transcode", "video.mute",
-    "video.crop", "video.resize", "video.thumbnail",
+    "video.crop", "video.resize", "video.thumbnail", "video.shot.detect",
     "image.resize", "image.crop", "image.format", "image.colour.adjust", "image.upscale",
     "audio.trim", "audio.concat", "audio.gain", "audio.normalize", "audio.fade",
     "audio.denoise", "audio.transcode",
@@ -107,6 +109,31 @@ def _make_audio(path: str) -> None:
     ])
 
 
+def _make_shot_video(path: str, tmp_path) -> None:
+    """Two visually distinct 2s/25fps segments concatenated, for shot-boundary detection.
+
+    Short/low-fps clips can fall under PySceneDetect's default min_scene_len (15
+    frames), merging the cut away, so this uses a longer/higher-fps pair than
+    _make_video's throwaway fixtures.
+    """
+    blue = tmp_path / "_shot_blue.mp4"
+    red = tmp_path / "_shot_red.mp4"
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+        "-i", "color=c=blue:duration=2:size=320x240:rate=25", str(blue),
+    ])
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+        "-i", "color=c=red:duration=2:size=320x240:rate=25", str(red),
+    ])
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(blue), "-i", str(red),
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+        path,
+    ])
+
+
 def _make_noisy_audio(path: str) -> None:
     _run([
         "ffmpeg", "-y", "-loglevel", "error",
@@ -164,6 +191,25 @@ async def test_video_thumbnail_execution(client: AsyncClient, tmp_path) -> None:
     assert meta["source_asset_id"] == aid
     dl = await client.get(f"{API}/assets/{out['asset_id']}/download")
     assert dl.status_code == 200 and len(dl.content) > 0
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+@pytest.mark.skipif(not HAVE_SCENEDETECT, reason="scenedetect not installed")
+async def test_video_shot_detect_execution(client: AsyncClient, tmp_path) -> None:
+    src = tmp_path / "shots.mp4"
+    _make_shot_video(str(src), tmp_path)
+    pid = await _project(client, "S")
+    aid = await _upload(client, pid, str(src), "shots.mp4", "video/mp4")
+
+    job = await _run_job(client, "video.shot.detect", aid, {})
+    assert job["status"] == "succeeded", job.get("error")
+    assert "outputs" not in job["output"]  # JSON-only capability, no derived asset
+
+    shots = job["output"]["shots"]
+    assert len(shots) == 2
+    assert shots[0]["start"] == 0.0
+    assert shots[0]["end"] == pytest.approx(2.0, abs=0.05)
+    assert shots[1]["end"] == pytest.approx(4.0, abs=0.05)
 
 
 @pytest.mark.skipif(not HAVE_CONVERT, reason="ImageMagick (convert) not installed")

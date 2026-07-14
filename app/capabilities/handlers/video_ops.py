@@ -12,7 +12,7 @@ from app.capabilities.handlers._util import (
 from app.capabilities.handlers.base import LocalToolHandler
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
-from app.tools import ffmpeg
+from app.tools import ffmpeg, pyscenedetect
 
 
 def _video_out(ctx: JobContext, suffix: str, ext: str | None = None) -> OutputFile:
@@ -137,3 +137,16 @@ class VideoThumbnailHandler(LocalToolHandler):
         )
         await ffmpeg.video_thumbnail(src, str(out.path), require(ctx.params, "timestamp"))
         return HandlerResult(data={"operation": "video.thumbnail"}, outputs=[out])
+
+
+class VideoShotDetectHandler(LocalToolHandler):
+    """Detects shot/scene boundaries (PySceneDetect ContentDetector). JSON-only: no output file."""
+
+    capability_id = "video.shot.detect"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        src = require_input(ctx)
+        shots = await pyscenedetect.detect_shots(src, ctx.params.get("threshold"))
+        return HandlerResult(
+            data={"operation": "video.shot.detect", "shots": shots}, outputs=[]
+        )

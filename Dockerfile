@@ -15,14 +15,19 @@ ENV PYTHONUNBUFFERED=1 \
 # realesrgan-ncnn-vulkan binary (image.upscale); see assets/realesrgan/README.md
 # for why a Vulkan device (real GPU or Mesa's llvmpipe software fallback) is
 # required, and docker-compose.yml `worker.devices` for GPU passthrough.
+# libgl1/libglib2.0-0 -> runtime libs required by opencv-python, a transitive
+# dependency of the `scenedetect` package (video.shot.detect); this slim base
+# image has neither by default and opencv-python fails to import without them.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg=7:5.1.9-0+deb12u1 \
         imagemagick=8:6.9.11.60+dfsg-1.6+deb12u11 \
         fonts-dejavu-core=2.37-6 \
         libvulkan1=1.3.239.0-1 \
-        mesa-vulkan-drivers=22.3.6-1+deb12u1 \
+        mesa-vulkan-drivers=22.3.6-1+deb12u2 \
         libgomp1=12.2.0-14+deb12u1 \
+        libgl1=1.6.0-1 \
+        libglib2.0-0=2.74.6-2+deb12u9 \
     && rm -rf /var/lib/apt/lists/*
 
 # RNNoise model for the arnndn filter (audio.denoise) — this ffmpeg build has

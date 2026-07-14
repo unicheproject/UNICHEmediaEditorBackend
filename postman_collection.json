@@ -526,13 +526,13 @@
           ]
         },
         {
-          "name": "Create not_implemented Job (image.upscale)",
+          "name": "Create not_implemented Job (video.upscale)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"capability_id\": \"image.upscale\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": {}\n}"
+              "raw": "{\n  \"capability_id\": \"video.upscale\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{video_asset_id}}\",\n  \"input\": {}\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/jobs",
@@ -617,6 +617,32 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "jobs"]
             }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create video.shot.detect Job (tool → JSON, PySceneDetect)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"video.shot.detect\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{video_asset_id}}\",\n  \"input\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Deterministic, local (PySceneDetect ContentDetector) -- no external API call. JSON-only result: output.shots[] = [{index, start, end, start_frame, end_frame}], no derived asset. Optional input.threshold (0-255, lower = more sensitive; default 27)."
           },
           "event": [
             {
