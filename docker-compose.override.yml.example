@@ -1,0 +1,15 @@
+# Optional, local-only overrides. Copy this file to docker-compose.override.yml
+# (already gitignored) -- `docker compose` merges it automatically, no flag
+# needed. Never commit the copy: it's meant to differ per machine.
+#
+# Use this to point the stack at a catalogue other than the one
+# docker-compose.yml assumes by default (e.g. the real prod catalogue instead
+# of a locally-composed one that isn't running on this machine).
+services:
+  api:
+    environment:
+      CATALOGUE_BASE_URL: https://catalogue.uniche-eccch.eu
+
+  worker:
+    environment:
+      CATALOGUE_BASE_URL: https://catalogue.uniche-eccch.eu

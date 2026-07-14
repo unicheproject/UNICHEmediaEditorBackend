@@ -11,17 +11,28 @@ ENV PYTHONUNBUFFERED=1 \
 
 # System tools for deterministic media capabilities, pinned to bookworm versions.
 # ffmpeg -> all video + audio ops; imagemagick -> image ops (`convert` CLI).
+# libvulkan1/mesa-vulkan-drivers/libgomp1 -> Vulkan runtime for the vendored
+# realesrgan-ncnn-vulkan binary (image.upscale); see assets/realesrgan/README.md
+# for why a Vulkan device (real GPU or Mesa's llvmpipe software fallback) is
+# required, and docker-compose.yml `worker.devices` for GPU passthrough.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg=7:5.1.9-0+deb12u1 \
         imagemagick=8:6.9.11.60+dfsg-1.6+deb12u11 \
         fonts-dejavu-core=2.37-6 \
+        libvulkan1=1.3.239.0-1 \
+        mesa-vulkan-drivers=22.3.6-1+deb12u1 \
+        libgomp1=12.2.0-14+deb12u1 \
     && rm -rf /var/lib/apt/lists/*
 
 # RNNoise model for the arnndn filter (audio.denoise) — this ffmpeg build has
 # no bundled default model, so one must be vendored. See assets/rnnoise/README.md.
 RUN mkdir -p /usr/share/rnnoise
 COPY assets/rnnoise/sh.rnnn /usr/share/rnnoise/model.rnnn
+
+# Real-ESRGAN (image.upscale) — vendored binary + model, see assets/realesrgan/README.md.
+COPY assets/realesrgan /opt/realesrgan
+RUN chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan
 
 WORKDIR /app
 

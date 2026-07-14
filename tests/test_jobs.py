@@ -118,7 +118,7 @@ async def test_not_implemented_capability_returns_payload(
     pid = await make_project("NI")
     resp = await client.post(
         f"{API}/jobs",
-        json={"capability_id": "image.upscale", "project_id": pid, "input": {}},
+        json={"capability_id": "image.restore.face", "project_id": pid, "input": {}},
     )
     assert resp.status_code == 201
     job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()

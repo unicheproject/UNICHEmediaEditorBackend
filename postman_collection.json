@@ -578,6 +578,32 @@
           ]
         },
         {
+          "name": "Create image.upscale Job (tool → derived image, Real-ESRGAN)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"image.upscale\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": { \"scale\": 2 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Deterministic, local (Real-ESRGAN via realesrgan-ncnn-vulkan) -- no external API call. scale is 2/3/4 (default 4). Slow without a GPU passed through to the container: use a small/cropped test image for quick iteration (~30-40s), a full photo can take many minutes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create video.thumbnail Job (tool → derived image)",
           "request": {
             "method": "POST",

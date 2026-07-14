@@ -12,7 +12,7 @@ import subprocess
 import pytest
 from httpx import AsyncClient
 
-from app.tools import ffmpeg
+from app.tools import ffmpeg, realesrgan
 from tests.conftest import DEFAULT_ORG_ID
 
 API = "/api/v1"
@@ -32,11 +32,14 @@ async def _project(client: AsyncClient, name: str) -> str:
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 HAVE_CONVERT = shutil.which("convert") is not None
 HAVE_RNNOISE_MODEL = os.path.exists(ffmpeg.DEFAULT_RNNOISE_MODEL)
+HAVE_REALESRGAN = os.path.exists(realesrgan.REALESRGAN_BIN) and os.path.exists(
+    os.path.join(realesrgan.REALESRGAN_MODELS_DIR, f"{realesrgan.DEFAULT_MODEL}.bin")
+)
 
 TOOL_IDS = {
     "video.trim", "video.split", "video.concat", "video.transcode", "video.mute",
     "video.crop", "video.resize", "video.thumbnail",
-    "image.resize", "image.crop", "image.format", "image.colour.adjust",
+    "image.resize", "image.crop", "image.format", "image.colour.adjust", "image.upscale",
     "audio.trim", "audio.concat", "audio.gain", "audio.normalize", "audio.fade",
     "audio.denoise", "audio.transcode",
 }
@@ -210,3 +213,21 @@ async def test_audio_denoise_execution(client: AsyncClient, tmp_path) -> None:
     denoised.write_bytes(dl.content)
 
     assert _rms_level_db(str(denoised)) < _rms_level_db(str(src))
+
+
+@pytest.mark.skipif(
+    not HAVE_REALESRGAN, reason="realesrgan-ncnn-vulkan binary/model not vendored at expected path"
+)
+async def test_image_upscale_execution(client: AsyncClient, tmp_path) -> None:
+    src = tmp_path / "i.png"
+    _make_image(str(src))
+    pid = await _project(client, "I")
+    aid = await _upload(client, pid, str(src), "i.png", "image/png")
+
+    job = await _run_job(client, "image.upscale", aid, {"scale": 2})
+    assert job["status"] == "succeeded", job.get("error")
+    out = job["output"]["outputs"][0]
+    assert out["media_type"] == "image"
+
+    dl = await client.get(f"{API}/assets/{out['asset_id']}/download")
+    assert dl.status_code == 200 and len(dl.content) > 0

@@ -166,6 +166,13 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "properties": {"brightness": _INT, "contrast": _INT, "saturation": _INT},
     },
     {
+        "id": "image.upscale",
+        "title": "Image Upscale",
+        "description": "Increase image resolution while preserving detail (Real-ESRGAN).",
+        "media": _I,
+        "properties": {"scale": _INT},
+    },
+    {
         "id": "audio.trim",
         "title": "Audio Trim",
         "description": "Trim an audio clip to a start/end time range (seconds).",
@@ -388,14 +395,6 @@ CAPABILITIES: list[CapabilityDef] = [
         output_schema={"type": "object", "properties": {"image_url": {"type": "string"}}},
     ),
     _def(
-        id="image.upscale",
-        title="Image Upscale",
-        description="Increase image resolution.",
-        media=[MediaType.image],
-        cost_class=CostClass.hosted_ai,
-        output_schema={"type": "object", "properties": {"image_url": {"type": "string"}}},
-    ),
-    _def(
         id="image.restore.face",
         title="Face Restoration",
         description="Restore and enhance faces in an image.",
@@ -441,7 +440,7 @@ CAPABILITIES: list[CapabilityDef] = [
         cost_class=CostClass.future_gpu,
         output_schema={"type": "object", "properties": {"video_url": {"type": "string"}}},
     ),
-    # --- Deterministic local-tool capabilities (FFmpeg / ImageMagick) ---
+    # --- Deterministic local-tool capabilities (FFmpeg / ImageMagick / Real-ESRGAN) ---
     # All produce one or more output files, registered as derived Assets and
     # listed under output.outputs[{asset_id, filename, media_type, ...}].
     *(

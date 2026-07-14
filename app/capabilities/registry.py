@@ -11,7 +11,7 @@ from app.capabilities.handlers.image_caption import ImageCaptionHandler
 from app.capabilities.handlers.not_implemented import NotImplementedHandler
 from app.core.errors import NotFoundError
 
-# Deterministic local-tool handlers (FFmpeg / ImageMagick).
+# Deterministic local-tool handlers (FFmpeg / ImageMagick / Real-ESRGAN).
 _TOOL_HANDLERS: list[CapabilityHandler] = [
     video_ops.VideoTrimHandler(),
     video_ops.VideoSplitHandler(),
@@ -25,6 +25,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
     image_ops.ImageCropHandler(),
     image_ops.ImageFormatHandler(),
     image_ops.ImageColourAdjustHandler(),
+    image_ops.ImageUpscaleHandler(),
     audio_ops.AudioTrimHandler(),
     audio_ops.AudioConcatHandler(),
     audio_ops.AudioGainHandler(),
