@@ -39,7 +39,9 @@ trap on_error ERR
 
 "${compose[@]}" pull
 "${compose[@]}" up -d postgres redis
-"${compose[@]}" run --rm migrate
+# This script is streamed to `bash -s` over SSH. Do not let Compose inherit that
+# stdin or it can consume the remaining script after Alembic exits successfully.
+"${compose[@]}" run --rm --no-TTY migrate </dev/null
 "${compose[@]}" up -d --remove-orphans api worker
 
 for attempt in {1..30}; do
