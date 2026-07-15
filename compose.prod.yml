@@ -96,9 +96,11 @@ services:
     # only worker executes capability jobs in production, so api doesn't need it.
     # NVIDIA_DRIVER_CAPABILITIES defaults to compute,utility (CUDA-only) --
     # graphics/display must be added explicitly or the container gets no
-    # Vulkan ICD and realesrgan-ncnn-vulkan finds no device.
+    # Vulkan ICD and realesrgan-ncnn-vulkan finds no device. Using "all"
+    # (NVIDIA's own recommended value for graphics/Vulkan workloads) rather
+    # than an explicit subset list.
     environment:
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics,display
+      NVIDIA_DRIVER_CAPABILITIES: all
     deploy:
       resources:
         reservations:
