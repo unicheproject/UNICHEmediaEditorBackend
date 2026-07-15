@@ -91,6 +91,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # GPU passthrough for image.upscale (Real-ESRGAN via Vulkan). Requires the
+    # NVIDIA driver + nvidia-container-toolkit on the host (see DEPLOYMENT.md);
+    # only worker executes capability jobs in production, so api doesn't need it.
+    # NVIDIA_DRIVER_CAPABILITIES defaults to compute,utility (CUDA-only) --
+    # graphics/display must be added explicitly or the container gets no
+    # Vulkan ICD and realesrgan-ncnn-vulkan finds no device.
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics,display
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   pgdata:
