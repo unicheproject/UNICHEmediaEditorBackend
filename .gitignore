@@ -9,6 +9,9 @@ dist/
 venv/
 .env
 docker-compose.override.yml
+*.pem
+*.key
+uniche_media_editor_deploy*
 
 # Tooling
 .mypy_cache/
