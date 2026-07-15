@@ -1,6 +1,7 @@
-# Optional, local-only overrides. Copy this file to docker-compose.override.yml
-# (already gitignored) -- `docker compose` merges it automatically, no flag
-# needed. Never commit the copy: it's meant to differ per machine.
+# Optional, local-development-only overrides. Copy this file to
+# docker-compose.override.yml (already gitignored) -- `docker compose` merges it
+# automatically, no flag needed. Never use this file for production: production
+# uses compose.prod.yml explicitly so development mounts and ports cannot leak in.
 #
 # Use this to point the stack at a catalogue other than the one
 # docker-compose.yml assumes by default (e.g. the real prod catalogue instead

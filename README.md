@@ -50,6 +50,10 @@ docker compose exec api alembic upgrade head
 - Health: http://localhost:8000/health
 - Placeholder page: http://localhost:8000/
 
+Production CI/CD and Hetzner VM setup are documented in
+[DEPLOYMENT.md](DEPLOYMENT.md). The regular `docker-compose.yml` and optional
+override remain development-only.
+
 The `api` container runs uvicorn with `--reload`; the `worker` container runs
 `arq app.workers.worker.WorkerSettings`. Both share the codebase and the
 `storage` volume. Postgres data persists in the `pgdata` volume.

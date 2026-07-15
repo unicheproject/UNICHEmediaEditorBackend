@@ -1,0 +1,131 @@
+name: CI and deployment
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Start with no token access and grant only what each job needs.
+permissions: {}
+
+jobs:
+  test:
+    name: Test, lint, and type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build the test image
+        run: docker build --tag uniche-media-editor:test .
+
+      - name: Lint
+        run: docker run --rm uniche-media-editor:test ruff check .
+
+      - name: Type-check
+        run: docker run --rm uniche-media-editor:test mypy app
+
+      - name: Test
+        run: docker run --rm uniche-media-editor:test pytest
+
+  publish:
+    name: Publish image
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Derive the lowercase image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build and publish the immutable image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.image.outputs.name }}:main
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  deploy:
+    name: Deploy to production
+    if: github.event_name != 'pull_request'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the deployed revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Deploy over verified SSH
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+          IMAGE: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          key_file="$RUNNER_TEMP/deploy_key"
+          known_hosts_file="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$key_file"
+          printf '%s\n' "$DEPLOY_SSH_HOST_KEY" > "$known_hosts_file"
+
+          ssh_options=(
+            -i "$key_file"
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o IdentitiesOnly=yes
+            -o ServerAliveCountMax=3
+            -o ServerAliveInterval=15
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$known_hosts_file"
+          )
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+
+          scp "${ssh_options[@]}" compose.prod.yml "$target:/opt/uniche-media-editor/compose.prod.yml.new"
+          ssh "${ssh_options[@]}" "$target" \
+            bash -s -- "$IMAGE" /opt/uniche-media-editor < deploy/deploy.sh

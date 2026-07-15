@@ -21,7 +21,7 @@ RUN apt-get update \
         imagemagick=8:6.9.11.60+dfsg-1.6+deb12u11 \
         fonts-dejavu-core=2.37-6 \
         libvulkan1=1.3.239.0-1 \
-        mesa-vulkan-drivers=22.3.6-1+deb12u1 \
+        mesa-vulkan-drivers=22.3.6-1+deb12u2 \
         libgomp1=12.2.0-14+deb12u1 \
     && rm -rf /var/lib/apt/lists/*
 

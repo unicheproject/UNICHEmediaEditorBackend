@@ -11,4 +11,9 @@ storage
 *.sqlite3
 *.db
 .env
+.env.*
+*.pem
+*.key
+uniche_media_editor_deploy*
+docker-compose.override.yml
 postman_collection.json
