@@ -17,3 +17,6 @@ class WorkerSettings:
     on_startup = startup
     max_jobs = 10
     job_timeout = 1800
+    # Lets Job.abort() (app.workers.queue.cancel_job) actually interrupt a job
+    # that's already running, not just prevent one that hasn't started yet.
+    allow_abort_jobs = True

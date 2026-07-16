@@ -24,17 +24,24 @@ from app.models.project import Project
 from app.schemas.common import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, Page
 from app.schemas.job import JobCreate, JobRead
 from app.services import jobs as svc
+from app.workers.queue import cancel_job as arq_cancel_job
 from app.workers.queue import enqueue_job
 
 router = APIRouter(tags=["jobs"])
 
-# Enqueue is injected so tests can override it (e.g. run the job eagerly)
-# without standing up Redis/arq. Routes never touch provider logic.
+# Enqueue/cancel are injected so tests can override them (e.g. run the job
+# eagerly, or no-op the arq call) without standing up Redis/arq. Routes never
+# touch provider logic.
 Enqueuer = Callable[[uuid.UUID], Awaitable[None]]
+Canceller = Callable[[uuid.UUID], Awaitable[bool]]
 
 
 def get_enqueuer() -> Enqueuer:
     return enqueue_job
+
+
+def get_canceller() -> Canceller:
+    return arq_cancel_job
 
 
 _TERMINAL = {JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled}
@@ -54,6 +61,24 @@ async def create_job(
 @router.get("/jobs/{job_id}", response_model=JobRead)
 async def get_job(job: Job = Depends(require_job_access)) -> JobRead:
     return JobRead.model_validate(job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobRead)
+async def cancel_job(
+    job: Job = Depends(require_job_access),
+    session: AsyncSession = Depends(get_session),
+    canceller: Canceller = Depends(get_canceller),
+) -> JobRead:
+    """Cancel a queued/running job. 422 if it's already terminal.
+
+    Marks the job cancelled immediately (the state the API/GUI see), then
+    best-effort signals arq to abort the underlying job -- for a running job
+    this interrupts it and kills its subprocess (app.tools.runner); for a
+    queued one it's prevented from ever starting.
+    """
+    cancelled = await svc.cancel_job(session, job.id)
+    await canceller(job.id)
+    return JobRead.model_validate(cancelled)
 
 
 @router.get("/projects/{project_id}/jobs", response_model=Page[JobRead])

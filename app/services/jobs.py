@@ -64,6 +64,27 @@ async def get_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     return job
 
 
+_CANCELLABLE = {JobStatus.queued, JobStatus.running}
+
+
+async def cancel_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
+    """Mark a queued/running job cancelled. The route also signals arq (best-
+    effort) to actually stop a running job's subprocess; this DB write is the
+    immediately-consistent state the API/GUI see regardless of that outcome.
+    """
+    job = await get_job(session, job_id)
+    if job.status not in _CANCELLABLE:
+        raise ValidationError(
+            f"Job '{job_id}' is already {job.status.value}; cannot cancel"
+        )
+    job.status = JobStatus.cancelled
+    job.error = "Cancelled by user"
+    job.finished_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
 async def list_jobs_for_project(
     session: AsyncSession,
     project_id: uuid.UUID,
@@ -194,6 +215,13 @@ async def execute_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
 
         result = await handler.run(ctx)
         output = await _persist_outputs(session, job, ctx, result)
+
+        # A concurrent cancel_job() may have already finalized this job (e.g.
+        # the handler was mid-cleanup when cancelled but still returned
+        # normally) -- don't stomp a cancellation with a late "succeeded".
+        await session.refresh(job)
+        if job.status == JobStatus.cancelled:
+            return job
 
         job.output = output
         job.status = JobStatus.succeeded

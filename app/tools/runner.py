@@ -38,6 +38,13 @@ async def _exec(args: list[str], timeout: float) -> tuple[str, str]:
         proc.kill()
         await proc.wait()
         raise ToolError(f"Tool '{args[0]}' timed out after {timeout}s") from exc
+    except asyncio.CancelledError:
+        # Job cancellation (app.workers.queue.cancel_job): without this, the
+        # asyncio task stops awaiting but the child process keeps running,
+        # orphaned, still burning CPU/GPU.
+        proc.kill()
+        await proc.wait()
+        raise
 
     stdout = stdout_b.decode("utf-8", errors="replace")
     stderr = stderr_b.decode("utf-8", errors="replace")

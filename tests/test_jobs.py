@@ -1,9 +1,12 @@
 import io
+import uuid
 
 import pytest
 from httpx import AsyncClient
 
+from app.api.v1.jobs import get_enqueuer
 from app.capabilities.handlers import audio_tts as audio_tts_module
+from app.main import app
 from app.providers.base import BaseInferenceProvider, InferenceRequest
 from app.providers.openrouter import AUDIO_BYTES_KEY
 
@@ -130,6 +133,53 @@ async def test_invalid_capability_rejected(client: AsyncClient) -> None:
     resp = await client.post(
         f"{API}/jobs", json={"capability_id": "no.such.capability"}
     )
+    assert resp.status_code == 404
+
+
+async def test_cancel_terminal_job_rejected(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
+    resp = await client.post(
+        f"{API}/jobs",
+        json={"capability_id": "image.caption", "project_id": pid, "asset_id": aid},
+    )
+    job_id = resp.json()["id"]  # eager enqueuer already ran it to "succeeded"
+
+    cancel = await client.post(f"{API}/jobs/{job_id}/cancel")
+    assert cancel.status_code == 422
+    assert cancel.json()["error"]["code"] == "validation_error"
+
+    # Unchanged.
+    job = (await client.get(f"{API}/jobs/{job_id}")).json()
+    assert job["status"] == "succeeded"
+
+
+async def test_cancel_queued_job(client: AsyncClient, make_project) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
+
+    # Skip the eager enqueuer for this one request so the job stays "queued"
+    # (the fixture's own override wins on the next test regardless).
+    async def _never_runs(_job_id: uuid.UUID) -> None:
+        return None
+
+    app.dependency_overrides[get_enqueuer] = lambda: _never_runs
+    resp = await client.post(
+        f"{API}/jobs",
+        json={"capability_id": "image.caption", "project_id": pid, "asset_id": aid},
+    )
+    job_id = resp.json()["id"]
+    assert resp.json()["status"] == "queued"
+
+    cancel = await client.post(f"{API}/jobs/{job_id}/cancel")
+    assert cancel.status_code == 200
+    assert cancel.json()["status"] == "cancelled"
+    assert cancel.json()["error"] == "Cancelled by user"
+
+    job = (await client.get(f"{API}/jobs/{job_id}")).json()
+    assert job["status"] == "cancelled"
+
+
+async def test_cancel_unknown_job_404(client: AsyncClient) -> None:
+    resp = await client.post(f"{API}/jobs/{uuid.uuid4()}/cancel")
     assert resp.status_code == 404
 
 

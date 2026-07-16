@@ -31,7 +31,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from app.agent.executor import execute_plan  # noqa: E402
 from app.api.v1.agent import get_plan_enqueuer  # noqa: E402
-from app.api.v1.jobs import get_enqueuer  # noqa: E402
+from app.api.v1.jobs import get_canceller, get_enqueuer  # noqa: E402
 from app.core.database import async_session_factory, engine  # noqa: E402
 from app.core.security import Principal, get_current_principal  # noqa: E402
 from app.main import app  # noqa: E402
@@ -109,6 +109,16 @@ def _get_eager_enqueuer():
     return _eager_enqueue
 
 
+async def _noop_cancel(job_id: uuid.UUID) -> bool:
+    """No real arq/Redis in tests; services.jobs.cancel_job's DB write is
+    what the cancel tests exercise."""
+    return False
+
+
+def _get_noop_canceller():
+    return _noop_cancel
+
+
 async def _eager_run_plan(plan_id: uuid.UUID) -> None:
     async with async_session_factory() as session:
         await execute_plan(session, plan_id)
@@ -130,6 +140,7 @@ async def _reset_db() -> AsyncGenerator[None, None]:
 async def client() -> AsyncGenerator[AsyncClient, None]:
     fake_catalogue = FakeCatalogueClient()
     app.dependency_overrides[get_enqueuer] = _get_eager_enqueuer
+    app.dependency_overrides[get_canceller] = _get_noop_canceller
     app.dependency_overrides[get_plan_enqueuer] = _get_eager_plan_enqueuer
     app.dependency_overrides[get_catalogue_client] = lambda: fake_catalogue
     app.dependency_overrides[get_current_principal] = lambda: Principal(
