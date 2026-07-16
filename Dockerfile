@@ -18,6 +18,13 @@ ENV PYTHONUNBUFFERED=1 \
 # libgl1/libglib2.0-0 -> runtime libs required by opencv-python, a transitive
 # dependency of the `scenedetect` package (video.shot.detect); this slim base
 # image has neither by default and opencv-python fails to import without them.
+# libegl1 -> the NVIDIA driver's Vulkan ICD dlopen()s the vendor-neutral
+# libEGL.so.1 (GLVND dispatch library) during init, even for a pure-Vulkan,
+# no-display session; CDI only mounts NVIDIA's own vendor libraries
+# (libEGL_nvidia.so etc.), not this distro-provided one. Without it, the ICD
+# silently fails to initialize (loader falls back to Mesa's llvmpipe/CPU)
+# with no error indicating why -- root-caused via strace on the production
+# GPU host, confirmed by testing a matching install on a throwaway container.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg=7:5.1.9-0+deb12u1 \
@@ -28,6 +35,7 @@ RUN apt-get update \
         libgomp1=12.2.0-14+deb12u1 \
         libgl1=1.6.0-1 \
         libglib2.0-0=2.74.6-2+deb12u9 \
+        libegl1=1.6.0-1 \
     && rm -rf /var/lib/apt/lists/*
 
 # RNNoise model for the arnndn filter (audio.denoise) — this ffmpeg build has

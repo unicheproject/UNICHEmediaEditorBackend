@@ -83,6 +83,23 @@ but `image.upscale` kept running on the CPU fallback regardless of
 ICD correctly; regenerate it (`nvidia-ctk cdi generate`, same command as
 above) after a driver upgrade.
 
+Switching to CDI was necessary but not sufficient: even with the Vulkan ICD
+JSON present and the CDI device correctly attached (`docker inspect` showing
+`"Driver":"cdi"`), `realesrgan-ncnn-vulkan` still silently fell back to the
+CPU (Mesa llvmpipe). `vulkaninfo`/`nvidia-smi` both worked fine on the bare
+host but not in *any* container config tried (default, `--privileged`,
+`--pid=host`, `--ipc=host`, `--cgroupns=host`, combinations of these) — ruling
+out capabilities, seccomp, AppArmor, and every namespace that can be disabled.
+`strace` on the failing process was what actually found it: the NVIDIA
+driver's Vulkan ICD `dlopen()`s the vendor-neutral `libEGL.so.1` (the GLVND
+dispatch library) during init — even for a pure-Vulkan, no-display session —
+and CDI only mounts NVIDIA's own vendor libraries (`libEGL_nvidia.so` etc.),
+not this distro-provided one. Without it, the loader logs only "Could not get
+'vkCreateInstance' via 'vk_icdGetInstanceProcAddr'" (no mention of the real,
+missing dependency) and falls back to software rendering. The image now
+installs `libegl1` for this reason (see the Dockerfile comment above that
+`apt-get install` line).
+
 ## 2. Create the deployment SSH key
 
 On a trusted administrator machine, generate a key dedicated to this repository:
