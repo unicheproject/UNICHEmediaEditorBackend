@@ -94,19 +94,22 @@ services:
     # GPU passthrough for image.upscale (Real-ESRGAN via Vulkan). Requires the
     # NVIDIA driver + nvidia-container-toolkit on the host (see DEPLOYMENT.md);
     # only worker executes capability jobs in production, so api doesn't need it.
-    # NVIDIA_DRIVER_CAPABILITIES defaults to compute,utility (CUDA-only) --
-    # graphics/display must be added explicitly or the container gets no
-    # Vulkan ICD and realesrgan-ncnn-vulkan finds no device. Using "all"
-    # (NVIDIA's own recommended value for graphics/Vulkan workloads) rather
-    # than an explicit subset list.
-    environment:
-      NVIDIA_DRIVER_CAPABILITIES: all
+    # Uses CDI (driver: cdi + nvidia.com/gpu=0, generated on the host via
+    # `nvidia-ctk cdi generate`), not the legacy `driver: nvidia` mechanism:
+    # the legacy mechanism's live capability discovery silently failed to
+    # mount the Vulkan ICD for the "graphics" capability on this host even
+    # with NVIDIA_DRIVER_CAPABILITIES=all (confirmed via `nvidia-container-cli
+    # list --graphics` finding nothing, while nvidia-smi/compute worked fine)
+    # -- realesrgan-ncnn-vulkan kept falling back to CPU. CDI's static,
+    # pre-generated device spec includes the Vulkan ICD correctly (confirmed
+    # via `nvidia-ctk cdi generate` + grep), so NVIDIA_DRIVER_CAPABILITIES no
+    # longer applies here -- CDI doesn't consult it.
     deploy:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: 1
+            - driver: cdi
+              device_ids: ["nvidia.com/gpu=0"]
               capabilities: [gpu]
 
 volumes:

@@ -53,6 +53,36 @@ The production stack talks to the remote catalogue at
 `https://catalogue.uniche-eccch.eu`. It does not join the development-only
 external `uniche` Docker network.
 
+### Optional: NVIDIA GPU passthrough (`image.upscale`)
+
+Only needed on a host with a real NVIDIA GPU; skip otherwise (`image.upscale`
+falls back to a slow CPU/Mesa path). Install the driver + Container Toolkit,
+then generate a CDI device spec and enable CDI in the Docker daemon:
+
+```bash
+sudo apt install -y nvidia-driver-535 nvidia-container-toolkit
+sudo reboot   # then confirm: nvidia-smi
+
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+nvidia-ctk cdi list   # confirm nvidia.com/gpu=0 is listed
+```
+
+Add `"features": {"cdi": true}` to `/etc/docker/daemon.json` (merge with any
+existing `runtimes` key already there), then `sudo systemctl restart docker`
+— this restarts every container on the host, briefly.
+
+`compose.prod.yml`'s `worker` service requests the GPU via this CDI device
+(`driver: cdi`, `nvidia.com/gpu=0`), not the more commonly-documented
+`driver: nvidia` + `capabilities: [gpu]` form. On at least one Ubuntu 24.04 +
+nvidia-container-toolkit 1.19.1 host, that legacy form's live capability
+discovery silently failed to mount the Vulkan ICD needed by
+`realesrgan-ncnn-vulkan` for the `graphics` capability — `nvidia-smi`/CUDA
+worked fine (proving the GPU reservation and driver were otherwise correct),
+but `image.upscale` kept running on the CPU fallback regardless of
+`NVIDIA_DRIVER_CAPABILITIES`. CDI's pre-generated spec includes the Vulkan
+ICD correctly; regenerate it (`nvidia-ctk cdi generate`, same command as
+above) after a driver upgrade.
+
 ## 2. Create the deployment SSH key
 
 On a trusted administrator machine, generate a key dedicated to this repository:
