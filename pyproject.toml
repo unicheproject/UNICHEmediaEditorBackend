@@ -20,6 +20,16 @@ dependencies = [
     "jsonschema>=4.23",
     "pyjwt[crypto]>=2.9",
     "scenedetect>=0.6.4",
+    # image.upscale: official PyTorch/CUDA Real-ESRGAN, see assets/realesrgan/README.md
+    # for why this replaced the vendored ncnn-vulkan binary. numpy pinned <2: basicsr
+    # (compiled against the numpy 1.x ABI) crashes on import under numpy 2.x.
+    "numpy<2",
+    "torch>=2.3,<2.4",
+    "torchvision>=0.18,<0.19",
+    "basicsr>=1.4.2",
+    "facexlib>=0.3.0",
+    "gfpgan>=1.3.8",
+    "realesrgan>=0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +47,23 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+# basicsr ships only an sdist (no prebuilt wheel) and needs torch + setuptools
+# present in its isolated PEP 517 build environment (its own setup.py imports
+# torch to detect CUDA availability); without this, uv tries to fetch an
+# unpinned "latest" torch just for that build step instead of reusing the one
+# already pinned above.
+[tool.uv.extra-build-dependencies]
+basicsr = ["setuptools", "torch", "numpy<2"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

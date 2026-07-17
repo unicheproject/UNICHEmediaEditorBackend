@@ -46,12 +46,6 @@ services:
     volumes:
       - .:/app
       - storage:/data/storage
-    # Passes the host GPU through for image.upscale (Real-ESRGAN via Vulkan).
-    # Disabled: no GPU is available right now. Uncomment on a host with a
-    # real GPU -- without it, image.upscale still works via Mesa's llvmpipe
-    # software Vulkan fallback, just much slower.
-    # devices:
-    #   - /dev/dri:/dev/dri
     ports:
       - "8000:8000"
     depends_on:
@@ -76,8 +70,8 @@ services:
     volumes:
       - .:/app
       - storage:/data/storage
-    # devices:
-    #   - /dev/dri:/dev/dri
+    # image.upscale requires a real CUDA GPU (none available locally, no CPU
+    # fallback by design -- see compose.prod.yml for the real GPU passthrough).
     depends_on:
       postgres:
         condition: service_healthy

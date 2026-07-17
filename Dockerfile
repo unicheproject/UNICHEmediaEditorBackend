@@ -11,31 +11,25 @@ ENV PYTHONUNBUFFERED=1 \
 
 # System tools for deterministic media capabilities, pinned to bookworm versions.
 # ffmpeg -> all video + audio ops; imagemagick -> image ops (`convert` CLI).
-# libvulkan1/mesa-vulkan-drivers/libgomp1 -> Vulkan runtime for the vendored
-# realesrgan-ncnn-vulkan binary (image.upscale); see assets/realesrgan/README.md
-# for why a Vulkan device (real GPU or Mesa's llvmpipe software fallback) is
-# required, and docker-compose.yml `worker.devices` for GPU passthrough.
+# libgomp1 -> OpenMP runtime needed by PyTorch's CPU-side ops (image.upscale).
 # libgl1/libglib2.0-0 -> runtime libs required by opencv-python, a transitive
-# dependency of the `scenedetect` package (video.shot.detect); this slim base
-# image has neither by default and opencv-python fails to import without them.
-# libegl1 -> the NVIDIA driver's Vulkan ICD dlopen()s the vendor-neutral
-# libEGL.so.1 (GLVND dispatch library) during init, even for a pure-Vulkan,
-# no-display session; CDI only mounts NVIDIA's own vendor libraries
-# (libEGL_nvidia.so etc.), not this distro-provided one. Without it, the ICD
-# silently fails to initialize (loader falls back to Mesa's llvmpipe/CPU)
-# with no error indicating why -- root-caused via strace on the production
-# GPU host, confirmed by testing a matching install on a throwaway container.
+# dependency of both `scenedetect` (video.shot.detect) and `basicsr`/
+# `realesrgan` (image.upscale); this slim base image has neither by default
+# and opencv-python fails to import without them.
+#
+# No Vulkan/EGL packages here anymore (libvulkan1, mesa-vulkan-drivers,
+# libegl1): image.upscale no longer uses the ncnn-vulkan binary. See
+# assets/realesrgan/README.md for why -- that binary produced corrupted
+# multi-tile output on real GPU hardware, replaced with the official
+# PyTorch/CUDA Real-ESRGAN implementation (no Vulkan involved at all).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg=7:5.1.9-0+deb12u1 \
         imagemagick=8:6.9.11.60+dfsg-1.6+deb12u11 \
         fonts-dejavu-core=2.37-6 \
-        libvulkan1=1.3.239.0-1 \
-        mesa-vulkan-drivers=22.3.6-1+deb12u2 \
         libgomp1=12.2.0-14+deb12u1 \
         libgl1=1.6.0-1 \
         libglib2.0-0=2.74.6-2+deb12u9 \
-        libegl1=1.6.0-1 \
     && rm -rf /var/lib/apt/lists/*
 
 # RNNoise model for the arnndn filter (audio.denoise) — this ffmpeg build has
@@ -43,16 +37,40 @@ RUN apt-get update \
 RUN mkdir -p /usr/share/rnnoise
 COPY assets/rnnoise/sh.rnnn /usr/share/rnnoise/model.rnnn
 
-# Real-ESRGAN (image.upscale) — vendored binary + model, see assets/realesrgan/README.md.
-COPY assets/realesrgan /opt/realesrgan
-RUN chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan
+# Real-ESRGAN weights (image.upscale) — see assets/realesrgan/README.md for
+# provenance/license. GPU-only, no ncnn/Vulkan binary involved (see above).
+RUN mkdir -p /opt/realesrgan
+COPY assets/realesrgan/RealESRGAN_x4plus.pth /opt/realesrgan/RealESRGAN_x4plus.pth
 
 WORKDIR /app
 
 # Install dependencies from the fully-pinned lockfile (with hashes), then the
 # project itself so `app` is importable for api/worker/tests regardless of cwd.
+# torch/torchvision (and their nvidia-*/triton transitive deps, elsewhere in
+# this file) come from PyTorch's own cu121 index; everything else from PyPI.
+# --index-strategy unsafe-best-match is required here: uv's default strategy
+# locks onto the first index that has ANY version of a package, and PyTorch's
+# index happens to also mirror common packages like certifi -- just not our
+# pinned version -- which made resolution fail outright instead of falling
+# through to PyPI. Safe in this case since both indexes are fully trusted
+# (PyPI + the official PyTorch project), unlike the dependency-confusion
+# scenario this default guards against.
 COPY requirements.lock pyproject.toml ./
-RUN uv pip install --system --require-hashes -r requirements.lock
+RUN uv pip install --system --require-hashes \
+    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    --index-strategy unsafe-best-match \
+    -r requirements.lock
+
+# basicsr 1.4.2 (unmaintained since 2022) imports
+# `torchvision.transforms.functional_tensor`, which torchvision removed in
+# 0.17 (the function it needs, rgb_to_grayscale, moved to
+# `torchvision.transforms.functional` unchanged) -- patch the one import line
+# rather than pin to an old torchvision, which would also force an old torch
+# without current CUDA/driver support.
+RUN sed -i \
+    's/from torchvision.transforms.functional_tensor import rgb_to_grayscale/from torchvision.transforms.functional import rgb_to_grayscale/' \
+    /usr/local/lib/python3.12/site-packages/basicsr/data/degradations.py
+
 COPY . .
 RUN uv pip install --system --no-deps .
 

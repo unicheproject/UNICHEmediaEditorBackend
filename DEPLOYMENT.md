@@ -53,11 +53,13 @@ The production stack talks to the remote catalogue at
 `https://catalogue.uniche-eccch.eu`. It does not join the development-only
 external `uniche` Docker network.
 
-### Optional: NVIDIA GPU passthrough (`image.upscale`)
+### NVIDIA GPU passthrough (`image.upscale`) — required, not optional
 
-Only needed on a host with a real NVIDIA GPU; skip otherwise (`image.upscale`
-falls back to a slow CPU/Mesa path). Install the driver + Container Toolkit,
-then generate a CDI device spec and enable CDI in the Docker daemon:
+`image.upscale` requires a real NVIDIA GPU and has no CPU fallback (see
+workspace `CLAUDE.md` policy and `assets/realesrgan/README.md`) — without
+this section done, the capability fails outright rather than running slow.
+Install the driver + Container Toolkit, then generate a CDI device spec and
+enable CDI in the Docker daemon:
 
 ```bash
 sudo apt install -y nvidia-driver-535 nvidia-container-toolkit
@@ -73,32 +75,29 @@ existing `runtimes` key already there), then `sudo systemctl restart docker`
 
 `compose.prod.yml`'s `worker` service requests the GPU via this CDI device
 (`driver: cdi`, `nvidia.com/gpu=0`), not the more commonly-documented
-`driver: nvidia` + `capabilities: [gpu]` form. On at least one Ubuntu 24.04 +
-nvidia-container-toolkit 1.19.1 host, that legacy form's live capability
-discovery silently failed to mount the Vulkan ICD needed by
-`realesrgan-ncnn-vulkan` for the `graphics` capability — `nvidia-smi`/CUDA
-worked fine (proving the GPU reservation and driver were otherwise correct),
-but `image.upscale` kept running on the CPU fallback regardless of
-`NVIDIA_DRIVER_CAPABILITIES`. CDI's pre-generated spec includes the Vulkan
-ICD correctly; regenerate it (`nvidia-ctk cdi generate`, same command as
-above) after a driver upgrade.
+`driver: nvidia` + `capabilities: [gpu]` form; regenerate the CDI spec
+(`nvidia-ctk cdi generate`, same command as above) after a driver upgrade.
 
-Switching to CDI was necessary but not sufficient: even with the Vulkan ICD
-JSON present and the CDI device correctly attached (`docker inspect` showing
-`"Driver":"cdi"`), `realesrgan-ncnn-vulkan` still silently fell back to the
-CPU (Mesa llvmpipe). `vulkaninfo`/`nvidia-smi` both worked fine on the bare
-host but not in *any* container config tried (default, `--privileged`,
-`--pid=host`, `--ipc=host`, `--cgroupns=host`, combinations of these) — ruling
-out capabilities, seccomp, AppArmor, and every namespace that can be disabled.
-`strace` on the failing process was what actually found it: the NVIDIA
-driver's Vulkan ICD `dlopen()`s the vendor-neutral `libEGL.so.1` (the GLVND
-dispatch library) during init — even for a pure-Vulkan, no-display session —
-and CDI only mounts NVIDIA's own vendor libraries (`libEGL_nvidia.so` etc.),
-not this distro-provided one. Without it, the loader logs only "Could not get
-'vkCreateInstance' via 'vk_icdGetInstanceProcAddr'" (no mention of the real,
-missing dependency) and falls back to software rendering. The image now
-installs `libegl1` for this reason (see the Dockerfile comment above that
-`apt-get install` line).
+**Historical context (why CDI, not `driver: nvidia`):** `image.upscale`
+originally ran on the vendored `realesrgan-ncnn-vulkan` binary (ncnn/Vulkan),
+which needed a working Vulkan ICD inside the container. On at least one
+Ubuntu 24.04 + nvidia-container-toolkit 1.19.1 host, the legacy `driver:
+nvidia` mechanism's live capability discovery silently failed to mount that
+Vulkan ICD for the `graphics` capability — `nvidia-smi`/CUDA worked fine
+(proving the GPU reservation and driver were otherwise correct), but the
+capability kept running on a CPU fallback regardless of
+`NVIDIA_DRIVER_CAPABILITIES`. Switching to CDI fixed the ICD-mounting problem,
+but a second, deeper issue remained: `vulkaninfo`/`nvidia-smi` both worked on
+the bare host but not in *any* container config tried (default,
+`--privileged`, `--pid=host`, `--ipc=host`, `--cgroupns=host`) — `strace`
+eventually found that the NVIDIA driver's Vulkan ICD `dlopen()`s the
+vendor-neutral `libEGL.so.1` during init, which CDI doesn't mount (only
+NVIDIA's own vendor libraries). Both findings are moot for what runs today —
+`image.upscale` was rewritten to use the official PyTorch/CUDA Real-ESRGAN
+implementation instead (see `assets/realesrgan/README.md`), which needs CUDA
+only, no Vulkan/EGL at all — but CDI remains the right passthrough mechanism
+regardless, and is documented here in case a future capability needs Vulkan
+again.
 
 ## 2. Create the deployment SSH key
 

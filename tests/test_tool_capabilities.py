@@ -33,9 +33,14 @@ async def _project(client: AsyncClient, name: str) -> str:
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 HAVE_CONVERT = shutil.which("convert") is not None
 HAVE_RNNOISE_MODEL = os.path.exists(ffmpeg.DEFAULT_RNNOISE_MODEL)
-HAVE_REALESRGAN = os.path.exists(realesrgan.REALESRGAN_BIN) and os.path.exists(
-    os.path.join(realesrgan.REALESRGAN_MODELS_DIR, f"{realesrgan.DEFAULT_MODEL}.bin")
-)
+# No CPU fallback by design (workspace CLAUDE.md) -- the execution test only
+# runs where a real CUDA GPU is present.
+_HAVE_CUDA = False
+if importlib.util.find_spec("torch") is not None:
+    import torch as _torch
+
+    _HAVE_CUDA = _torch.cuda.is_available()
+HAVE_REALESRGAN = os.path.exists(realesrgan.MODEL_PATH) and _HAVE_CUDA
 HAVE_SCENEDETECT = importlib.util.find_spec("scenedetect") is not None
 
 TOOL_IDS = {
@@ -262,7 +267,7 @@ async def test_audio_denoise_execution(client: AsyncClient, tmp_path) -> None:
 
 
 @pytest.mark.skipif(
-    not HAVE_REALESRGAN, reason="realesrgan-ncnn-vulkan binary/model not vendored at expected path"
+    not HAVE_REALESRGAN, reason="requires a CUDA GPU (no CPU fallback by design)"
 )
 async def test_image_upscale_execution(client: AsyncClient, tmp_path) -> None:
     src = tmp_path / "i.png"
