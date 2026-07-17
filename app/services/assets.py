@@ -19,6 +19,7 @@ from app.core.errors import (
 )
 from app.models.asset import Asset
 from app.models.enums import MediaType
+from app.schemas.asset import AssetUpdate
 from app.services.projects import get_project
 from app.services.storage import get_storage, safe_filename
 
@@ -129,6 +130,19 @@ async def soft_delete_asset(session: AsyncSession, asset_id: uuid.UUID) -> None:
     asset = await get_asset(session, asset_id)
     asset.deleted_at = datetime.now(UTC)
     await session.commit()
+
+
+async def update_asset(
+    session: AsyncSession, asset_id: uuid.UUID, data: AssetUpdate
+) -> Asset:
+    """Rename an asset: local metadata only, no physical file/storage_path change."""
+    asset = await get_asset(session, asset_id)
+    fields = data.model_dump(exclude_unset=True)
+    if "original_filename" in fields:
+        asset.original_filename = fields["original_filename"]
+    await session.commit()
+    await session.refresh(asset)
+    return asset
 
 
 async def create_derived_asset(

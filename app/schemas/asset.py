@@ -5,8 +5,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from pydantic import BaseModel, Field
+
 from app.models.enums import MediaType
 from app.schemas.common import ORMModel
+
+
+class AssetUpdate(BaseModel):
+    original_filename: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class AssetRead(ORMModel):

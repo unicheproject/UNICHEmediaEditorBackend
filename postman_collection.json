@@ -369,6 +369,22 @@
           }
         },
         {
+          "name": "Rename Asset",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"original_filename\": \"vacation.png\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets/{{asset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets", "{{asset_id}}"]
+            }
+          }
+        },
+        {
           "name": "Download Asset",
           "request": {
             "method": "GET",

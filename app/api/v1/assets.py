@@ -1,4 +1,4 @@
-"""Asset endpoints: upload, list, metadata, download, soft delete.
+"""Asset endpoints: upload, list, metadata, rename, download, soft delete.
 
 Every route is project-scoped: routes with ``project_id`` in the path guard via
 ``require_project``; asset-id routes resolve the owning project via
@@ -18,7 +18,7 @@ from app.core.database import get_session
 from app.core.errors import ValidationError
 from app.models.asset import Asset
 from app.models.project import Project
-from app.schemas.asset import AssetRead
+from app.schemas.asset import AssetRead, AssetUpdate
 from app.services import assets as svc
 from app.services.storage import get_storage
 
@@ -76,6 +76,17 @@ async def download_asset(
         media_type=asset.mime_type,
         filename=asset.original_filename,
     )
+
+
+@router.patch("/assets/{asset_id}", response_model=AssetRead)
+async def update_asset(
+    asset_id: uuid.UUID,
+    data: AssetUpdate,
+    _asset: Asset = Depends(require_asset_access),
+    session: AsyncSession = Depends(get_session),
+) -> AssetRead:
+    asset = await svc.update_asset(session, asset_id, data)
+    return AssetRead.model_validate(asset)
 
 
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)

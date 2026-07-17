@@ -34,10 +34,26 @@ async def test_upload_list_get_download_delete(
     assert resp.status_code == 200
     assert resp.content == b"fake-image-bytes"
 
+    # Rename
+    resp = await client.patch(f"{API}/assets/{aid}", json={"original_filename": "vacation.png"})
+    assert resp.status_code == 200
+    assert resp.json()["original_filename"] == "vacation.png"
+    resp = await client.get(f"{API}/assets/{aid}/download")
+    assert resp.status_code == 200
+    assert resp.headers["content-disposition"].endswith('filename="vacation.png"')
+
+    # Rename rejects an empty name
+    resp = await client.patch(f"{API}/assets/{aid}", json={"original_filename": ""})
+    assert resp.status_code == 422
+
     # Soft delete
     resp = await client.delete(f"{API}/assets/{aid}")
     assert resp.status_code == 204
     resp = await client.get(f"{API}/assets/{aid}")
+    assert resp.status_code == 404
+
+    # Renaming a deleted (gone) asset 404s
+    resp = await client.patch(f"{API}/assets/{aid}", json={"original_filename": "x.png"})
     assert resp.status_code == 404
 
 

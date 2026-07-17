@@ -151,7 +151,7 @@ curl -s -X POST $BASE/jobs \
 |------|---------------|
 | System | `GET /health` |
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
-| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `GET /api/v1/assets/{id}/download` · `DELETE /api/v1/assets/{id}` |
+| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
