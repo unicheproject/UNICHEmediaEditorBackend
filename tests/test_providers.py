@@ -36,11 +36,21 @@ def _settings(**overrides) -> Settings:
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, content: bytes, headers: dict[str, str]) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        content: bytes,
+        headers: dict[str, str],
+        json_body: dict | None = None,
+    ) -> None:
         self.status_code = status_code
         self.content = content
         self.headers = headers
         self.text = content.decode(errors="replace")
+        self._json_body = json_body
+
+    def json(self) -> dict:
+        return self._json_body if self._json_body is not None else {}
 
 
 class _FakeAsyncClient:
@@ -55,8 +65,14 @@ class _FakeAsyncClient:
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
-    async def post(self, url, headers=None, json=None):  # noqa: A002
-        _FakeAsyncClient.last_request = {"url": url, "headers": headers, "json": json}
+    async def post(self, url, headers=None, json=None, data=None, files=None):  # noqa: A002
+        _FakeAsyncClient.last_request = {
+            "url": url,
+            "headers": headers,
+            "json": json,
+            "data": data,
+            "files": files,
+        }
         return self._response
 
 
@@ -204,7 +220,7 @@ async def test_openrouter_tts_rejects_non_audio_content_type(
 
 async def test_openrouter_tts_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     class _TimeoutClient(_FakeAsyncClient):
-        async def post(self, url, headers=None, json=None):  # noqa: A002
+        async def post(self, url, headers=None, json=None, data=None, files=None):  # noqa: A002
             raise httpx.TimeoutException("timed out")
 
     monkeypatch.setattr(
@@ -215,4 +231,92 @@ async def test_openrouter_tts_timeout_raises(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(ProviderError, match="timed out"):
         await provider.infer(
             InferenceRequest(capability_id="audio.tts", payload={"text": "Hi"})
+        )
+
+
+async def test_openrouter_transcribe_returns_text_and_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    audio_path = tmp_path / "clip.wav"
+    audio_path.write_bytes(b"fake-wav-bytes")
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(
+            200,
+            b"",
+            {"content-type": "application/json", "X-Generation-Id": "gen-2"},
+            json_body={"text": "Hello world", "language": "en"},
+        ),
+    )
+    provider = OpenRouterInferenceProvider(_settings())
+
+    result = await provider.infer(
+        InferenceRequest(capability_id="audio.transcribe", file_path=str(audio_path))
+    )
+
+    assert result["text"] == "Hello world"
+    assert result["language"] == "en"
+    assert result["provider"] == "openrouter"
+    assert result["model"] == "openai/whisper-large-v3-turbo"
+    assert result["generation_id"] == "gen-2"
+    sent = _FakeAsyncClient.last_request
+    assert sent["url"] == "https://openrouter.ai/api/v1/audio/transcriptions"
+    assert sent["data"]["model"] == "openai/whisper-large-v3-turbo"
+    assert sent["data"]["response_format"] == "verbose_json"
+    assert sent["files"]["file"][0] == "clip.wav"
+    assert sent["files"]["file"][1] == b"fake-wav-bytes"
+    assert sent["headers"]["Authorization"] == "Bearer sk-test"
+    assert "Content-Type" not in sent["headers"]
+
+
+async def test_openrouter_transcribe_sends_requested_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    audio_path = tmp_path / "clip.mp3"
+    audio_path.write_bytes(b"fake-mp3-bytes")
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(200, b"", {"content-type": "application/json"}, json_body={"text": "Γειά"}),
+    )
+    provider = OpenRouterInferenceProvider(_settings())
+
+    result = await provider.infer(
+        InferenceRequest(
+            capability_id="audio.transcribe",
+            payload={"language": "el"},
+            file_path=str(audio_path),
+        )
+    )
+
+    # Response omitted "language" -> falls back to what was requested.
+    assert result["language"] == "el"
+    assert _FakeAsyncClient.last_request["data"]["language"] == "el"
+
+
+async def test_openrouter_transcribe_requires_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = OpenRouterInferenceProvider(_settings())
+    with pytest.raises(ProviderError, match="requires an input asset"):
+        await provider.infer(InferenceRequest(capability_id="audio.transcribe", payload={}))
+
+
+async def test_openrouter_transcribe_requires_api_key(tmp_path) -> None:
+    audio_path = tmp_path / "clip.wav"
+    audio_path.write_bytes(b"x")
+    provider = OpenRouterInferenceProvider(_settings(openrouter_api_key=""))
+    with pytest.raises(ProviderError, match="OPENROUTER_API_KEY"):
+        await provider.infer(
+            InferenceRequest(capability_id="audio.transcribe", file_path=str(audio_path))
+        )
+
+
+async def test_openrouter_transcribe_error_status_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    audio_path = tmp_path / "clip.wav"
+    audio_path.write_bytes(b"x")
+    _patch_client(monkeypatch, _FakeResponse(402, b"insufficient credits", {}))
+    provider = OpenRouterInferenceProvider(_settings())
+    with pytest.raises(ProviderError, match="402"):
+        await provider.infer(
+            InferenceRequest(capability_id="audio.transcribe", file_path=str(audio_path))
         )

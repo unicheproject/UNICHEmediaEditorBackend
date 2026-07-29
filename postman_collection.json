@@ -485,7 +485,7 @@
           ]
         },
         {
-          "name": "Create audio.transcribe Job",
+          "name": "Create audio.transcribe Job (OpenRouter → real Whisper)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -497,7 +497,8 @@
               "raw": "{{base_url}}/api/v1/jobs",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "jobs"]
-            }
+            },
+            "description": "Real speech-to-text via OpenRouter's hosted Whisper endpoint (openai/whisper-large-v3-turbo by default) -- previously always returned fake placeholder text regardless of INFERENCE_PROVIDER. Requires INFERENCE_PROVIDER=openrouter + OPENROUTER_API_KEY server-side (falls back to a deterministic mock transcript otherwise). Optional input.language hints the language as an ISO-639-1 code (e.g. \"en\"); omit to auto-detect. On success, job.output = {text, language, ...} -- note language comes back as the detected language's name (e.g. \"English\"), not an ISO code. Accepts audio (mp3/wav/m4a/flac/ogg) or video assets, but real transcription may reject video-container formats the endpoint doesn't understand (mp4 works, mov/mkv may not) -- surfaces as a normal job failure with a clear provider error."
           },
           "event": [
             {

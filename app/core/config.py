@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # Assumed sample rate (Hz) for headerless "pcm" responses, used to wrap
     # them in a WAV container. See _wrap_pcm_as_wav in app/providers/openrouter.py.
     openrouter_tts_pcm_sample_rate: int = 24000
+    # --- OpenRouter STT (audio.transcribe, when INFERENCE_PROVIDER=openrouter) ---
+    # Shares openrouter_api_key / openrouter_base_url above. Turbo trades a
+    # little accuracy for much lower latency/cost -- a good default for an
+    # interactive editor; swap to "openai/whisper-large-v3" for max accuracy.
+    openrouter_transcribe_model: str = "openai/whisper-large-v3-turbo"
+
     # Optional: sent as HTTP-Referer / X-Title on OpenRouter calls (attributes
     # requests for their public rankings; unrelated to auth).
     openrouter_site_url: str = ""
