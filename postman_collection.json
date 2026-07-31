@@ -621,6 +621,32 @@
           ]
         },
         {
+          "name": "Create image.kenburns Job (tool → derived video, OpenCV + FFmpeg zoompan)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"image.kenburns\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"input\": { \"duration\": 5, \"zoom\": 1.2 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Deterministic, local (OpenCV face/edge-density detection + FFmpeg zoompan) -- no external API call. Turns a still image into a pan-and-zoom video clip. The pan/zoom target is auto-detected (face detection, falling back to the most visually 'busy' region) -- not user-specified. All input fields optional: duration (seconds, default 5), zoom (target zoom factor, default 1.15), direction ('in'/'out', default 'in'), width/height (default 1920x1080). Output includes focus_x/focus_y (0.0-1.0) showing where it detected the target -- useful if a result looks like it zoomed 'the wrong way'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create video.thumbnail Job (tool → derived image)",
           "request": {
             "method": "POST",
@@ -660,6 +686,32 @@
               "path": ["api", "v1", "jobs"]
             },
             "description": "Deterministic, local (PySceneDetect ContentDetector) -- no external API call. JSON-only result: output.shots[] = [{index, start, end, start_frame, end_frame}], no derived asset. Optional input.threshold (0-255, lower = more sensitive; default 27)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('job_id', pm.response.json().id);"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create video.lowerthird Job (tool → derived video)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capability_id\": \"video.lowerthird\",\n  \"project_id\": \"{{project_id}}\",\n  \"asset_id\": \"{{video_asset_id}}\",\n  \"input\": { \"text\": \"Dr. Jane Doe\", \"caption\": \"Curator\", \"start\": 2, \"duration\": 4 }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Deterministic, local (ImageMagick graphic + FFmpeg overlay) -- no external API call. Overlays a name/caption graphic during [start, start+duration) without replacing the frame (unlike media.titlecard, which is a full clip). Only input.text is required. Optional: input.caption (second line), input.start/input.duration (seconds, default 0/5), input.position ('bottom-left'/'bottom-center'/'bottom-right', default 'bottom-left'), input.background/input.foreground (hex colors, same defaults as media.titlecard: #101418/#ffffff)."
           },
           "event": [
             {
