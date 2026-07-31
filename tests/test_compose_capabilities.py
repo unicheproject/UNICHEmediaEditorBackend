@@ -113,6 +113,37 @@ async def test_slideshow_then_compose(client: AsyncClient, tmp_path) -> None:
     assert meta["source_asset_id"] is not None
 
 
+async def test_lowerthird(client: AsyncClient, tmp_path) -> None:
+    pid = await _project(client)
+    vid_path = tmp_path / "v.mp4"
+    _make_video(str(vid_path))
+    vid = await _upload(client, pid, str(vid_path), "v.mp4", "video/mp4")
+
+    job = await _run_job(client, {
+        "capability_id": "video.lowerthird", "project_id": pid, "asset_id": vid,
+        "input": {
+            "text": "Dr. Jane Doe", "caption": "Curator", "start": 0, "duration": 1,
+            "position": "bottom-left",
+        },
+    })
+    out = _first_output(job)
+    assert out["media_type"] == "video"
+
+
+async def test_lowerthird_rejects_bad_position(client: AsyncClient, tmp_path) -> None:
+    pid = await _project(client)
+    vid_path = tmp_path / "v.mp4"
+    _make_video(str(vid_path))
+    vid = await _upload(client, pid, str(vid_path), "v.mp4", "video/mp4")
+
+    job = await _run_job(client, {
+        "capability_id": "video.lowerthird", "project_id": pid, "asset_id": vid,
+        "input": {"text": "Name", "position": "top-left"},
+    })
+    assert job["status"] == "failed"
+    assert "position" in job["error"]
+
+
 async def test_subtitle_embed_soft(client: AsyncClient, tmp_path) -> None:
     pid = await _project(client)
     vid_path = tmp_path / "v.mp4"

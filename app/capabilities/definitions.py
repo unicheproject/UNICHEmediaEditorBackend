@@ -261,6 +261,28 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "required": ["text"],
     },
     {
+        "id": "video.lowerthird",
+        "title": "Lower Third",
+        "description": (
+            "Overlay a lower-third text graphic (name/caption) onto a video "
+            "for a given time window."
+        ),
+        "media": _V,
+        "properties": {
+            "text": _STR,
+            "caption": _STR,
+            "start": _NUM,
+            "duration": _NUM,
+            "position": {
+                "type": "string",
+                "enum": ["bottom-left", "bottom-center", "bottom-right"],
+            },
+            "background": _STR,
+            "foreground": _STR,
+        },
+        "required": ["text"],
+    },
+    {
         "id": "video.subtitle.embed",
         "title": "Embed Subtitles",
         "description": (

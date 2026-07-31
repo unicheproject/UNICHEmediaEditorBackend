@@ -307,6 +307,40 @@ def _escape_subs(path: str) -> str:
     return path.replace("\\", "\\\\").replace(":", "\\:")
 
 
+_LOWERTHIRD_POSITIONS = {
+    "bottom-left": "20:main_h-overlay_h-20",
+    "bottom-center": "(main_w-overlay_w)/2:main_h-overlay_h-20",
+    "bottom-right": "main_w-overlay_w-20:main_h-overlay_h-20",
+}
+
+
+async def overlay_lowerthird(
+    video: str,
+    overlay_png: str,
+    dst: str,
+    *,
+    start: float,
+    duration: float,
+    position: str = "bottom-left",
+) -> None:
+    """Overlay a (small, pre-rendered) graphic onto `video` for [start, start+duration)."""
+    if position not in _LOWERTHIRD_POSITIONS:
+        raise ToolError(
+            f"position must be one of {sorted(_LOWERTHIRD_POSITIONS)}, got {position!r}"
+        )
+    _num(start, "start")
+    _num(duration, "duration")
+    xy = _LOWERTHIRD_POSITIONS[position]
+    filt = f"[0:v][1:v]overlay={xy}:enable='between(t,{start},{start + duration})'[v]"
+    await runner.run(
+        [
+            *_BASE, "-i", video, "-i", overlay_png,
+            "-filter_complex", filt, "-map", "[v]", "-map", "0:a?",
+            *_PIX, "-c:a", "copy", dst,
+        ]
+    )
+
+
 async def subtitle_embed(video: str, subtitle: str, dst: str, mode: str = "soft") -> None:
     if mode == "burn":
         await runner.run(

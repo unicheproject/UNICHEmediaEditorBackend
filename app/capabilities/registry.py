@@ -36,6 +36,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
     audio_ops.AudioTranscodeHandler(),
     compose_ops.ImageSlideshowHandler(),
     compose_ops.MediaTitlecardHandler(),
+    compose_ops.VideoLowerthirdHandler(),
     compose_ops.VideoSubtitleEmbedHandler(),
     compose_ops.AudioMixHandler(),
     compose_ops.VideoComposeHandler(),

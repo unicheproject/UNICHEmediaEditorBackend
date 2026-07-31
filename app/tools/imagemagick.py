@@ -71,3 +71,30 @@ async def render_text_card(
         args += ["-font", font]
     args += [f"caption:{text}", dst]
     await runner.run(args)
+
+
+async def render_lowerthird(
+    dst: str,
+    text: str,
+    caption: str | None = None,
+    *,
+    width: int = 640,
+    height: int = 160,
+    background: str = "#101418",
+    foreground: str = "#ffffff",
+    font: str | None = DEFAULT_FONT,
+) -> None:
+    """Render a small solid-background name/caption box PNG (not full-frame) --
+    meant to be overlaid onto an existing video, not to fill it."""
+    args = [
+        CONVERT,
+        "-size", f"{_int(width, 'width')}x{_int(height, 'height')}",
+        f"xc:{background}", "-gravity", "northwest", "-fill", foreground,
+    ]
+    if font:
+        args += ["-font", font]
+    args += ["-pointsize", "36", "-annotate", "+20+16", text]
+    if caption:
+        args += ["-pointsize", "22", "-annotate", "+20+72", caption]
+    args.append(dst)
+    await runner.run(args)

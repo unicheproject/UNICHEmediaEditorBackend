@@ -70,6 +70,39 @@ class MediaTitlecardHandler(LocalToolHandler):
         return HandlerResult(data={"operation": "media.titlecard"}, outputs=[out])
 
 
+class VideoLowerthirdHandler(LocalToolHandler):
+    capability_id = "video.lowerthird"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        video = require_input(ctx)
+        text = require(ctx.params, "text")
+        caption = ctx.params.get("caption")
+        start = ctx.params.get("start", 0)
+        duration = ctx.params.get("duration", 5)
+        position = ctx.params.get("position", "bottom-left")
+        png = ctx.out_path("lowerthird.png")
+        await imagemagick.render_lowerthird(
+            str(png),
+            str(text),
+            str(caption) if caption else None,
+            background=ctx.params.get("background", "#101418"),
+            foreground=ctx.params.get("foreground", "#ffffff"),
+        )
+        out = OutputFile(
+            path=ctx.out_path(f"{input_stem(ctx)}_lowerthird.mp4"),
+            filename=f"{input_stem(ctx)}_lowerthird.mp4",
+            media_type=MediaType.video,
+        )
+        await ffmpeg.overlay_lowerthird(
+            video, str(png), str(out.path),
+            start=start, duration=duration, position=position,
+        )
+        return HandlerResult(
+            data={"operation": "video.lowerthird", "start": start, "duration": duration},
+            outputs=[out],
+        )
+
+
 class VideoSubtitleEmbedHandler(LocalToolHandler):
     capability_id = "video.subtitle.embed"
 
