@@ -243,6 +243,24 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "required": ["asset_ids"],
     },
     {
+        "id": "image.kenburns",
+        "title": "Ken Burns Pan & Zoom",
+        "description": (
+            "Apply a saliency-aware pan-and-zoom animation to a still image, "
+            "producing a video clip. The pan/zoom target is auto-detected "
+            "(face detection, falling back to edge/contrast density) rather "
+            "than user-specified."
+        ),
+        "media": _I,
+        "properties": {
+            "duration": _NUM,
+            "zoom": _NUM,
+            "direction": {"type": "string", "enum": ["in", "out"]},
+            "width": _INT,
+            "height": _INT,
+        },
+    },
+    {
         "id": "media.titlecard",
         "title": "Title Card",
         "description": (

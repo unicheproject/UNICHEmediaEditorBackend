@@ -82,6 +82,42 @@ async def test_titlecard(client: AsyncClient) -> None:
     assert out["media_type"] == "video"
 
 
+async def test_kenburns(client: AsyncClient, tmp_path) -> None:
+    pid = await _project(client)
+    img_path = tmp_path / "photo.png"
+    _run([
+        "convert", "-size", "320x240", "xc:#222222",
+        "-fill", "white", "-draw", "circle 260,60 280,60",
+        str(img_path),
+    ])
+    asset = await _upload(client, pid, str(img_path), "photo.png", "image/png")
+
+    job = await _run_job(client, {
+        "capability_id": "image.kenburns", "project_id": pid, "asset_id": asset,
+        "input": {"duration": 1, "zoom": 1.3, "direction": "in", "width": 320, "height": 240},
+    })
+    out = _first_output(job)
+    assert out["media_type"] == "video"
+    # The bright spot is in the upper-right -- the auto-detected focus point
+    # should reflect that, not default to dead-center.
+    assert job["output"]["focus_x"] > 0.5
+    assert job["output"]["focus_y"] < 0.5
+
+
+async def test_kenburns_rejects_bad_direction(client: AsyncClient, tmp_path) -> None:
+    pid = await _project(client)
+    img_path = tmp_path / "photo.png"
+    _make_image(str(img_path), "red")
+    asset = await _upload(client, pid, str(img_path), "photo.png", "image/png")
+
+    job = await _run_job(client, {
+        "capability_id": "image.kenburns", "project_id": pid, "asset_id": asset,
+        "input": {"direction": "sideways"},
+    })
+    assert job["status"] == "failed"
+    assert "direction" in job["error"]
+
+
 async def test_slideshow_then_compose(client: AsyncClient, tmp_path) -> None:
     pid = await _project(client)
     imgs = []

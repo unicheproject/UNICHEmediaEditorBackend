@@ -8,11 +8,12 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     assert resp.status_code == 200
     caps = resp.json()
     ids = {c["id"] for c in caps}
-    # A representative sample of the registered capabilities (14 AI + 19 tools).
+    # A representative sample of the registered capabilities (14 AI + 20 tools).
     assert {"image.caption", "audio.transcribe", "video.upscale"} <= ids
     assert {"video.trim", "image.resize", "audio.normalize"} <= ids
     assert {"image.slideshow", "media.titlecard", "video.compose", "video.lowerthird"} <= ids
-    assert len(caps) == 38
+    assert "image.kenburns" in ids
+    assert len(caps) == 39
 
 
 async def test_get_capability_detail(client: AsyncClient) -> None:

@@ -12,7 +12,7 @@ from app.capabilities.handlers._util import input_stem, require, require_input
 from app.capabilities.handlers.base import LocalToolHandler
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
-from app.tools import ffmpeg, imagemagick
+from app.tools import ffmpeg, imagemagick, saliency
 
 DEFAULT_W, DEFAULT_H = 1920, 1080
 
@@ -48,6 +48,32 @@ class ImageSlideshowHandler(LocalToolHandler):
         )
         return HandlerResult(
             data={"operation": "image.slideshow", "images": len(ctx.input_paths)},
+            outputs=[out],
+        )
+
+
+class ImageKenburnsHandler(LocalToolHandler):
+    capability_id = "image.kenburns"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        image = require_input(ctx)
+        w, h = _wh(ctx)
+        duration = ctx.params.get("duration", 5)
+        zoom = ctx.params.get("zoom", 1.15)
+        direction = ctx.params.get("direction", "in")
+        focus_x, focus_y = await saliency.find_focus_point(image)
+        out = _video_out(ctx, f"{input_stem(ctx)}_kenburns")
+        await ffmpeg.kenburns(
+            image, str(out.path),
+            duration=duration, zoom=zoom, direction=direction,
+            width=w, height=h, focus_x=focus_x, focus_y=focus_y,
+        )
+        return HandlerResult(
+            data={
+                "operation": "image.kenburns",
+                "focus_x": round(focus_x, 4),
+                "focus_y": round(focus_y, 4),
+            },
             outputs=[out],
         )
 

@@ -281,6 +281,53 @@ async def still_to_clip(image: str, dst: str, duration: float, width: int, heigh
     )
 
 
+async def kenburns(
+    image: str,
+    dst: str,
+    *,
+    duration: float,
+    zoom: float,
+    direction: str,
+    width: int,
+    height: int,
+    focus_x: float,
+    focus_y: float,
+) -> None:
+    """Ken Burns pan-and-zoom: a still image -> a video clip zooming toward
+    (focus_x, focus_y) (fractions of image width/height).
+
+    Deliberately does NOT `-loop 1` the input: zoompan expands a single still
+    frame into `d` output frames itself, and combining the two breaks the pan
+    -- each looped copy arrives as a "new" input frame, which resets zoompan's
+    internal zoom accumulator instead of advancing it (confirmed empirically:
+    with -loop 1, zoom animates correctly but x/y stay frozen at their
+    frame-0 values; without it, both animate together as expected).
+    """
+    _num(duration, "duration")
+    _num(zoom, "zoom")
+    if direction not in ("in", "out"):
+        raise ToolError(f"direction must be 'in' or 'out', got {direction!r}")
+    if zoom <= 1.0:
+        raise ToolError(f"zoom must be greater than 1.0, got {zoom!r}")
+
+    frames = max(round(duration * FPS), 1)
+    step = (zoom - 1.0) / frames
+    zoompan = (
+        f"zoompan=z='min(zoom+{step},{zoom})':"
+        f"x='{focus_x}*iw-(iw/zoom/2)':y='{focus_y}*ih-(ih/zoom/2)':"
+        f"d={frames}:s={_num(width, 'width')}x{_num(height, 'height')}:fps={FPS}"
+    )
+    vf = zoompan if direction == "in" else f"{zoompan},reverse"
+
+    await runner.run(
+        [
+            *_BASE, "-i", image, *_ANULL,
+            "-vf", vf, "-map", "0:v", "-map", "1:a",
+            *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+        ]
+    )
+
+
 async def slideshow(
     images: list[str], dst: str, seconds_per_image: float, width: int, height: int
 ) -> None:
