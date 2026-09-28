@@ -10,6 +10,7 @@ API = "/api/v1"
 HAVE_IMAGEMAGICK = (
     shutil.which("convert") is not None and shutil.which("identify") is not None
 )
+HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
 
 def _make_image(path: str) -> None:
@@ -56,6 +57,7 @@ async def test_upload_list_get_download_delete(
     resp = await client.get(f"{API}/assets/{aid}/download")
     assert resp.status_code == 200
     assert resp.headers["content-disposition"].endswith('filename="vacation.png"')
+    assert resp.content == b"fake-image-bytes"
 
     # Rename rejects an empty name
     resp = await client.patch(f"{API}/assets/{aid}", json={"original_filename": ""})
@@ -158,3 +160,58 @@ async def test_corrupt_tiff_thumbnail_returns_controlled_tool_error(
     )
     assert thumbnail.status_code == 500
     assert thumbnail.json()["error"]["code"] == "tool_error"
+
+
+@pytest.mark.skipif(
+    not (HAVE_FFMPEG and HAVE_IMAGEMAGICK),
+    reason="FFmpeg and ImageMagick are required",
+)
+async def test_video_thumbnail_is_a_decodable_jpeg_and_preserves_download(
+    client: AsyncClient, make_project, tmp_path
+) -> None:
+    source = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=#cc3300:size=160x90:rate=10:duration=1",
+            "-c:v",
+            "mpeg4",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    original = source.read_bytes()
+    pid = await make_project()
+
+    with source.open("rb") as stream:
+        uploaded = await client.post(
+            f"{API}/projects/{pid}/assets",
+            files={"file": (source.name, stream, "video/mp4")},
+        )
+    assert uploaded.status_code == 201, uploaded.text
+    asset_id = uploaded.json()["id"]
+
+    thumbnail = await client.get(f"{API}/assets/{asset_id}/thumbnail")
+    assert thumbnail.status_code == 200, thumbnail.text
+    assert thumbnail.headers["content-type"] == "image/jpeg"
+
+    output = tmp_path / "video-thumbnail.jpg"
+    output.write_bytes(thumbnail.content)
+    identified = subprocess.run(
+        ["identify", "-format", "%m %wx%h", str(output)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert identified == "JPEG 160x90"
+
+    downloaded = await client.get(f"{API}/assets/{asset_id}/download")
+    assert downloaded.status_code == 200
+    assert downloaded.content == original

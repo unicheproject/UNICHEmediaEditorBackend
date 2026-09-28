@@ -397,7 +397,7 @@
           }
         },
         {
-          "name": "Get Image Thumbnail",
+          "name": "Get Image or Video Thumbnail",
           "request": {
             "method": "GET",
             "header": [],
