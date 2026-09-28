@@ -107,6 +107,27 @@ def _make_video(path: str) -> None:
     ])
 
 
+def _make_color_video(path: str, color: str) -> None:
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+        "-i", f"color=c={color}:duration=1:size=320x240:rate=15", path,
+    ])
+
+
+def _frame_rgb(path: str, timestamp: float) -> tuple[int, int, int]:
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-loglevel", "error", "-ss", str(timestamp), "-i", path,
+            "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo",
+            "-pix_fmt", "rgb24", "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    assert len(proc.stdout) == 3
+    return proc.stdout[0], proc.stdout[1], proc.stdout[2]
+
+
 def _make_audio(path: str) -> None:
     _run([
         "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
@@ -177,6 +198,41 @@ async def _run_job(client: AsyncClient, capability: str, asset_id: str, params: 
     )
     assert resp.status_code == 201, resp.text
     return (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+async def test_video_concat_preserves_explicit_asset_order(
+    client: AsyncClient, tmp_path
+) -> None:
+    pid = await _project(client, "Ordered video concat")
+    asset_ids = []
+    for label, color in [("a", "red"), ("b", "lime"), ("c", "blue")]:
+        path = tmp_path / f"{label}.mp4"
+        _make_color_video(str(path), color)
+        asset_ids.append(await _upload(client, pid, str(path), path.name, "video/mp4"))
+
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "video.concat",
+            "project_id": pid,
+            "input": {"asset_ids": asset_ids},
+        },
+    )
+    assert response.status_code == 201, response.text
+    job = (await client.get(f"{API}/jobs/{response.json()['id']}")).json()
+    assert job["status"] == "succeeded", job.get("error")
+
+    output = job["output"]["outputs"][0]
+    download = await client.get(output["download_path"])
+    assert download.status_code == 200, download.text
+    rendered = tmp_path / "ordered.mp4"
+    rendered.write_bytes(download.content)
+
+    red, green, blue = (_frame_rgb(str(rendered), t) for t in (0.5, 1.5, 2.5))
+    assert red[0] > red[1] + 50 and red[0] > red[2] + 50
+    assert green[1] > green[0] + 50 and green[1] > green[2] + 50
+    assert blue[2] > blue[0] + 50 and blue[2] > blue[1] + 50
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
