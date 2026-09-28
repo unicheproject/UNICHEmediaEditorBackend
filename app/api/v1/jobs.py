@@ -86,11 +86,12 @@ async def list_project_jobs(
     project_id: uuid.UUID,
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
+    status: JobStatus | None = Query(None),
     session: AsyncSession = Depends(get_session),
     _project: Project = Depends(require_project),
 ) -> Page[JobRead]:
     jobs, total = await svc.list_jobs_for_project(
-        session, project_id, limit=limit, offset=offset
+        session, project_id, limit=limit, offset=offset, status=status
     )
     return Page[JobRead](
         items=[JobRead.model_validate(j) for j in jobs],

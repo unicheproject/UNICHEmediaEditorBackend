@@ -219,3 +219,79 @@ async def test_list_jobs_pagination(client: AsyncClient, make_project) -> None:
 
     # limit above the cap is rejected.
     assert (await client.get(f"{API}/projects/{pid}/jobs?limit=999")).status_code == 422
+
+
+async def test_job_history_retains_audit_data_and_filters_by_status(
+    client: AsyncClient, make_project
+) -> None:
+    pid, aid = await _project_with_asset(client, make_project, "pic.png", "image/png")
+    other_pid = await make_project("Other project")
+    created: list[dict] = []
+
+    for index in range(11):
+        response = await client.post(
+            f"{API}/jobs",
+            json={
+                "capability_id": "image.caption",
+                "project_id": pid,
+                "asset_id": aid,
+                "input": {"prompt": f"audit-{index}"},
+            },
+        )
+        assert response.status_code == 201
+        created.append(response.json())
+
+    failed_response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "image.resize",
+            "project_id": pid,
+            "asset_id": aid,
+            "input": {"width": 20, "height": 20},
+        },
+    )
+    assert failed_response.status_code == 201
+    failed = (
+        await client.get(f"{API}/jobs/{failed_response.json()['id']}")
+    ).json()
+    assert failed["status"] == "failed"
+    created.append(failed)
+
+    history_response = await client.get(f"{API}/projects/{pid}/jobs")
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert history["total"] == 12
+    assert len(history["items"]) == 12
+    assert {job["id"] for job in history["items"]} == {
+        job["id"] for job in created
+    }
+    assert [job["created_at"] for job in history["items"]] == sorted(
+        (job["created_at"] for job in history["items"]), reverse=True
+    )
+
+    oldest = (await client.get(f"{API}/jobs/{created[0]['id']}")).json()
+    assert oldest["capability_id"] == "image.caption"
+    assert oldest["asset_id"] == aid
+    assert oldest["input"] == {"prompt": "audit-0"}
+    assert oldest["output"]["provider"] == "mock"
+    assert oldest["started_at"] is not None
+    assert oldest["finished_at"] is not None
+
+    failed_detail = (await client.get(f"{API}/jobs/{failed['id']}")).json()
+    assert failed_detail["error"] == failed["error"]
+    assert "convert" in failed_detail["error"]
+    assert failed_detail["started_at"] is not None
+    assert failed_detail["finished_at"] is not None
+
+    failed_history = (
+        await client.get(f"{API}/projects/{pid}/jobs?status=failed")
+    ).json()
+    assert failed_history["total"] == 1
+    assert [job["id"] for job in failed_history["items"]] == [failed["id"]]
+    assert (
+        await client.get(f"{API}/projects/{pid}/jobs?status=not-a-status")
+    ).status_code == 422
+
+    other_history = (await client.get(f"{API}/projects/{other_pid}/jobs")).json()
+    assert other_history["total"] == 0
+    assert other_history["items"] == []

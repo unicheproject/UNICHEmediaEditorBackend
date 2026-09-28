@@ -157,7 +157,8 @@ curl -s -X POST $BASE/jobs \
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
 
 `GET /api/v1/projects/{id}/jobs` is paginated: `?limit=` (default 50, max 200)
-and `?offset=`, newest first. It returns a page envelope:
+and `?offset=`, newest first. An optional `?status=queued|running|succeeded|failed|cancelled`
+filter applies before pagination and total calculation. It returns a page envelope:
 `{ "items": [...], "total": N, "limit": 50, "offset": 0 }`.
 
 Project and asset deletes are **soft** (`deleted_at`). Uploads validate file

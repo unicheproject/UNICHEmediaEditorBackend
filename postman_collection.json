@@ -808,7 +808,8 @@
               "path": ["api", "v1", "projects", "{{project_id}}", "jobs"],
               "query": [
                 { "key": "limit", "value": "50", "description": "max 200, default 50" },
-                { "key": "offset", "value": "0", "description": "skip N (newest first)" }
+                { "key": "offset", "value": "0", "description": "skip N (newest first)" },
+                { "key": "status", "value": "failed", "description": "optional job status filter", "disabled": true }
               ]
             },
             "description": "Returns a page envelope: { items, total, limit, offset }."

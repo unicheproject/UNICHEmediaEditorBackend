@@ -91,10 +91,13 @@ async def list_jobs_for_project(
     *,
     limit: int,
     offset: int,
+    status: JobStatus | None = None,
 ) -> tuple[list[Job], int]:
     """Return one page of a project's jobs (newest first) plus the total count."""
     await get_project(session, project_id)
     base = select(Job).where(Job.project_id == project_id)
+    if status is not None:
+        base = base.where(Job.status == status)
     total = await session.scalar(
         select(func.count()).select_from(base.subquery())
     )
