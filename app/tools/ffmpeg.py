@@ -404,10 +404,18 @@ async def audio_mix(
 ) -> None:
     """Lay `music` under `media`'s audio. mode: mix | duck (≈low mix) | replace."""
     vol = music_volume if mode != "duck" else min(music_volume, 0.2)
+    has_audio = await _has_audio(media)
     if mode == "replace":
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
              "-map", "0:v?", "-map", "1:a", "-c:v", "copy", "-shortest", dst]
+        )
+        return
+    if not has_audio:
+        await runner.run(
+            [*_BASE, "-i", media, "-i", music,
+             "-filter_complex", f"[1:a]volume={vol}[a]",
+             "-map", "0:v?", "-map", "[a]", "-c:v", "copy", "-shortest", dst]
         )
         return
     filt = f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[a]"

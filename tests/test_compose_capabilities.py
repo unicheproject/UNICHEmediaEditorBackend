@@ -1,5 +1,6 @@
 """Execution tests for composition capabilities (skip-guarded on binaries)."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -30,6 +31,13 @@ def _make_video(path: str) -> None:
         "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
         "-i", "testsrc=duration=2:size=320x240:rate=15",
         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest", path,
+    ])
+
+
+def _make_silent_video(path: str) -> None:
+    _run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+        "-i", "testsrc=duration=2:size=320x240:rate=15", path,
     ])
 
 
@@ -70,6 +78,25 @@ async def _run_job(client: AsyncClient, body: dict) -> dict:
 def _first_output(job: dict) -> dict:
     assert job["status"] == "succeeded", job.get("error")
     return job["output"]["outputs"][0]
+
+
+def _probe(path: str) -> dict:
+    proc = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries",
+            "stream=codec_type:format=duration", "-of", "json", path,
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(proc.stdout)
+
+
+async def _download_output(client: AsyncClient, output: dict, path) -> dict:
+    response = await client.get(output["download_path"])
+    assert response.status_code == 200, response.text
+    path.write_bytes(response.content)
+    return _probe(str(path))
 
 
 async def test_titlecard(client: AsyncClient) -> None:
@@ -211,4 +238,26 @@ async def test_audio_mix_under_video(client: AsyncClient, tmp_path) -> None:
         "capability_id": "audio.mix", "project_id": pid, "asset_id": vid,
         "input": {"music_asset_id": mus, "music_volume": 0.3, "mode": "mix"},
     })
-    assert _first_output(job)["media_type"] == "video"
+    output = _first_output(job)
+    assert output["media_type"] == "video"
+    probe = await _download_output(client, output, tmp_path / "mixed-with-source-audio.mp4")
+    assert {stream["codec_type"] for stream in probe["streams"]} == {"video", "audio"}
+    assert 1.8 <= float(probe["format"]["duration"]) <= 2.2
+
+
+async def test_audio_mix_under_silent_video(client: AsyncClient, tmp_path) -> None:
+    pid = await _project(client)
+    vid_path, mus_path = tmp_path / "silent.mp4", tmp_path / "m.mp3"
+    _make_silent_video(str(vid_path))
+    _make_audio(str(mus_path))
+    vid = await _upload(client, pid, str(vid_path), "silent.mp4", "video/mp4")
+    mus = await _upload(client, pid, str(mus_path), "m.mp3", "audio/mpeg")
+
+    job = await _run_job(client, {
+        "capability_id": "audio.mix", "project_id": pid, "asset_id": vid,
+        "input": {"music_asset_id": mus, "music_volume": 0.3, "mode": "mix"},
+    })
+    output = _first_output(job)
+    probe = await _download_output(client, output, tmp_path / "mixed-silent-video.mp4")
+    assert {stream["codec_type"] for stream in probe["streams"]} == {"video", "audio"}
+    assert 1.8 <= float(probe["format"]["duration"]) <= 2.2
