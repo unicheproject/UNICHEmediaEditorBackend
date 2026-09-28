@@ -397,6 +397,18 @@
           }
         },
         {
+          "name": "Get Image Thumbnail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets/{{asset_id}}/thumbnail",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets", "{{asset_id}}", "thumbnail"]
+            }
+          }
+        },
+        {
           "name": "Delete Asset (soft)",
           "request": {
             "method": "DELETE",

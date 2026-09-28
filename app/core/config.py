@@ -100,7 +100,7 @@ class Settings(BaseSettings):
         return self.max_upload_size_mb * 1024 * 1024
 
     # Accepted upload extensions per media type (lowercase, no leading dot)
-    allowed_image_extensions: set[str] = {"jpg", "jpeg", "png", "webp", "tiff"}
+    allowed_image_extensions: set[str] = {"jpg", "jpeg", "png", "webp", "tif", "tiff"}
     allowed_audio_extensions: set[str] = {"mp3", "wav", "m4a", "flac", "ogg"}
     allowed_video_extensions: set[str] = {"mp4", "mov", "webm", "mkv"}
     allowed_subtitle_extensions: set[str] = {"srt", "vtt"}

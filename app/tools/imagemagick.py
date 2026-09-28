@@ -23,6 +23,32 @@ async def resize(src: str, dst: str, width: int, height: int) -> None:
     await runner.run([CONVERT, src, "-resize", geom, dst])
 
 
+async def thumbnail(src: str, dst: str, max_size: int = 512) -> None:
+    """Render the first image/frame as a browser-safe JPEG thumbnail."""
+    geometry = f"{_int(max_size, 'max_size')}x{_int(max_size, 'max_size')}>"
+    await runner.run(
+        [
+            CONVERT,
+            f"{src}[0]",
+            "-auto-orient",
+            "-thumbnail",
+            geometry,
+            "-colorspace",
+            "sRGB",
+            "-background",
+            "white",
+            "-alpha",
+            "remove",
+            "-alpha",
+            "off",
+            "-strip",
+            "-quality",
+            "85",
+            dst,
+        ]
+    )
+
+
 async def crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> None:
     geom = (
         f"{_int(width, 'width')}x{_int(height, 'height')}"

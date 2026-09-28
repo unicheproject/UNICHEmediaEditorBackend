@@ -21,6 +21,7 @@ from app.models.project import Project
 from app.schemas.asset import AssetRead, AssetUpdate
 from app.services import assets as svc
 from app.services.storage import get_storage
+from app.services.thumbnails import get_or_create_thumbnail
 
 router = APIRouter(tags=["assets"])
 
@@ -76,6 +77,14 @@ async def download_asset(
         media_type=asset.mime_type,
         filename=asset.original_filename,
     )
+
+
+@router.get("/assets/{asset_id}/thumbnail")
+async def get_asset_thumbnail(
+    asset: Asset = Depends(require_asset_access),
+) -> FileResponse:
+    path = await get_or_create_thumbnail(asset)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.patch("/assets/{asset_id}", response_model=AssetRead)
