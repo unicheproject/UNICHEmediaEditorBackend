@@ -109,6 +109,46 @@ async def test_same_project_secondary_asset_is_accepted(
     assert response.json()["project_id"] == project_id
 
 
+@pytest.mark.parametrize(
+    ("capability_id", "input_factory"),
+    [
+        ("audio.mix", lambda primary, wrong: {"music_asset_id": wrong}),
+        ("video.concat", lambda primary, wrong: {"asset_ids": [primary, wrong]}),
+        (
+            "video.compose",
+            lambda primary, wrong: {"asset_ids": [primary], "audio_asset_id": wrong},
+        ),
+        (
+            "video.subtitle.embed",
+            lambda primary, wrong: {"subtitle_asset_id": wrong},
+        ),
+    ],
+)
+async def test_same_project_wrong_media_reference_is_rejected(
+    client: AsyncClient, make_project, capability_id: str, input_factory
+) -> None:
+    project_id = await make_project("wrong-media")
+    primary = await _upload(client, project_id, "primary.mp4", "video/mp4")
+    wrong = await _upload(client, project_id, "wrong.png", "image/png")
+
+    app.dependency_overrides[get_enqueuer] = lambda: _never_enqueue
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": capability_id,
+            "project_id": project_id,
+            "asset_id": primary
+            if capability_id in {"audio.mix", "video.subtitle.embed"}
+            else None,
+            "input": input_factory(primary, wrong),
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert "requires" in response.json()["error"]["message"]
+
+
 async def test_deleted_secondary_asset_is_rejected(
     client: AsyncClient, make_project
 ) -> None:
@@ -156,6 +196,31 @@ async def test_worker_rejects_preexisting_cross_project_job(
         completed = await execute_job(session, job.id)
         assert completed.status == JobStatus.failed
         assert "not in the job's project" in (completed.error or "")
+
+
+async def test_worker_rejects_preexisting_wrong_media_reference(
+    client: AsyncClient, make_project
+) -> None:
+    project_id = await make_project("worker-media")
+    video = await _upload(client, project_id, "video.mp4", "video/mp4")
+    image = await _upload(client, project_id, "not-music.png", "image/png")
+
+    async with async_session_factory() as session:
+        job = Job(
+            project_id=uuid.UUID(project_id),
+            asset_id=uuid.UUID(video),
+            capability_id="audio.mix",
+            status=JobStatus.queued,
+            input={"music_asset_id": image},
+            progress=0,
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+        completed = await execute_job(session, job.id)
+        assert completed.status == JobStatus.failed
+        assert "requires audio media" in (completed.error or "")
 
 
 async def test_agent_execution_rejects_cross_project_secondary_asset(

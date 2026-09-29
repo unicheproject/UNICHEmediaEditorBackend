@@ -141,6 +141,34 @@ async def test_invalid_capability_rejected(client: AsyncClient) -> None:
     assert resp.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "capability_id,job_input",
+    [
+        ("image.resize", {"width": 64}),
+        ("image.resize", {"width": "wide", "height": 64}),
+        ("audio.mix", {"music_asset_id": str(uuid.uuid4()), "mode": "overlay"}),
+        ("video.concat", {"asset_ids": [str(uuid.uuid4())]}),
+        ("video.concat", {"asset_ids": ["not-a-uuid", str(uuid.uuid4())]}),
+        ("image.format", {"format": "bmp"}),
+    ],
+)
+async def test_direct_job_rejects_invalid_canonical_input(
+    client: AsyncClient, make_project, capability_id: str, job_input: dict
+) -> None:
+    pid = await make_project("schema-validation")
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": capability_id,
+            "project_id": pid,
+            "input": job_input,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 async def test_job_submission_and_api_remain_async_while_jobs_run(
     client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:

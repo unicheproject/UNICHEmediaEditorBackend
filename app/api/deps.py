@@ -16,6 +16,7 @@ import uuid
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.capabilities import registry
 from app.core.database import get_session
 from app.core.security import Principal, get_current_principal
 from app.models.asset import Asset
@@ -73,6 +74,8 @@ async def require_job_create_access(
     catalogue: CatalogueClient = Depends(get_catalogue_client),
 ) -> JobCreate:
     """Authorize the project a new job will run against (from body or its asset)."""
+    capability = registry.get(data.capability_id)
+    jobs_svc.validate_job_input(capability, data.input)
     project_id = await jobs_svc.resolve_job_project(
         session,
         project_id=data.project_id,

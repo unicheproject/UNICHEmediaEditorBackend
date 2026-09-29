@@ -12,9 +12,53 @@ from app.schemas.capability import CapabilityRead
 # A CapabilityDef is just a CapabilityRead instance.
 CapabilityDef = CapabilityRead
 
+
+def _string(title: str, description: str, **keywords: object) -> dict:
+    return {"type": "string", "title": title, "description": description, **keywords}
+
+
+def _number(title: str, description: str, **keywords: object) -> dict:
+    return {"type": "number", "title": title, "description": description, **keywords}
+
+
+def _integer(title: str, description: str, **keywords: object) -> dict:
+    return {"type": "integer", "title": title, "description": description, **keywords}
+
+
+def _asset_id(title: str, description: str, *, role: str, media_types: list[str]) -> dict:
+    return _string(
+        title,
+        description,
+        format="uuid",
+        **{"x-media-asset": {"role": role, "media_types": media_types}},
+    )
+
+
+def _asset_ids(
+    title: str,
+    description: str,
+    *,
+    role: str,
+    media_types: list[str],
+    min_items: int,
+) -> dict:
+    return {
+        "type": "array",
+        "title": title,
+        "description": description,
+        "items": {"type": "string", "format": "uuid"},
+        "minItems": min_items,
+        "x-media-asset": {"role": role, "media_types": media_types},
+    }
+
+
 _ASSET_INPUT = {
     "type": "object",
-    "properties": {"asset_id": {"type": "string", "format": "uuid"}},
+    "properties": {
+        "asset_id": _string(
+            "Input asset", "Asset processed by this capability.", format="uuid"
+        )
+    },
 }
 
 
@@ -63,9 +107,6 @@ _FILE_OUTPUT_SCHEMA = {
 
 _NUM = {"type": "number"}
 _INT = {"type": "integer"}
-_STR = {"type": "string"}
-_IDS = {"type": "array", "items": {"type": "string", "format": "uuid"}}
-_UUID = {"type": "string", "format": "uuid"}
 _V, _A, _I = [MediaType.video], [MediaType.audio], [MediaType.image]
 _VA = [MediaType.video, MediaType.audio]
 
@@ -76,7 +117,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Trim",
         "description": "Trim a video clip to a start/end time range (seconds).",
         "media": _V,
-        "properties": {"start": _NUM, "end": _NUM},
+        "properties": {
+            "start": _number(
+                "Start time", "Start time in seconds.", **{"x-unit": "seconds"}
+            ),
+            "end": _number("End time", "End time in seconds.", **{"x-unit": "seconds"}),
+        },
         "required": ["start", "end"],
     },
     {
@@ -84,7 +130,16 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Split",
         "description": "Split a video into segments at the given time markers (seconds).",
         "media": _V,
-        "properties": {"markers": {"type": "array", "items": _NUM}},
+        "properties": {
+            "markers": {
+                "type": "array",
+                "title": "Split markers",
+                "description": "Times in seconds at which to split the video.",
+                "items": {"type": "number"},
+                "minItems": 1,
+                "x-unit": "seconds",
+            }
+        },
         "required": ["markers"],
     },
     {
@@ -92,7 +147,15 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Concatenate",
         "description": "Concatenate multiple video clips into one (input.asset_ids).",
         "media": _V,
-        "properties": {"asset_ids": _IDS},
+        "properties": {
+            "asset_ids": _asset_ids(
+                "Video clips",
+                "Video assets in the exact order they will be concatenated.",
+                role="video_segment",
+                media_types=["video"],
+                min_items=2,
+            )
+        },
         "required": ["asset_ids"],
     },
     {
@@ -100,7 +163,20 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Transcode",
         "description": "Transcode a video to a target container/codec.",
         "media": _V,
-        "properties": {"format": _STR, "video_codec": _STR, "audio_codec": _STR},
+        "properties": {
+            "format": _string(
+                "Output format",
+                "FFmpeg output container extension, without a leading dot.",
+            ),
+            "video_codec": _string(
+                "Video codec",
+                "Optional FFmpeg video encoder name; omitted lets FFmpeg choose for the container.",
+            ),
+            "audio_codec": _string(
+                "Audio codec",
+                "Optional FFmpeg audio encoder name; omitted lets FFmpeg choose for the container.",
+            ),
+        },
         "required": ["format"],
     },
     {
@@ -115,7 +191,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Crop",
         "description": "Crop a video to a rectangle (x, y, width, height).",
         "media": _V,
-        "properties": {"x": _INT, "y": _INT, "width": _INT, "height": _INT},
+        "properties": {
+            "x": _integer("Left offset", "Horizontal crop offset.", **{"x-unit": "pixels"}),
+            "y": _integer("Top offset", "Vertical crop offset.", **{"x-unit": "pixels"}),
+            "width": _integer("Width", "Crop width.", minimum=1, **{"x-unit": "pixels"}),
+            "height": _integer("Height", "Crop height.", minimum=1, **{"x-unit": "pixels"}),
+        },
         "required": ["x", "y", "width", "height"],
     },
     {
@@ -123,7 +204,18 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Resize",
         "description": "Resize a video to the given dimensions.",
         "media": _V,
-        "properties": {"width": _INT, "height": _INT},
+        "properties": {
+            "width": _integer(
+                "Width",
+                "Output width; FFmpeg also accepts -1 for automatic aspect-preserving size.",
+                **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height",
+                "Output height; FFmpeg also accepts -1 for automatic aspect-preserving size.",
+                **{"x-unit": "pixels"},
+            ),
+        },
         "required": ["width", "height"],
     },
     {
@@ -131,7 +223,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Thumbnail",
         "description": "Extract a single frame at a timestamp as an image.",
         "media": _V,
-        "properties": {"timestamp": _NUM},
+        "properties": {
+            "timestamp": _number(
+                "Timestamp", "Time of the frame to extract.", **{"x-unit": "seconds"}
+            )
+        },
         "required": ["timestamp"],
     },
     {
@@ -139,7 +235,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Image Resize",
         "description": "Resize an image to the given dimensions.",
         "media": _I,
-        "properties": {"width": _INT, "height": _INT},
+        "properties": {
+            "width": _integer("Width", "Exact output width.", minimum=1, **{"x-unit": "pixels"}),
+            "height": _integer("Height", "Exact output height.", minimum=1, **{"x-unit": "pixels"}),
+        },
         "required": ["width", "height"],
     },
     {
@@ -147,7 +246,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Image Crop",
         "description": "Crop an image to a rectangle (x, y, width, height).",
         "media": _I,
-        "properties": {"x": _INT, "y": _INT, "width": _INT, "height": _INT},
+        "properties": {
+            "x": _integer("Left offset", "Horizontal crop offset.", **{"x-unit": "pixels"}),
+            "y": _integer("Top offset", "Vertical crop offset.", **{"x-unit": "pixels"}),
+            "width": _integer("Width", "Crop width.", minimum=1, **{"x-unit": "pixels"}),
+            "height": _integer("Height", "Crop height.", minimum=1, **{"x-unit": "pixels"}),
+        },
         "required": ["x", "y", "width", "height"],
     },
     {
@@ -155,7 +259,13 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Image Format Convert",
         "description": "Convert an image between formats (jpeg/png/webp/tiff).",
         "media": _I,
-        "properties": {"format": _STR},
+        "properties": {
+            "format": _string(
+                "Output format",
+                "Image format produced by the conversion.",
+                enum=["jpeg", "jpg", "png", "webp", "tiff"],
+            )
+        },
         "required": ["format"],
     },
     {
@@ -163,21 +273,50 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Image Colour Adjust",
         "description": "Adjust brightness, contrast and saturation of an image.",
         "media": _I,
-        "properties": {"brightness": _INT, "contrast": _INT, "saturation": _INT},
+        "properties": {
+            "brightness": _integer(
+                "Brightness",
+                "ImageMagick brightness percentage; 100 leaves it unchanged.",
+                default=100,
+                **{"x-unit": "percent"},
+            ),
+            "contrast": _integer(
+                "Contrast", "ImageMagick contrast adjustment; 0 leaves it unchanged.", default=0
+            ),
+            "saturation": _integer(
+                "Saturation",
+                "ImageMagick saturation percentage; 100 leaves it unchanged.",
+                default=100,
+                **{"x-unit": "percent"},
+            ),
+        },
     },
     {
         "id": "image.upscale",
         "title": "Image Upscale",
         "description": "Increase image resolution while preserving detail (Real-ESRGAN).",
         "media": _I,
-        "properties": {"scale": _INT},
+        "properties": {
+            "scale": _integer(
+                "Scale",
+                "Real-ESRGAN output scale factor.",
+                default=4,
+                enum=[2, 3, 4],
+                **{"x-unit": "ratio"},
+            )
+        },
     },
     {
         "id": "audio.trim",
         "title": "Audio Trim",
         "description": "Trim an audio clip to a start/end time range (seconds).",
         "media": _A,
-        "properties": {"start": _NUM, "end": _NUM},
+        "properties": {
+            "start": _number(
+                "Start time", "Start time in seconds.", **{"x-unit": "seconds"}
+            ),
+            "end": _number("End time", "End time in seconds.", **{"x-unit": "seconds"}),
+        },
         "required": ["start", "end"],
     },
     {
@@ -185,7 +324,15 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Concatenate",
         "description": "Concatenate multiple audio clips into one (input.asset_ids).",
         "media": _A,
-        "properties": {"asset_ids": _IDS},
+        "properties": {
+            "asset_ids": _asset_ids(
+                "Audio clips",
+                "Audio assets in the exact order they will be concatenated.",
+                role="audio_segment",
+                media_types=["audio"],
+                min_items=2,
+            )
+        },
         "required": ["asset_ids"],
     },
     {
@@ -193,7 +340,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Gain",
         "description": "Adjust the gain of an audio clip (gain_db).",
         "media": _A,
-        "properties": {"gain_db": _NUM},
+        "properties": {
+            "gain_db": _number(
+                "Gain", "Gain adjustment applied to the audio.", **{"x-unit": "decibels"}
+            )
+        },
         "required": ["gain_db"],
     },
     {
@@ -201,21 +352,54 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Normalize",
         "description": "Normalize loudness to a target integrated level (LUFS).",
         "media": _A,
-        "properties": {"target_i": _NUM},
+        "properties": {
+            "target_i": _number(
+                "Target loudness",
+                "Integrated loudness target used by FFmpeg loudnorm.",
+                default=-16,
+                minimum=-70,
+                maximum=-5,
+                **{"x-unit": "LUFS"},
+            )
+        },
     },
     {
         "id": "audio.fade",
         "title": "Audio Fade",
         "description": "Apply fade-in and/or fade-out (seconds) to an audio clip.",
         "media": _A,
-        "properties": {"fade_in": _NUM, "fade_out": _NUM},
+        "properties": {
+            "fade_in": _number(
+                "Fade in",
+                "Fade-in duration; 0 disables it.",
+                default=0,
+                minimum=0,
+                **{"x-unit": "seconds"},
+            ),
+            "fade_out": _number(
+                "Fade out",
+                "Fade-out duration; 0 disables it.",
+                default=0,
+                minimum=0,
+                **{"x-unit": "seconds"},
+            ),
+        },
     },
     {
         "id": "audio.transcode",
         "title": "Audio Transcode",
         "description": "Transcode audio to a target container/codec.",
         "media": _A,
-        "properties": {"format": _STR, "codec": _STR},
+        "properties": {
+            "format": _string(
+                "Output format",
+                "FFmpeg output container extension, without a leading dot.",
+            ),
+            "codec": _string(
+                "Audio codec",
+                "Optional FFmpeg audio encoder name; omitted lets FFmpeg choose for the container.",
+            ),
+        },
         "required": ["format"],
     },
     {
@@ -223,7 +407,16 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Denoise",
         "description": "Reduce background noise in an audio recording (RNNoise).",
         "media": _A,
-        "properties": {"strength": _NUM},
+        "properties": {
+            "strength": _number(
+                "Denoise strength",
+                "RNNoise mix from -1 to 1; 0 is original and 1 is fully filtered.",
+                default=1.0,
+                minimum=-1,
+                maximum=1,
+                **{"x-unit": "ratio"},
+            )
+        },
     },
     # --- Composition capabilities ---
     {
@@ -235,10 +428,34 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _I,
         "properties": {
-            "asset_ids": _IDS,
-            "seconds_per_image": _NUM,
-            "width": _INT,
-            "height": _INT,
+            "asset_ids": _asset_ids(
+                "Slideshow images",
+                "Image assets in the exact order they will appear.",
+                role="slideshow_image",
+                media_types=["image"],
+                min_items=1,
+            ),
+            "seconds_per_image": _number(
+                "Seconds per image",
+                "Display duration of each image.",
+                default=4,
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
+            ),
+            "width": _integer(
+                "Width",
+                "Output video width.",
+                default=1920,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height",
+                "Output video height.",
+                default=1080,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
         },
         "required": ["asset_ids"],
     },
@@ -253,11 +470,40 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _I,
         "properties": {
-            "duration": _NUM,
-            "zoom": _NUM,
-            "direction": {"type": "string", "enum": ["in", "out"]},
-            "width": _INT,
-            "height": _INT,
+            "duration": _number(
+                "Duration",
+                "Output clip duration.",
+                default=5,
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
+            ),
+            "zoom": _number(
+                "Zoom",
+                "Final zoom ratio; must be greater than 1.",
+                default=1.15,
+                exclusiveMinimum=1,
+                **{"x-unit": "ratio"},
+            ),
+            "direction": _string(
+                "Direction",
+                "Whether the animation zooms in or out.",
+                default="in",
+                enum=["in", "out"],
+            ),
+            "width": _integer(
+                "Width",
+                "Output video width.",
+                default=1920,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height",
+                "Output video height.",
+                default=1080,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
         },
     },
     {
@@ -269,12 +515,36 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _V,
         "properties": {
-            "text": _STR,
-            "duration": _NUM,
-            "width": _INT,
-            "height": _INT,
-            "background": _STR,
-            "foreground": _STR,
+            "text": _string("Text", "Text rendered on the title card."),
+            "duration": _number(
+                "Duration",
+                "Title-card duration.",
+                default=5,
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
+            ),
+            "width": _integer(
+                "Width",
+                "Output video width.",
+                default=1920,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height",
+                "Output video height.",
+                default=1080,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "background": _string(
+                "Background colour",
+                "ImageMagick colour used for the background.",
+                default="#101418",
+            ),
+            "foreground": _string(
+                "Text colour", "ImageMagick colour used for the text.", default="#ffffff"
+            ),
         },
         "required": ["text"],
     },
@@ -287,16 +557,37 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _V,
         "properties": {
-            "text": _STR,
-            "caption": _STR,
-            "start": _NUM,
-            "duration": _NUM,
+            "text": _string("Name", "Primary lower-third text."),
+            "caption": _string("Caption", "Optional secondary lower-third text."),
+            "start": _number(
+                "Start time",
+                "Time at which the overlay appears.",
+                default=0,
+                minimum=0,
+                **{"x-unit": "seconds"},
+            ),
+            "duration": _number(
+                "Duration",
+                "How long the overlay remains visible.",
+                default=5,
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
+            ),
             "position": {
                 "type": "string",
+                "title": "Position",
+                "description": "Horizontal placement along the bottom edge.",
                 "enum": ["bottom-left", "bottom-center", "bottom-right"],
+                "default": "bottom-left",
             },
-            "background": _STR,
-            "foreground": _STR,
+            "background": _string(
+                "Background colour",
+                "ImageMagick colour used for the label background.",
+                default="#101418",
+            ),
+            "foreground": _string(
+                "Text colour", "ImageMagick colour used for the text.", default="#ffffff"
+            ),
         },
         "required": ["text"],
     },
@@ -309,8 +600,25 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _V,
         "properties": {
-            "subtitle_asset_id": _UUID,
-            "mode": {"type": "string", "enum": ["soft", "burn"]},
+            "subtitle_asset_id": _asset_id(
+                "Subtitle asset",
+                "Subtitle file to mux or render into the video.",
+                role="subtitle",
+                media_types=["subtitle"],
+            ),
+            "mode": {
+                "type": "string",
+                "title": "Subtitle mode",
+                "description": (
+                    "Choose a selectable subtitle track or render text into the picture."
+                ),
+                "enum": ["soft", "burn"],
+                "default": "soft",
+                "x-enum-descriptions": {
+                    "soft": "Mux a selectable subtitle track without burning it into frames.",
+                    "burn": "Render subtitles permanently into the video picture.",
+                },
+            },
         },
         "required": ["subtitle_asset_id"],
     },
@@ -323,9 +631,30 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _VA,
         "properties": {
-            "music_asset_id": _UUID,
-            "music_volume": _NUM,
-            "mode": {"type": "string", "enum": ["mix", "duck", "replace"]},
+            "music_asset_id": _asset_id(
+                "Background audio",
+                "Audio asset used as music or narration.",
+                role="background_audio",
+                media_types=["audio"],
+            ),
+            "music_volume": _number(
+                "Music volume",
+                "Linear volume multiplier for the supplied audio; duck caps it at 0.2.",
+                default=0.3,
+                **{"x-unit": "ratio"},
+            ),
+            "mode": {
+                "type": "string",
+                "title": "Audio mode",
+                "description": "How supplied audio combines with the primary asset's audio.",
+                "enum": ["mix", "duck", "replace"],
+                "default": "mix",
+                "x-enum-descriptions": {
+                    "mix": "Mix supplied audio with the primary asset's existing audio.",
+                    "duck": "Mix supplied audio at no more than a 0.2 volume multiplier.",
+                    "replace": "Replace the primary asset's audio with the supplied audio.",
+                },
+            },
         },
         "required": ["music_asset_id"],
     },
@@ -340,13 +669,57 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _V,
         "properties": {
-            "asset_ids": _IDS,
-            "width": _INT,
-            "height": _INT,
-            "audio_asset_id": _UUID,
-            "audio_mode": {"type": "string", "enum": ["mix", "duck", "replace"]},
-            "music_volume": _NUM,
-            "subtitle_asset_id": _UUID,
+            "asset_ids": _asset_ids(
+                "Video segments",
+                "Video assets in the exact timeline order.",
+                role="video_segment",
+                media_types=["video"],
+                min_items=1,
+            ),
+            "width": _integer(
+                "Width",
+                "Composition output width.",
+                default=1920,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height",
+                "Composition output height.",
+                default=1080,
+                minimum=1,
+                **{"x-unit": "pixels"},
+            ),
+            "audio_asset_id": _asset_id(
+                "Audio bed",
+                "Optional audio asset mixed into or substituted for timeline audio.",
+                role="background_audio",
+                media_types=["audio"],
+            ),
+            "audio_mode": {
+                "type": "string",
+                "title": "Audio mode",
+                "description": "How the optional audio bed combines with timeline audio.",
+                "enum": ["mix", "duck", "replace"],
+                "default": "mix",
+                "x-enum-descriptions": {
+                    "mix": "Mix the audio bed with timeline audio.",
+                    "duck": "Mix the audio bed at no more than a 0.2 volume multiplier.",
+                    "replace": "Replace timeline audio with the audio bed.",
+                },
+            },
+            "music_volume": _number(
+                "Music volume",
+                "Linear volume multiplier for the optional audio bed.",
+                default=0.3,
+                **{"x-unit": "ratio"},
+            ),
+            "subtitle_asset_id": _asset_id(
+                "Subtitle asset",
+                "Optional subtitle file burned into the final composition.",
+                role="subtitle",
+                media_types=["subtitle"],
+            ),
         },
         "required": ["asset_ids"],
     },
@@ -381,7 +754,10 @@ CAPABILITIES: list[CapabilityDef] = [
         cost_class=CostClass.hosted_ai,
         input_schema={
             "type": "object",
-            "properties": {"text": {"type": "string"}, "voice": {"type": "string"}},
+            "properties": {
+                "text": _string("Text", "Text to synthesize as speech."),
+                "voice": _string("Voice", "Optional provider voice identifier."),
+            },
             "required": ["text"],
         },
         output_schema={"type": "object", "properties": {"audio_url": {"type": "string"}}},
@@ -394,7 +770,7 @@ CAPABILITIES: list[CapabilityDef] = [
         cost_class=CostClass.hosted_ai,
         input_schema={
             "type": "object",
-            "properties": {"prompt": {"type": "string"}},
+            "properties": {"prompt": _string("Prompt", "Description of the music to generate.")},
             "required": ["prompt"],
         },
         output_schema={"type": "object", "properties": {"audio_url": {"type": "string"}}},
@@ -427,7 +803,12 @@ CAPABILITIES: list[CapabilityDef] = [
         input_schema={
             "type": "object",
             "properties": {
-                "asset_id": {"type": "string", "format": "uuid"},
+                "asset_id": _asset_id(
+                    "Source image",
+                    "Image asset containing the region to inpaint.",
+                    role="source_image",
+                    media_types=["image"],
+                ),
                 "mask_url": {"type": "string"},
                 "prompt": {"type": "string"},
             },
@@ -498,7 +879,15 @@ CAPABILITIES: list[CapabilityDef] = [
         cost_class=CostClass.deterministic,
         input_schema={
             "type": "object",
-            "properties": {"threshold": _NUM},
+            "properties": {
+                "threshold": _number(
+                    "Detection threshold",
+                    "PySceneDetect content-change threshold on its 0–255 score.",
+                    default=27.0,
+                    minimum=0,
+                    maximum=255,
+                )
+            },
         },
         output_schema={
             "type": "object",

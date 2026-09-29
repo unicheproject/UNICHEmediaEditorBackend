@@ -11,7 +11,7 @@ import shutil
 import pytest
 from httpx import AsyncClient
 
-from app.agent.catalog import build_catalog
+from app.agent.catalog import build_catalog, catalog_text
 from app.agent.planner import PlanValidationError, validate_plan
 from app.agent.schemas import Plan
 from app.tools.imagemagick import DEFAULT_FONT
@@ -30,6 +30,22 @@ def test_catalog_reflects_registry() -> None:
     assert {"video.trim", "image.slideshow", "video.compose"} <= ids
     for c in build_catalog():
         assert "input_schema" in c and "supported_media_types" in c
+
+
+def test_catalog_text_exposes_compact_contract_without_ui_hints() -> None:
+    text = catalog_text()
+    mix_line = next(line for line in text.splitlines() if line.startswith("- audio.mix "))
+    assert "music_asset_id: string/uuid required" in mix_line
+    assert "asset_role=background_audio" in mix_line
+    assert "asset_media=['audio']" in mix_line
+    assert "music_volume: number optional default=0.3 unit=ratio" in mix_line
+    assert "enum=[" in mix_line and "mix (Mix supplied audio" in mix_line
+    assert "x-ui" not in text
+
+    concat_line = next(
+        line for line in text.splitlines() if line.startswith("- video.concat ")
+    )
+    assert "asset_ids: array<string/uuid> required min_items=2" in concat_line
 
 
 # --- plan validation (no binaries) -----------------------------------------
@@ -63,6 +79,64 @@ def test_bad_params_rejected() -> None:
                    "params": {"width": 64}, "asset": IMG}])
     with pytest.raises(PlanValidationError):
         validate_plan(plan, SCOPE)
+
+
+@pytest.mark.parametrize(
+    "capability_id,params",
+    [
+        ("image.resize", {"width": "wide", "height": 48}),
+        ("image.format", {"format": "bmp"}),
+        ("video.concat", {"asset_ids": [VID]}),
+        ("video.concat", {"asset_ids": ["not-a-uuid", VID]}),
+    ],
+)
+def test_planner_rejects_same_malformed_contract_as_direct_jobs(
+    capability_id: str, params: dict
+) -> None:
+    plan = _plan([{"id": "s1", "capability_id": capability_id, "params": params}])
+    with pytest.raises(PlanValidationError):
+        validate_plan(plan, SCOPE)
+
+
+def test_planner_rejects_wrong_media_for_named_and_list_asset_parameters() -> None:
+    audio = "33333333-3333-3333-3333-333333333333"
+    scope = {**SCOPE, audio: "audio"}
+    wrong_music = _plan(
+        [
+            {
+                "id": "s1",
+                "capability_id": "audio.mix",
+                "asset": VID,
+                "params": {"music_asset_id": IMG},
+            }
+        ]
+    )
+    with pytest.raises(PlanValidationError):
+        validate_plan(wrong_music, scope)
+
+    wrong_segment = _plan(
+        [
+            {
+                "id": "s1",
+                "capability_id": "video.concat",
+                "params": {"asset_ids": [VID, IMG]},
+            }
+        ]
+    )
+    with pytest.raises(PlanValidationError):
+        validate_plan(wrong_segment, scope)
+
+    valid_music = _plan(
+        [
+            {
+                "id": "s1",
+                "capability_id": "audio.mix",
+                "asset": VID,
+                "params": {"music_asset_id": audio},
+            }
+        ]
+    )
+    validate_plan(valid_music, scope)
 
 
 def test_media_type_mismatch_rejected() -> None:

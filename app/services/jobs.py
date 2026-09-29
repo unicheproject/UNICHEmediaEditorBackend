@@ -13,11 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
 from app.capabilities.context import HandlerResult, JobContext
+from app.capabilities.validation import (
+    CapabilityInputValidationError,
+    iter_media_asset_references,
+    validate_capability_input,
+)
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import JobStatus
 from app.models.job import Job
+from app.schemas.capability import CapabilityRead
 from app.schemas.job import JobCreate
 from app.services import assets as assets_svc
 from app.services.assets import get_asset
@@ -32,6 +38,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     cap = registry.get(data.capability_id)  # raises NotFoundError if unknown
     if not cap.enabled:
         raise ValidationError(f"Capability '{data.capability_id}' is disabled")
+    validate_job_input(cap, data.input)
 
     project_id = await resolve_job_project(
         session,
@@ -48,6 +55,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
                 f"Capability '{data.capability_id}' does not support "
                 f"{asset.media_type.value} assets"
             )
+    await _validate_referenced_asset_media_types(session, cap, data.input)
 
     job = Job(
         project_id=project_id,
@@ -61,6 +69,28 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     await session.commit()
     await session.refresh(job)
     return job
+
+
+def validate_job_input(capability: CapabilityRead, job_input: dict) -> None:
+    """Map canonical schema failures to the application's 422 error contract."""
+    try:
+        validate_capability_input(capability, job_input)
+    except CapabilityInputValidationError as exc:
+        raise ValidationError(f"Invalid capability input: {exc}") from exc
+
+
+async def _validate_referenced_asset_media_types(
+    session: AsyncSession, capability: CapabilityRead, job_input: dict
+) -> None:
+    """Enforce x-media-asset declarations after project isolation checks."""
+    for reference in iter_media_asset_references(capability, job_input):
+        asset = await get_asset(session, uuid.UUID(reference.asset_id))
+        if reference.media_types and asset.media_type.value not in reference.media_types:
+            raise ValidationError(
+                f"Parameter '{reference.parameter}' requires "
+                f"{', '.join(reference.media_types)} media, but asset "
+                f"'{reference.asset_id}' is {asset.media_type.value}"
+            )
 
 
 def _literal_asset_references(
@@ -156,12 +186,15 @@ async def _build_job_context(
     session: AsyncSession, job: Job, work_dir: Path
 ) -> JobContext:
     """Resolve input assets to paths and assemble the handler context."""
+    capability = registry.get(job.capability_id)
+    validate_job_input(capability, dict(job.input or {}))
     project_id = await resolve_job_project(
         session,
         project_id=job.project_id,
         asset_id=job.asset_id,
         job_input=job.input,
     )
+    await _validate_referenced_asset_media_types(session, capability, dict(job.input or {}))
     storage = get_storage()
     input_path: str | None = None
     input_asset_meta: dict = {}

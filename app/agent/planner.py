@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
-import jsonschema
-
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities import registry
+from app.capabilities.validation import (
+    CapabilityInputValidationError,
+    iter_media_asset_references,
+    validate_capability_input,
+)
 from app.core.errors import NotFoundError
 from app.models.enums import CostClass
 
@@ -68,11 +71,12 @@ def validate_plan(
             )
 
         # params + derived asset_ids validate against the capability schema
+        effective_input = _effective_input(step)
         try:
-            jsonschema.validate(_effective_input(step), cap.input_schema)
-        except jsonschema.ValidationError as exc:
+            validate_capability_input(cap, effective_input, allow_step_refs=True)
+        except CapabilityInputValidationError as exc:
             raise PlanValidationError(
-                f"Step '{step.id}' ({step.capability_id}) invalid params: {exc.message}"
+                f"Step '{step.id}' ({step.capability_id}) invalid params: {exc}"
             ) from exc
 
         # references: '@step' must point at an earlier step; literals must be in scope
@@ -91,6 +95,24 @@ def validate_plan(
             if lit not in assets_by_id:
                 raise PlanValidationError(
                     f"Step '{step.id}' references asset '{lit}' not in this session's scope."
+                )
+
+        # Literal named/list asset parameters must be in scope and match the
+        # media category declared by the canonical capability schema.
+        for reference in iter_media_asset_references(cap, effective_input):
+            if is_step_ref(reference.asset_id):
+                continue
+            media = assets_by_id.get(reference.asset_id)
+            if media is None:
+                raise PlanValidationError(
+                    f"Step '{step.id}' references asset '{reference.asset_id}' "
+                    "not in this session's scope."
+                )
+            if reference.media_types and media not in reference.media_types:
+                raise PlanValidationError(
+                    f"Step '{step.id}' parameter '{reference.parameter}' needs "
+                    f"{list(reference.media_types)} media, but asset "
+                    f"'{reference.asset_id}' is {media}."
                 )
 
         # primary-asset media type must be supported (only for literal primaries)

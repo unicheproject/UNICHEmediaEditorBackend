@@ -137,12 +137,12 @@ async def test_kenburns_rejects_bad_direction(client: AsyncClient, tmp_path) -> 
     _make_image(str(img_path), "red")
     asset = await _upload(client, pid, str(img_path), "photo.png", "image/png")
 
-    job = await _run_job(client, {
+    response = await client.post(f"{API}/jobs", json={
         "capability_id": "image.kenburns", "project_id": pid, "asset_id": asset,
         "input": {"direction": "sideways"},
     })
-    assert job["status"] == "failed"
-    assert "direction" in job["error"]
+    assert response.status_code == 422
+    assert "direction" in response.json()["error"]["message"]
 
 
 async def test_slideshow_then_compose(client: AsyncClient, tmp_path) -> None:
@@ -199,12 +199,12 @@ async def test_lowerthird_rejects_bad_position(client: AsyncClient, tmp_path) ->
     _make_video(str(vid_path))
     vid = await _upload(client, pid, str(vid_path), "v.mp4", "video/mp4")
 
-    job = await _run_job(client, {
+    response = await client.post(f"{API}/jobs", json={
         "capability_id": "video.lowerthird", "project_id": pid, "asset_id": vid,
         "input": {"text": "Name", "position": "top-left"},
     })
-    assert job["status"] == "failed"
-    assert "position" in job["error"]
+    assert response.status_code == 422
+    assert "position" in response.json()["error"]["message"]
 
 
 async def test_subtitle_embed_soft(client: AsyncClient, tmp_path) -> None:
