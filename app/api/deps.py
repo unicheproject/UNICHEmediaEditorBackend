@@ -73,10 +73,12 @@ async def require_job_create_access(
     catalogue: CatalogueClient = Depends(get_catalogue_client),
 ) -> JobCreate:
     """Authorize the project a new job will run against (from body or its asset)."""
-    project_id = data.project_id
-    if project_id is None and data.asset_id is not None:
-        asset = await assets_svc.get_asset(session, data.asset_id)
-        project_id = asset.project_id
+    project_id = await jobs_svc.resolve_job_project(
+        session,
+        project_id=data.project_id,
+        asset_id=data.asset_id,
+        job_input=data.input,
+    )
     if project_id is not None:
         await projects_svc.require_project_access(
             session, catalogue, principal, project_id

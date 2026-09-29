@@ -33,8 +33,14 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     if not cap.enabled:
         raise ValidationError(f"Capability '{data.capability_id}' is disabled")
 
-    if data.project_id is not None:
-        await get_project(session, data.project_id)
+    project_id = await resolve_job_project(
+        session,
+        project_id=data.project_id,
+        asset_id=data.asset_id,
+        job_input=data.input,
+    )
+    if project_id is not None:
+        await get_project(session, project_id)
     if data.asset_id is not None:
         asset = await get_asset(session, data.asset_id)
         if asset.media_type not in cap.supported_media_types:
@@ -44,7 +50,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
             )
 
     job = Job(
-        project_id=data.project_id,
+        project_id=project_id,
         asset_id=data.asset_id,
         capability_id=data.capability_id,
         status=JobStatus.queued,
@@ -55,6 +61,45 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     await session.commit()
     await session.refresh(job)
     return job
+
+
+def _literal_asset_references(
+    asset_id: uuid.UUID | None, job_input: dict | None
+) -> list[uuid.UUID]:
+    """Return every literal asset UUID represented by the current job contract."""
+    references: list[uuid.UUID] = []
+    if asset_id is not None:
+        references.append(asset_id)
+
+    values = job_input or {}
+    for raw in values.get("asset_ids", []) or []:
+        references.append(raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw)))
+    for key, value in values.items():
+        if key.endswith("_asset_id") and value:
+            references.append(
+                value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+            )
+    return references
+
+
+async def resolve_job_project(
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID | None,
+    asset_id: uuid.UUID | None,
+    job_input: dict | None,
+) -> uuid.UUID | None:
+    """Resolve and enforce the single-project boundary for all job assets."""
+    resolved_project_id = project_id
+    for reference_id in _literal_asset_references(asset_id, job_input):
+        asset = await get_asset(session, reference_id)
+        if resolved_project_id is None:
+            resolved_project_id = asset.project_id
+        elif asset.project_id != resolved_project_id:
+            raise ValidationError(
+                f"Asset '{reference_id}' is not in the job's project"
+            )
+    return resolved_project_id
 
 
 async def get_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
@@ -111,11 +156,16 @@ async def _build_job_context(
     session: AsyncSession, job: Job, work_dir: Path
 ) -> JobContext:
     """Resolve input assets to paths and assemble the handler context."""
+    project_id = await resolve_job_project(
+        session,
+        project_id=job.project_id,
+        asset_id=job.asset_id,
+        job_input=job.input,
+    )
     storage = get_storage()
     input_path: str | None = None
     input_asset_meta: dict = {}
     input_paths: list[str] = []
-    project_id = job.project_id
 
     # Collect primary asset first, then any extra asset_ids (multi-input ops).
     asset_ids: list[uuid.UUID] = []
