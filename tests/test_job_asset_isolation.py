@@ -10,6 +10,7 @@ from app.core.database import async_session_factory
 from app.main import app
 from app.models.agent import AgentPlan, AgentPlanStatus, AgentSession
 from app.models.job import Job, JobStatus
+from app.services.catalogue_client import get_catalogue_client
 from app.services.jobs import execute_job
 
 API = "/api/v1"
@@ -28,6 +29,140 @@ async def _upload(
 
 async def _never_enqueue(_job_id: uuid.UUID) -> None:
     return None
+
+
+async def test_job_submission_authorizes_explicit_project_before_asset_resolution(
+    client: AsyncClient, make_project
+) -> None:
+    project_a = await make_project("unauthorized-A")
+    project_b = await make_project("foreign-B")
+    foreign_asset = await _upload(client, project_b, "foreign.mp4", "video/mp4")
+
+    # The fixture principal initially has access to both projects. Remove A
+    # from the Catalogue view to exercise the actual unauthorised API path.
+    catalogue = app.dependency_overrides[get_catalogue_client]()
+    catalogue.projects.pop(project_a)
+    app.dependency_overrides[get_enqueuer] = lambda: _never_enqueue
+
+    async def submit(asset_id: str) -> dict:
+        response = await client.post(
+            f"{API}/jobs",
+            json={
+                "capability_id": "video.resize",
+                "project_id": project_a,
+                "asset_id": asset_id,
+                "input": {"width": 320, "height": 240},
+            },
+        )
+        return {"status": response.status_code, **response.json()["error"]}
+
+    missing = await submit(str(uuid.uuid4()))
+    foreign = await submit(foreign_asset)
+
+    # Before the fix, these were 404/not_found and 422/validation_error,
+    # respectively. Both now fail at the project authorization boundary.
+    assert missing["status"] == 404
+    assert missing["code"] == "not_found"
+    assert foreign == missing
+
+
+async def test_unauthorized_explicit_project_hides_all_asset_reference_states(
+    client: AsyncClient, make_project
+) -> None:
+    project_a = await make_project("unauthorized-reference-A")
+    project_b = await make_project("reference-B")
+    own_video = await _upload(client, project_a, "own.mp4", "video/mp4")
+    foreign_video = await _upload(client, project_b, "foreign.mp4", "video/mp4")
+    foreign_audio = await _upload(client, project_b, "music.mp3", "audio/mpeg")
+    foreign_subtitle = await _upload(
+        client, project_b, "captions.srt", "application/x-subrip"
+    )
+    deleted = await _upload(client, project_b, "deleted.mp4", "video/mp4")
+    assert (await client.delete(f"{API}/assets/{deleted}")).status_code == 204
+
+    catalogue = app.dependency_overrides[get_catalogue_client]()
+    catalogue.projects.pop(project_a)
+    app.dependency_overrides[get_enqueuer] = lambda: _never_enqueue
+
+    missing = str(uuid.uuid4())
+
+    async def submit(body: dict) -> dict:
+        response = await client.post(f"{API}/jobs", json=body)
+        return {"status": response.status_code, **response.json()["error"]}
+
+    variants = [
+        # Primary asset_id.
+        (
+            lambda ref: {
+                "capability_id": "video.resize",
+                "project_id": project_a,
+                "asset_id": ref,
+                "input": {"width": 320, "height": 240},
+            },
+            [foreign_video, missing, deleted],
+        ),
+        # Ordered input.asset_ids.
+        (
+            lambda ref: {
+                "capability_id": "video.concat",
+                "project_id": project_a,
+                "input": {"asset_ids": [ref, ref]},
+            },
+            [foreign_video, missing],
+        ),
+        # Named secondary asset references.
+        (
+            lambda ref: {
+                "capability_id": "audio.mix",
+                "project_id": project_a,
+                "asset_id": own_video,
+                "input": {"music_asset_id": ref},
+            },
+            [foreign_audio, missing],
+        ),
+        (
+            lambda ref: {
+                "capability_id": "video.compose",
+                "project_id": project_a,
+                "input": {"asset_ids": [own_video], "audio_asset_id": ref},
+            },
+            [foreign_audio, missing],
+        ),
+        (
+            lambda ref: {
+                "capability_id": "video.compose",
+                "project_id": project_a,
+                "input": {"asset_ids": [own_video], "subtitle_asset_id": ref},
+            },
+            [foreign_subtitle, missing],
+        ),
+    ]
+
+    for make_body, references in variants:
+        errors = [await submit(make_body(reference)) for reference in references]
+        assert all(error == errors[0] for error in errors)
+        assert errors[0]["status"] == 404
+        assert errors[0]["code"] == "not_found"
+
+
+async def test_job_project_is_inferred_and_authorized_when_omitted(
+    client: AsyncClient, make_project
+) -> None:
+    project_id = await make_project("inferred-project")
+    video = await _upload(client, project_id, "video.mp4", "video/mp4")
+    app.dependency_overrides[get_enqueuer] = lambda: _never_enqueue
+
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "video.resize",
+            "asset_id": video,
+            "input": {"width": 320, "height": 240},
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["project_id"] == project_id
 
 
 @pytest.mark.parametrize(

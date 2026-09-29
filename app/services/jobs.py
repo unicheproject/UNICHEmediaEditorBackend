@@ -132,6 +132,25 @@ async def resolve_job_project(
     return resolved_project_id
 
 
+async def infer_job_project(
+    session: AsyncSession,
+    *,
+    asset_id: uuid.UUID | None,
+    job_input: dict | None,
+) -> uuid.UUID | None:
+    """Infer scope from only the first asset reference when no project is given.
+
+    The API authorizes this candidate project before resolving the remaining
+    user-supplied references. Full consistency validation remains in
+    ``resolve_job_project`` and is also performed by service/worker callers.
+    """
+    references = _literal_asset_references(asset_id, job_input)
+    if not references:
+        return None
+    asset = await get_asset(session, references[0])
+    return asset.project_id
+
+
 async def get_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     job = await session.get(Job, job_id)
     if job is None:

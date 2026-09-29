@@ -76,14 +76,25 @@ async def require_job_create_access(
     """Authorize the project a new job will run against (from body or its asset)."""
     capability = registry.get(data.capability_id)
     jobs_svc.validate_job_input(capability, data.input)
-    project_id = await jobs_svc.resolve_job_project(
-        session,
-        project_id=data.project_id,
-        asset_id=data.asset_id,
-        job_input=data.input,
-    )
+
+    # When the caller names a project, authorization must precede every asset
+    # lookup so asset existence/ownership cannot be used as an oracle.
+    project_id = data.project_id
+    if project_id is None:
+        # Preserve project inference: only the first reference is resolved to
+        # establish a candidate scope, which is authorized before other
+        # user-supplied references are inspected.
+        project_id = await jobs_svc.infer_job_project(
+            session, asset_id=data.asset_id, job_input=data.input
+        )
     if project_id is not None:
         await projects_svc.require_project_access(
             session, catalogue, principal, project_id
+        )
+        await jobs_svc.resolve_job_project(
+            session,
+            project_id=project_id,
+            asset_id=data.asset_id,
+            job_input=data.input,
         )
     return data
