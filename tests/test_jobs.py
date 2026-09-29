@@ -1,3 +1,4 @@
+import asyncio
 import io
 import uuid
 
@@ -5,10 +6,14 @@ import pytest
 from httpx import AsyncClient
 
 from app.api.v1.jobs import get_enqueuer
+from app.capabilities import registry
+from app.capabilities.context import HandlerResult, JobContext
 from app.capabilities.handlers import audio_tts as audio_tts_module
+from app.core.database import async_session_factory
 from app.main import app
 from app.providers.base import BaseInferenceProvider, InferenceRequest
 from app.providers.openrouter import AUDIO_BYTES_KEY
+from app.services.jobs import execute_job
 
 API = "/api/v1"
 
@@ -134,6 +139,87 @@ async def test_invalid_capability_rejected(client: AsyncClient) -> None:
         f"{API}/jobs", json={"capability_id": "no.such.capability"}
     )
     assert resp.status_code == 404
+
+
+async def test_job_submission_and_api_remain_async_while_jobs_run(
+    client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Model the production queue boundary without relying on timing or Redis."""
+    pid, aid = await _project_with_asset(
+        client, make_project, "pic.png", "image/png"
+    )
+    release = asyncio.Event()
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    started_count = 0
+    tasks: list[asyncio.Task[None]] = []
+
+    class _BlockingHandler:
+        async def run(self, _ctx: JobContext) -> HandlerResult:
+            nonlocal started_count
+            started_count += 1
+            (first_started if started_count == 1 else second_started).set()
+            await release.wait()
+            return HandlerResult(data={"completed": True})
+
+    monkeypatch.setitem(registry._HANDLERS, "image.caption", _BlockingHandler())
+
+    async def _run_in_worker(job_id: uuid.UUID) -> None:
+        async with async_session_factory() as session:
+            await execute_job(session, job_id)
+
+    async def _background_enqueue(job_id: uuid.UUID) -> None:
+        tasks.append(asyncio.create_task(_run_in_worker(job_id)))
+
+    app.dependency_overrides[get_enqueuer] = lambda: _background_enqueue
+    try:
+        first = await client.post(
+            f"{API}/jobs",
+            json={
+                "capability_id": "image.caption",
+                "project_id": pid,
+                "asset_id": aid,
+            },
+        )
+        assert first.status_code == 201
+        assert first.json()["status"] == "queued"
+        first_id = first.json()["id"]
+        await asyncio.wait_for(first_started.wait(), timeout=2)
+
+        # Independent authorized routes and polling remain responsive while the
+        # handler is deliberately suspended in RUNNING state.
+        assert (await client.get(f"{API}/projects/{pid}")).status_code == 200
+        assert (await client.get(f"{API}/projects/{pid}/assets")).status_code == 200
+        detail = await client.get(f"{API}/jobs/{first_id}")
+        assert detail.status_code == 200
+        assert detail.json()["status"] == "running"
+        listing = await client.get(f"{API}/projects/{pid}/jobs")
+        assert listing.status_code == 200
+        assert listing.json()["items"][0]["status"] == "running"
+
+        # Submission is not serialized behind the first execution. The second
+        # worker task reaches the same controlled handler before either is released.
+        second = await client.post(
+            f"{API}/jobs",
+            json={
+                "capability_id": "image.caption",
+                "project_id": pid,
+                "asset_id": aid,
+            },
+        )
+        assert second.status_code == 201
+        assert second.json()["status"] == "queued"
+        second_id = second.json()["id"]
+        await asyncio.wait_for(second_started.wait(), timeout=2)
+
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=2)
+        assert (await client.get(f"{API}/jobs/{first_id}")).json()["status"] == "succeeded"
+        assert (await client.get(f"{API}/jobs/{second_id}")).json()["status"] == "succeeded"
+    finally:
+        release.set()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def test_cancel_terminal_job_rejected(client: AsyncClient, make_project) -> None:
