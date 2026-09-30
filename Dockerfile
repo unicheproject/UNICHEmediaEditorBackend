@@ -59,7 +59,8 @@ COPY requirements.lock pyproject.toml ./
 RUN uv pip install --system --require-hashes \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     --index-strategy unsafe-best-match \
-    -r requirements.lock
+    -r requirements.lock \
+    && rm -rf /root/.cache/uv
 
 # basicsr 1.4.2 (unmaintained since 2022) imports
 # `torchvision.transforms.functional_tensor`, which torchvision removed in
