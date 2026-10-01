@@ -115,26 +115,38 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "video.trim",
         "title": "Video Trim",
-        "description": "Trim a video clip to a start/end time range (seconds).",
+        "description": (
+            "Keep one specified interval from a video and return one video. "
+            "Use this to keep from a time onward or keep a time range; use video.split "
+            "to divide the complete input into multiple segments."
+        ),
         "media": _V,
         "properties": {
             "start": _number(
-                "Start time", "Start time in seconds.", **{"x-unit": "seconds"}
+                "Start time", "Start of the interval to keep, in seconds.", **{"x-unit": "seconds"}
             ),
-            "end": _number("End time", "End time in seconds.", **{"x-unit": "seconds"}),
+            "end": _number(
+                "End time", "End of the interval to keep, in seconds.", **{"x-unit": "seconds"}
+            ),
         },
         "required": ["start", "end"],
     },
     {
         "id": "video.split",
         "title": "Video Split",
-        "description": "Split a video into segments at the given time markers (seconds).",
+        "description": (
+            "Divide the complete input video at the given time markers and return "
+            "multiple segment Assets. Splitting does not choose which segment to keep; "
+            "use video.trim to keep one interval."
+        ),
         "media": _V,
         "properties": {
             "markers": {
                 "type": "array",
                 "title": "Split markers",
-                "description": "Times in seconds at which to split the video.",
+                "description": (
+                    "Times in seconds where the complete video is divided into segments."
+                ),
                 "items": {"type": "number"},
                 "minItems": 1,
                 "x-unit": "seconds",

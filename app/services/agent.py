@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import llm
+from app.agent.render import compile_execution_plan
 from app.agent.schemas import Plan, PlannerResult
 from app.core.errors import NotFoundError, ValidationError
 from app.models.agent import AgentPlan, AgentSession
@@ -68,21 +69,33 @@ def _planning_asset_context(asset: Asset) -> dict:
 
 async def _assets_for_planning(
     session: AsyncSession, agent_session: AgentSession
-) -> tuple[dict[str, str], dict[str, dict]]:
+) -> tuple[dict[str, str], dict[str, dict], dict[str, dict]]:
     assets_by_id: dict[str, str] = {}
     asset_context: dict[str, dict] = {}
+    asset_facts: dict[str, dict] = {}
     for aid in agent_session.asset_ids:
         asset = await get_asset(session, uuid.UUID(aid))
         assets_by_id[aid] = asset.media_type.value
         asset_context[aid] = _planning_asset_context(asset)
-    return assets_by_id, asset_context
+        asset_facts[aid] = {
+            "media_type": asset.media_type.value,
+            "extension": asset.extension,
+            "checksum_sha256": asset.checksum_sha256,
+            "technical_metadata_status": asset.technical_metadata_status,
+            "width": asset.width,
+            "height": asset.height,
+            "has_audio_stream": asset.has_audio_stream,
+        }
+    return assets_by_id, asset_context, asset_facts
 
 
 async def post_message(
     session: AsyncSession, session_id: uuid.UUID, content: str
 ) -> tuple[PlannerResult, AgentPlan | None]:
     agent_session = await get_session(session, session_id)
-    assets_by_id, asset_context = await _assets_for_planning(session, agent_session)
+    assets_by_id, asset_context, asset_facts = await _assets_for_planning(
+        session, agent_session
+    )
 
     result, new_messages = await llm.propose(
         list(agent_session.messages), content, assets_by_id,
@@ -92,12 +105,14 @@ async def post_message(
 
     plan_row: AgentPlan | None = None
     if isinstance(result, Plan):
+        execution_summary = compile_execution_plan(result, asset_facts)
         plan_row = AgentPlan(
             session_id=agent_session.id,
             summary=result.summary,
             status=AgentPlanStatus.proposed,
             steps=[s.model_dump() for s in result.steps],
             step_runs=[],
+            execution_summary=execution_summary,
             result_asset_ids=[],
         )
         session.add(plan_row)

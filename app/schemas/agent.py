@@ -42,6 +42,7 @@ class AgentPlanRead(ORMModel):
     status: AgentPlanStatus
     steps: list[dict[str, Any]]
     step_runs: list[dict[str, Any]]
+    execution_summary: dict[str, Any] | None = None
     result_asset_ids: list[uuid.UUID]
     error: str | None
     created_at: datetime

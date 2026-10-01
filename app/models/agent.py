@@ -40,5 +40,8 @@ class AgentPlan(Base, TimestampMixin):
     # Proposed steps (as planned) and per-step run state (job_id/status/output).
     steps: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     step_runs: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # Compiled Agent execution schedule, count summary, and source fingerprints.
+    # Nullable for plans persisted before the render optimizer was introduced.
+    execution_summary: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     result_asset_ids: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

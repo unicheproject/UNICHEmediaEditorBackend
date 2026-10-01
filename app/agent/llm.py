@@ -43,6 +43,14 @@ inputs (width, height, start, end, format, subtitle_asset_id, music_asset_id,
 audio_asset_id, ...) in `params`. Map "1080p"->1920x1080, "720p"->1280x720,
 "square"->1080x1080; timecodes (00:01:10) -> seconds. Only plan steps whose
 capabilities exist in the catalog.
+Temporal intent must be explicit: video.trim keeps one interval and returns
+one video; video.split divides the complete input at markers and returns
+multiple segments, without selecting one. For example, "keep from 10 seconds
+onward" is trim semantics, while "split at 10 seconds" is split semantics.
+If the request does not make clear whether a portion should be kept or removed,
+ask a clarification question instead of choosing an interpretation. Never use
+video.split as a substitute for selecting a trim range, and do not reference a
+multi-output split result as if it were one asset.
 """
 
 

@@ -35,10 +35,18 @@ def _effective_input(step: PlanStep) -> dict[str, Any]:
 
 def _refs_in_step(step: PlanStep) -> list[str]:
     refs: list[str] = []
-    candidates = [step.asset, *step.assets, *step.params.values()]
-    for value in candidates:
+    def visit(value: Any) -> None:
         if is_step_ref(value):
             refs.append(step_ref_id(value))  # type: ignore[arg-type]
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+
+    for value in [step.asset, *step.assets, *step.params.values()]:
+        visit(value)
     return refs
 
 
@@ -56,6 +64,7 @@ def validate_plan(
         raise PlanValidationError("Plan has no steps.")
 
     seen_steps: set[str] = set()
+    capability_by_step: dict[str, str] = {}
     for step in plan.steps:
         # capability exists + enabled
         try:
@@ -85,6 +94,11 @@ def validate_plan(
             if ref not in seen_steps:
                 raise PlanValidationError(
                     f"Step '{step.id}' references unknown/earlier-undefined step '{ref}'."
+                )
+            if capability_by_step.get(ref) == "video.split":
+                raise PlanValidationError(
+                    f"Step '{step.id}' cannot use '@{ref}' as one asset: video.split "
+                    "returns multiple segments. Select a segment explicitly in a future flow."
                 )
         for dep in step.depends_on:
             if dep not in seen_steps:
@@ -126,3 +140,4 @@ def validate_plan(
                 )
 
         seen_steps.add(step.id)
+        capability_by_step[step.id] = step.capability_id
