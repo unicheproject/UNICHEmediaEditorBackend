@@ -14,6 +14,7 @@ import hashlib
 import re
 import shutil
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -75,8 +76,8 @@ class LocalStorageService:
 
     def delete_asset(self, project_id: uuid.UUID, asset_id: uuid.UUID) -> None:
         asset_dir = self._asset_dir(project_id, asset_id)
-        if asset_dir.exists():
-            shutil.rmtree(asset_dir, ignore_errors=True)
+        with suppress(FileNotFoundError):
+            shutil.rmtree(asset_dir)
 
     def calculate_checksum(self, storage_path: str) -> str:
         digest = hashlib.sha256()

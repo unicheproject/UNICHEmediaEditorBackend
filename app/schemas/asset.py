@@ -28,6 +28,8 @@ class AssetRead(ORMModel):
     checksum_sha256: str
     source_asset_id: uuid.UUID | None
     is_intermediate: bool
+    temp_expires_at: datetime | None
+    physical_expired_at: datetime | None
     technical_metadata_status: TechnicalMetadataStatus
     duration_seconds: float | None
     container_format: str | None

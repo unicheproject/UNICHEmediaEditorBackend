@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import uuid
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
@@ -472,6 +473,8 @@ async def test_agent_trim_resize_lowerthird_executes_one_physical_render(
     assert output["media_type"] == "video"
     assert output["width"] == 80 and output["height"] == 60
     assert output["technical_metadata_status"] == "available"
+    assert output["is_intermediate"] is False
+    assert output["temp_expires_at"] is None
     async with async_session_factory() as db:
         jobs = list(
             (await db.execute(select(Job).where(Job.project_id == uuid.UUID(pid)))).scalars()
@@ -616,6 +619,85 @@ async def test_grouped_render_failure_has_truthful_job_and_no_output_asset(
         assert final["execution_summary"]["nodes"][0]["status"] == "failed"
 
 
+@pytest.mark.skipif(not NEED_ALL, reason="needs ffmpeg + convert + font")
+async def test_agent_checkpoint_is_hidden_immediately_when_later_step_fails(
+    client: AsyncClient, make_project, monkeypatch, tmp_path
+) -> None:
+    from app.agent.schemas import Plan
+    from app.models.enums import TechnicalMetadataStatus
+    from app.services import jobs as jobs_svc
+
+    pid = await make_project("agent-temp-checkpoint-failure")
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+        "color=c=blue:size=160x120:rate=10:duration=1", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", str(source),
+    ], check=True)
+    with source.open("rb") as fh:
+        uploaded = await client.post(
+            f"{API}/projects/{pid}/assets",
+            files={"file": ("source.mp4", fh.read(), "video/mp4")},
+        )
+    source_id = uploaded.json()["id"]
+    async with async_session_factory() as db:
+        asset = await db.get(Asset, uuid.UUID(source_id))
+        assert asset is not None
+        asset.technical_metadata_status = TechnicalMetadataStatus.available.value
+        asset.width, asset.height, asset.has_audio_stream = 160, 120, False
+        await db.commit()
+
+    agent_session = (await client.post(
+        f"{API}/agent/sessions", json={"project_id": pid, "asset_ids": [source_id]}
+    )).json()
+    plan = Plan.model_validate({"type": "plan", "summary": "checkpoint then fail", "steps": [
+        {"id": "resize", "capability_id": "video.resize", "asset": source_id,
+         "params": {"width": 80, "height": 60}},
+        {"id": "normalize", "capability_id": "audio.normalize", "asset": "@resize",
+         "params": {}},
+    ]})
+
+    async def fake_propose(*_args, **_kwargs):
+        return plan, []
+
+    async def copy_render(src: Path, dst: Path, *_args, **_kwargs) -> bool:
+        shutil.copyfile(src, dst)
+        return False
+
+    class FailingHandler:
+        async def run(self, _ctx):
+            raise RuntimeError("expected downstream test failure")
+
+    original_get_handler = jobs_svc.registry.get_handler
+
+    def get_handler(capability_id: str):
+        if capability_id == "audio.normalize":
+            return FailingHandler()
+        return original_get_handler(capability_id)
+
+    monkeypatch.setattr("app.services.agent.llm.propose", fake_propose)
+    monkeypatch.setattr("app.agent.render.render_group", copy_render)
+    monkeypatch.setattr(jobs_svc.registry, "get_handler", get_handler)
+    proposed = await client.post(
+        f"{API}/agent/sessions/{agent_session['id']}/messages",
+        json={"content": "Resize then normalize"},
+    )
+    plan_id = proposed.json()["plan"]["id"]
+    await client.post(f"{API}/agent/plans/{plan_id}/approve")
+    result = (await client.get(f"{API}/agent/plans/{plan_id}")).json()
+    assert result["status"] == "failed"
+    checkpoint_id = result["step_runs"][0]["output_asset_id"]
+    checkpoint = (await client.get(f"{API}/assets/{checkpoint_id}")).json()
+    assert checkpoint["is_intermediate"] is True
+    assert checkpoint["temp_expires_at"] is not None
+    default_assets = (await client.get(f"{API}/projects/{pid}/assets")).json()
+    included_assets = (await client.get(
+        f"{API}/projects/{pid}/assets?include_intermediate=true"
+    )).json()
+    assert checkpoint_id not in {asset["id"] for asset in default_assets}
+    assert checkpoint_id in {asset["id"] for asset in included_assets}
+
+
 # --- session flow via API (no binaries) ------------------------------------
 
 
@@ -712,16 +794,18 @@ async def test_agent_end_to_end_slideshow(
     consumed = {r["output_asset_id"] for r in final["step_runs"]
                 if r["step_id"] in ("title", "slides")}
     for aid in consumed:
-        assert (await client.get(f"{API}/assets/{aid}")).json()["is_intermediate"] is True
+        temp_asset = (await client.get(f"{API}/assets/{aid}")).json()
+        assert temp_asset["is_intermediate"] is True
+        assert temp_asset["temp_expires_at"] is not None
 
-    # the default list shows everything; filtered list hides intermediates
+    # Temp Processed Assets are excluded by default and included explicitly.
     pid = (await client.get(f"{API}/agent/sessions/{sess['id']}")).json()["project_id"]
-    all_assets = (await client.get(f"{API}/projects/{pid}/assets")).json()
-    finals_only = (
-        await client.get(f"{API}/projects/{pid}/assets?include_intermediate=false")
+    default_list = (await client.get(f"{API}/projects/{pid}/assets")).json()
+    all_assets = (
+        await client.get(f"{API}/projects/{pid}/assets?include_intermediate=true")
     ).json()
     all_ids = {a["id"] for a in all_assets}
-    final_ids = {a["id"] for a in finals_only}
-    assert consumed <= all_ids                 # intermediates present in full list
-    assert consumed.isdisjoint(final_ids)      # but hidden when filtered
-    assert out_id in final_ids                 # deliverable remains
+    default_ids = {a["id"] for a in default_list}
+    assert consumed <= all_ids
+    assert consumed.isdisjoint(default_ids)
+    assert out_id in default_ids

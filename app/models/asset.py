@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import false as sa_false
 
@@ -43,6 +44,14 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     # later step). Finals/originals are False. Lets the UI hide scaffolding.
     is_intermediate: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=sa_false(), index=True
+    )
+    # Temp Processed Assets retain their audit row after the binary expires.
+    # Historical intermediates keep NULL here and are not automatically swept.
+    temp_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    physical_expired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Canonical, normalized technical media metadata. Summary columns support

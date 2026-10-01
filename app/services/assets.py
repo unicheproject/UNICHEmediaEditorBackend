@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
@@ -13,16 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import (
+    GoneError,
     NotFoundError,
     PayloadTooLargeError,
     UnsupportedMediaTypeError,
 )
+from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.schemas.asset import AssetUpdate
 from app.services.media_metadata import apply_metadata, probe_media_safely
 from app.services.projects import get_project
 from app.services.storage import get_storage, safe_filename
+
+logger = get_logger(__name__)
 
 
 def _resolve_media_type(extension: str) -> MediaType:
@@ -76,7 +80,12 @@ async def create_asset(
 
     if size_bytes > settings.max_upload_size_bytes:
         # Roll back the just-written file before failing.
-        storage.delete_asset(project_id, asset_id)
+        try:
+            storage.delete_asset(project_id, asset_id)
+        except OSError as exc:
+            logger.warning(
+                "Could not remove rejected upload %s (%s)", asset_id, type(exc).__name__
+            )
         raise PayloadTooLargeError(
             f"File exceeds maximum upload size of {settings.max_upload_size_mb} MB"
         )
@@ -109,7 +118,7 @@ async def list_assets(
     session: AsyncSession,
     project_id: uuid.UUID,
     *,
-    include_intermediate: bool = True,
+    include_intermediate: bool = False,
 ) -> list[Asset]:
     await get_project(session, project_id)
     stmt = select(Asset).where(
@@ -155,6 +164,7 @@ async def create_derived_asset(
     src_path: Path,
     filename: str,
     media_type: MediaType,
+    is_intermediate: bool = False,
 ) -> Asset:
     """Register a tool-produced file as a new (derived) Asset.
 
@@ -177,6 +187,7 @@ async def create_derived_asset(
     # second queue round-trip and never makes a successful output fail.
     metadata = await probe_media_safely(src_path, media_type)
 
+    persisted_at = datetime.now(UTC)
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -189,6 +200,10 @@ async def create_derived_asset(
         storage_path=storage_path,
         checksum_sha256=checksum,
         source_asset_id=source_asset_id,
+        is_intermediate=is_intermediate,
+        temp_expires_at=(
+            persisted_at + timedelta(hours=72) if is_intermediate else None
+        ),
         technical_metadata_status=metadata.status.value,
     )
     apply_metadata(asset, metadata)
@@ -196,3 +211,13 @@ async def create_derived_asset(
     await session.commit()
     await session.refresh(asset)
     return asset
+
+
+def ensure_asset_binary_available(asset: Asset) -> Path:
+    """Return a readable local media path or a controlled lifecycle error."""
+    if asset.physical_expired_at is not None:
+        raise GoneError("This Asset's temporary media has expired")
+    path = get_storage().get_path(asset.storage_path)
+    if not path.is_file():
+        raise NotFoundError("Asset media is not available")
+    return path

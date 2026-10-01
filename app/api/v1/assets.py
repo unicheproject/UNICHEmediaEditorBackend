@@ -21,7 +21,6 @@ from app.models.asset import Asset
 from app.models.project import Project
 from app.schemas.asset import AssetRead, AssetUpdate
 from app.services import assets as svc
-from app.services.storage import get_storage
 from app.services.thumbnails import get_or_create_thumbnail
 from app.workers.queue import enqueue_asset_probe
 
@@ -70,7 +69,7 @@ async def upload_asset(
 @router.get("/projects/{project_id}/assets", response_model=list[AssetRead])
 async def list_assets(
     project_id: uuid.UUID,
-    include_intermediate: bool = True,
+    include_intermediate: bool = False,
     session: AsyncSession = Depends(get_session),
     _project: Project = Depends(require_project),
 ) -> list[AssetRead]:
@@ -89,7 +88,7 @@ async def get_asset(asset: Asset = Depends(require_asset_access)) -> AssetRead:
 async def download_asset(
     asset: Asset = Depends(require_asset_access),
 ) -> FileResponse:
-    path = get_storage().get_path(asset.storage_path)
+    path = svc.ensure_asset_binary_available(asset)
     return FileResponse(
         path,
         media_type=asset.mime_type,
@@ -101,6 +100,7 @@ async def download_asset(
 async def get_asset_thumbnail(
     asset: Asset = Depends(require_asset_access),
 ) -> FileResponse:
+    svc.ensure_asset_binary_available(asset)
     path = await get_or_create_thumbnail(asset)
     return FileResponse(path, media_type="image/jpeg")
 

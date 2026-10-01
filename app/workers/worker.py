@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from arq import cron
+
 from app.core.logging import configure_logging
 from app.workers.queue import redis_settings
-from app.workers.tasks import run_asset_probe, run_job, run_plan
+from app.workers.tasks import cleanup_temp_assets, run_asset_probe, run_job, run_plan
 
 
 async def startup(ctx: dict) -> None:
@@ -13,6 +15,7 @@ async def startup(ctx: dict) -> None:
 
 class WorkerSettings:
     functions = [run_job, run_plan, run_asset_probe]
+    cron_jobs = [cron(cleanup_temp_assets, minute=0)]
     redis_settings = redis_settings()
     on_startup = startup
     max_jobs = 10

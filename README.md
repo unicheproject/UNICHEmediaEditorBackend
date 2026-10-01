@@ -181,6 +181,15 @@ and `?offset=`, newest first. An optional `?status=queued|running|succeeded|fail
 filter applies before pagination and total calculation. It returns a page envelope:
 `{ "items": [...], "total": N, "limit": 50, "offset": 0 }`.
 
+`GET /api/v1/projects/{id}/assets` excludes Temp Processed Assets
+(`is_intermediate=true`) by default. Pass `?include_intermediate=true` to
+include them. Asset responses expose `temp_expires_at` and
+`physical_expired_at`; the latter is populated after automatic expiry removes
+the media binary while retaining the Asset and job/Agent audit metadata.
+Download and thumbnail requests for an expired binary return HTTP 410.
+Intermediate checkpoints expire after 72 hours; final Agent outputs and
+uploaded originals are not part of this retention cleanup.
+
 Project and asset deletes are **soft** (`deleted_at`). Uploads validate file
 extension (415 if unsupported) and size against `MAX_UPLOAD_SIZE_MB` (413 if
 too large).

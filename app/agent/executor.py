@@ -24,13 +24,11 @@ from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.core.errors import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.agent import AgentPlan, AgentSession
-from app.models.asset import Asset
 from app.models.enums import AgentPlanStatus, JobStatus, MediaType
 from app.models.job import Job
 from app.schemas.job import JobCreate
 from app.services import jobs as jobs_svc
-from app.services.assets import get_asset
-from app.services.storage import get_storage
+from app.services.assets import ensure_asset_binary_available, get_asset
 
 logger = get_logger(__name__)
 
@@ -126,6 +124,7 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
     plan_row.status = AgentPlanStatus.running
     await session.commit()
 
+    consumed = _consumed_step_ids(plan)
     outputs: dict[str, str | None] = {}
     step_runs: list[dict] = []
     try:
@@ -156,8 +155,13 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
                     await session.commit()
                     continue
                 if node["kind"] == "render_group":
+                    terminal_step = node["step_ids"][-1]
                     job, output_asset_id = await _execute_render_group(
-                        session, plan_row, project_id, node
+                        session,
+                        plan_row,
+                        project_id,
+                        node,
+                        is_intermediate=terminal_step in consumed,
                     )
                     node["job_id"] = str(job.id)
                     node["status"] = job.status.value
@@ -194,11 +198,17 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
 
                 step = steps_by_id[node["step_id"]]
                 await _execute_standard_step(
-                    session, project_id, step, outputs, step_runs, plan_row, summary
+                    session,
+                    project_id,
+                    step,
+                    outputs,
+                    step_runs,
+                    plan_row,
+                    summary,
+                    is_intermediate=step.id in consumed,
                 )
 
         # Outputs consumed by a later step are intermediate; leaves are finals.
-        consumed = _consumed_step_ids(plan)
         finals: list[str] = []
         for run in step_runs:
             if run.get("render_group_id"):
@@ -207,9 +217,7 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
                          if run.get("output_asset_id") else [])
             for out_asset in out_assets:
                 if run["step_id"] in consumed:
-                    asset = await session.get(Asset, uuid.UUID(out_asset))
-                    if asset is not None:
-                        asset.is_intermediate = True
+                    continue
                 elif out_asset not in finals:
                     finals.append(out_asset)
         for node in (summary or {}).get("nodes", []):
@@ -218,9 +226,7 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
             terminal_step = node["step_ids"][-1]
             asset_id = node["output_asset_id"]
             if terminal_step in consumed:
-                asset = await session.get(Asset, uuid.UUID(asset_id))
-                if asset is not None:
-                    asset.is_intermediate = True
+                continue
             elif asset_id not in finals:
                 finals.append(asset_id)
         # Identity-only leaf steps return their unchanged source without creating
@@ -278,6 +284,8 @@ async def _execute_standard_step(
     step_runs: list[dict],
     plan_row: AgentPlan,
     summary: dict,
+    *,
+    is_intermediate: bool = False,
 ) -> None:
     asset_id, job_input = _build_job_input(step, outputs)
     job = await jobs_svc.create_job(
@@ -289,7 +297,9 @@ async def _execute_standard_step(
             input=job_input,
         ),
     )
-    job = await jobs_svc.execute_job(session, job.id)
+    job = await jobs_svc.execute_job(
+        session, job.id, is_intermediate_output=is_intermediate
+    )
     output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
     output_id = output_ids[0] if len(output_ids) == 1 else None
     outputs[step.id] = output_id
@@ -320,6 +330,7 @@ async def _execute_legacy_steps(
     step_runs: list[dict],
 ) -> None:
     """Preserve old persisted-plan behavior when no optimizer summary exists."""
+    consumed = _consumed_step_ids(plan)
     for step in plan.steps:
         asset_id, job_input = _build_job_input(step, outputs)
         job = await jobs_svc.create_job(
@@ -327,7 +338,11 @@ async def _execute_legacy_steps(
             JobCreate(capability_id=step.capability_id, project_id=project_id,
                       asset_id=asset_id, input=job_input),
         )
-        job = await jobs_svc.execute_job(session, job.id)
+        job = await jobs_svc.execute_job(
+            session,
+            job.id,
+            is_intermediate_output=step.id in consumed,
+        )
         output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
         output_id = output_ids[0] if output_ids else None
         outputs[step.id] = output_id
@@ -352,6 +367,8 @@ async def _execute_render_group(
     plan_row: AgentPlan,
     project_id: uuid.UUID,
     group: dict,
+    *,
+    is_intermediate: bool,
 ) -> tuple[Job, str | None]:
     """Execute and persist one physical Agent-only render-group Job."""
     source_asset = await get_asset(session, uuid.UUID(group["source_asset_id"]))
@@ -379,7 +396,7 @@ async def _execute_render_group(
     work_dir = Path(tempfile.mkdtemp(prefix=f"uniche-agent-render-{job.id}-"))
     output_asset_id: str | None = None
     try:
-        source_path = get_storage().get_path(source_asset.storage_path)
+        source_path = ensure_asset_binary_available(source_asset)
         output_name = f"agent-{plan_row.id}-{group['id']}.{group['output_extension']}"
         output_path = work_dir / output_name
         audio_present = await render_compiler.render_group(
@@ -405,7 +422,9 @@ async def _execute_render_group(
             },
             outputs=[OutputFile(output_path, output_name, MediaType.video)],
         )
-        job.output = await jobs_svc._persist_outputs(session, job, ctx, result)
+        job.output = await jobs_svc._persist_outputs(
+            session, job, ctx, result, is_intermediate=is_intermediate
+        )
         output_asset_id = job.output["outputs"][0]["asset_id"]
         job.status = JobStatus.succeeded
         job.progress = 100

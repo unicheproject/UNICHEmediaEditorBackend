@@ -26,7 +26,7 @@ from app.models.job import Job
 from app.schemas.capability import CapabilityRead
 from app.schemas.job import JobCreate
 from app.services import assets as assets_svc
-from app.services.assets import get_asset
+from app.services.assets import ensure_asset_binary_available, get_asset
 from app.services.projects import get_project
 from app.services.storage import get_storage
 
@@ -45,6 +45,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
         project_id=data.project_id,
         asset_id=data.asset_id,
         job_input=data.input,
+        lock_assets=True,
     )
     if project_id is not None:
         await get_project(session, project_id)
@@ -118,17 +119,29 @@ async def resolve_job_project(
     project_id: uuid.UUID | None,
     asset_id: uuid.UUID | None,
     job_input: dict | None,
+    lock_assets: bool = False,
 ) -> uuid.UUID | None:
     """Resolve and enforce the single-project boundary for all job assets."""
     resolved_project_id = project_id
     for reference_id in _literal_asset_references(asset_id, job_input):
-        asset = await get_asset(session, reference_id)
+        if lock_assets:
+            result = await session.execute(
+                select(Asset)
+                .where(Asset.id == reference_id, Asset.deleted_at.is_(None))
+                .with_for_update()
+            )
+            asset = result.scalar_one_or_none()
+            if asset is None:
+                raise NotFoundError(f"Asset '{reference_id}' not found")
+        else:
+            asset = await get_asset(session, reference_id)
         if resolved_project_id is None:
             resolved_project_id = asset.project_id
         elif asset.project_id != resolved_project_id:
             raise ValidationError(
                 f"Asset '{reference_id}' is not in the job's project"
             )
+        ensure_asset_binary_available(asset)
     return resolved_project_id
 
 
@@ -266,7 +279,12 @@ async def _build_job_context(
 
 
 async def _persist_outputs(
-    session: AsyncSession, job: Job, ctx: JobContext, result: HandlerResult
+    session: AsyncSession,
+    job: Job,
+    ctx: JobContext,
+    result: HandlerResult,
+    *,
+    is_intermediate: bool = False,
 ) -> dict:
     """Register handler output files as derived Assets; build job.output."""
     descriptors: list[dict] = []
@@ -282,6 +300,7 @@ async def _persist_outputs(
             src_path=out.path,
             filename=out.filename,
             media_type=out.media_type,
+            is_intermediate=is_intermediate,
         )
         descriptors.append(
             {
@@ -299,7 +318,12 @@ async def _persist_outputs(
     return output
 
 
-async def execute_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
+async def execute_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    is_intermediate_output: bool = False,
+) -> Job:
     """Run a queued job to completion. Used by the worker (and tests).
 
     Transitions are committed as they happen so polling/SSE see live state.
@@ -319,7 +343,13 @@ async def execute_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
         await session.commit()
 
         result = await handler.run(ctx)
-        output = await _persist_outputs(session, job, ctx, result)
+        output = await _persist_outputs(
+            session,
+            job,
+            ctx,
+            result,
+            is_intermediate=is_intermediate_output,
+        )
 
         # A concurrent cancel_job() may have already finalized this job (e.g.
         # the handler was mid-cleanup when cancelled but still returned

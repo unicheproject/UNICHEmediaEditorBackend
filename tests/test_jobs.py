@@ -115,6 +115,14 @@ async def test_audio_tts_job_persists_derived_audio_asset(
     assert len(outputs) == 1
     assert outputs[0]["media_type"] == "audio"
 
+    output_asset = (
+        await client.get(f"{API}/assets/{outputs[0]['asset_id']}")
+    ).json()
+    assert output_asset["is_intermediate"] is False
+    assert output_asset["temp_expires_at"] is None
+    normal_assets = (await client.get(f"{API}/projects/{pid}/assets")).json()
+    assert outputs[0]["asset_id"] in {asset["id"] for asset in normal_assets}
+
     download = await client.get(f"{API}/assets/{outputs[0]['asset_id']}/download")
     assert download.status_code == 200
     assert download.content == fake_audio

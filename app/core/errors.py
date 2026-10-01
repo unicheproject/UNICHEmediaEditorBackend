@@ -38,6 +38,13 @@ class NotFoundError(AppError):
     code = "not_found"
 
 
+class GoneError(AppError):
+    """The retained resource exists, but its physical media has expired."""
+
+    status_code = 410
+    code = "asset_media_expired"
+
+
 class ValidationError(AppError):
     status_code = 422
     code = "validation_error"
