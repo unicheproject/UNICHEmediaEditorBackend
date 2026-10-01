@@ -11,7 +11,8 @@ from app.agent import llm
 from app.agent.schemas import Plan, PlannerResult
 from app.core.errors import NotFoundError, ValidationError
 from app.models.agent import AgentPlan, AgentSession
-from app.models.enums import AgentPlanStatus
+from app.models.asset import Asset
+from app.models.enums import AgentPlanStatus, TechnicalMetadataStatus
 from app.services.assets import get_asset
 from app.services.projects import get_project
 
@@ -42,22 +43,50 @@ async def get_session(session: AsyncSession, session_id: uuid.UUID) -> AgentSess
     return row
 
 
-async def _assets_by_id(session: AsyncSession, agent_session: AgentSession) -> dict[str, str]:
-    out: dict[str, str] = {}
+def _planning_asset_context(asset: Asset) -> dict:
+    """Whitelisted, compact asset facts safe for planner context."""
+    status = asset.technical_metadata_status
+    available = status == TechnicalMetadataStatus.available.value
+    fields = (
+        "duration_seconds",
+        "width",
+        "height",
+        "has_video_stream",
+        "has_audio_stream",
+        "video_codec",
+        "audio_codec",
+        "frame_rate",
+        "audio_sample_rate",
+        "audio_channels",
+    )
+    return {
+        "media_type": asset.media_type.value,
+        "technical_metadata_status": status,
+        **{field: getattr(asset, field) if available else None for field in fields},
+    }
+
+
+async def _assets_for_planning(
+    session: AsyncSession, agent_session: AgentSession
+) -> tuple[dict[str, str], dict[str, dict]]:
+    assets_by_id: dict[str, str] = {}
+    asset_context: dict[str, dict] = {}
     for aid in agent_session.asset_ids:
         asset = await get_asset(session, uuid.UUID(aid))
-        out[aid] = asset.media_type.value
-    return out
+        assets_by_id[aid] = asset.media_type.value
+        asset_context[aid] = _planning_asset_context(asset)
+    return assets_by_id, asset_context
 
 
 async def post_message(
     session: AsyncSession, session_id: uuid.UUID, content: str
 ) -> tuple[PlannerResult, AgentPlan | None]:
     agent_session = await get_session(session, session_id)
-    assets_by_id = await _assets_by_id(session, agent_session)
+    assets_by_id, asset_context = await _assets_for_planning(session, agent_session)
 
     result, new_messages = await llm.propose(
-        list(agent_session.messages), content, assets_by_id
+        list(agent_session.messages), content, assets_by_id,
+        asset_context=asset_context,
     )
     agent_session.messages = list(agent_session.messages) + new_messages
 

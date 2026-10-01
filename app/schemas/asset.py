@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import MediaType
+from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.schemas.common import ORMModel
 
 
@@ -28,6 +28,20 @@ class AssetRead(ORMModel):
     checksum_sha256: str
     source_asset_id: uuid.UUID | None
     is_intermediate: bool
+    technical_metadata_status: TechnicalMetadataStatus
+    duration_seconds: float | None
+    container_format: str | None
+    width: int | None
+    height: int | None
+    has_video_stream: bool | None
+    has_audio_stream: bool | None
+    video_codec: str | None
+    audio_codec: str | None
+    frame_rate: float | None
+    audio_sample_rate: int | None
+    audio_channels: int | None
+    bit_rate: int | None
+    technical_streams: dict | None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

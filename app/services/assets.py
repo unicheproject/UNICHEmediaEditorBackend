@@ -18,8 +18,9 @@ from app.core.errors import (
     UnsupportedMediaTypeError,
 )
 from app.models.asset import Asset
-from app.models.enums import MediaType
+from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.schemas.asset import AssetUpdate
+from app.services.media_metadata import apply_metadata, probe_media_safely
 from app.services.projects import get_project
 from app.services.storage import get_storage, safe_filename
 
@@ -96,6 +97,7 @@ async def create_asset(
         size_bytes=size_bytes,
         storage_path=storage_path,
         checksum_sha256=checksum,
+        technical_metadata_status=TechnicalMetadataStatus.pending.value,
     )
     session.add(asset)
     await session.commit()
@@ -171,6 +173,10 @@ async def create_derived_asset(
     checksum = storage.calculate_checksum(storage_path)
     mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
+    # Derived media already runs in the worker, so probing here avoids a
+    # second queue round-trip and never makes a successful output fail.
+    metadata = await probe_media_safely(src_path, media_type)
+
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -183,7 +189,9 @@ async def create_derived_asset(
         storage_path=storage_path,
         checksum_sha256=checksum,
         source_asset_id=source_asset_id,
+        technical_metadata_status=metadata.status.value,
     )
+    apply_metadata(asset, metadata)
     session.add(asset)
     await session.commit()
     await session.refresh(asset)

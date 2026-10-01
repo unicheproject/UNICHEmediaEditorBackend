@@ -182,6 +182,7 @@ async def propose(
     user_message: str,
     assets_by_id: dict[str, str],
     *,
+    asset_context: dict[str, dict] | None = None,
     settings: Settings | None = None,
 ) -> tuple[PlannerResult, list[dict]]:
     """Return (result, new_messages_to_append) for the session transcript."""
@@ -200,8 +201,15 @@ async def propose(
         return result, new_messages
 
     backend = OpenRouterBackend(settings)
-    asset_ctx = {"role": "system", "content": "IN-SCOPE ASSETS (id: media_type): "
-                 + json.dumps(assets_by_id)}
+    context = asset_context or {
+        asset_id: {"media_type": media_type}
+        for asset_id, media_type in assets_by_id.items()
+    }
+    asset_ctx = {
+        "role": "system",
+        "content": "IN-SCOPE ASSETS (compact technical metadata; null means unknown): "
+        + json.dumps(context, separators=(",", ":")),
+    }
     messages = [_system_message(), asset_ctx, *history, {"role": "user", "content": user_message}]
 
     last_error: str | None = None

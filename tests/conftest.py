@@ -31,6 +31,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from app.agent.executor import execute_plan  # noqa: E402
 from app.api.v1.agent import get_plan_enqueuer  # noqa: E402
+from app.api.v1.assets import get_asset_probe_enqueuer  # noqa: E402
 from app.api.v1.jobs import get_canceller, get_enqueuer  # noqa: E402
 from app.core.database import async_session_factory, engine  # noqa: E402
 from app.core.security import Principal, get_current_principal  # noqa: E402
@@ -124,6 +125,10 @@ async def _eager_run_plan(plan_id: uuid.UUID) -> None:
         await execute_plan(session, plan_id)
 
 
+async def _noop_asset_probe(asset_id: uuid.UUID) -> None:
+    """Uploads remain pending in API tests unless a probe test opts in."""
+
+
 def _get_eager_plan_enqueuer():
     return _eager_run_plan
 
@@ -142,6 +147,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_enqueuer] = _get_eager_enqueuer
     app.dependency_overrides[get_canceller] = _get_noop_canceller
     app.dependency_overrides[get_plan_enqueuer] = _get_eager_plan_enqueuer
+    app.dependency_overrides[get_asset_probe_enqueuer] = lambda: _noop_asset_probe
     app.dependency_overrides[get_catalogue_client] = lambda: fake_catalogue
     app.dependency_overrides[get_current_principal] = lambda: Principal(
         subject=TEST_SUBJECT, token="test-token", preferred_username="tester"

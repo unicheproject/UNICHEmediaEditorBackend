@@ -13,6 +13,12 @@ class MediaType(enum.StrEnum):
     unknown = "unknown"
 
 
+class TechnicalMetadataStatus(enum.StrEnum):
+    pending = "pending"
+    available = "available"
+    unavailable = "unavailable"
+
+
 class JobStatus(enum.StrEnum):
     queued = "queued"
     running = "running"

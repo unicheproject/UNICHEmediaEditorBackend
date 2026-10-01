@@ -5,12 +5,12 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, String
+from sqlalchemy import BigInteger, Boolean, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import false as sa_false
 
-from app.models.base import Base, SoftDeleteMixin, TimestampMixin
-from app.models.enums import MediaType
+from app.models.base import Base, JSONType, SoftDeleteMixin, TimestampMixin
+from app.models.enums import MediaType, TechnicalMetadataStatus
 
 if TYPE_CHECKING:
     from app.models.project import Project
@@ -44,6 +44,30 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     is_intermediate: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=sa_false(), index=True
     )
+
+    # Canonical, normalized technical media metadata. Summary columns support
+    # common queries; technical_streams stores a bounded application-owned
+    # projection of relevant per-stream facts, never raw ffprobe output.
+    technical_metadata_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=TechnicalMetadataStatus.pending.value,
+        server_default=TechnicalMetadataStatus.pending.value,
+        index=True,
+    )
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    container_format: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_video_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_audio_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    video_codec: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    audio_codec: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    frame_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audio_channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bit_rate: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    technical_streams: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     project: Mapped[Project] = relationship(
         back_populates="assets", lazy="noload"

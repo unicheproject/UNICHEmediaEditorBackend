@@ -88,6 +88,26 @@ docker compose exec api alembic revision --autogenerate -m "describe change"
 docker compose exec api alembic downgrade -1
 ```
 
+## Asset technical metadata
+
+New uploads are saved and returned immediately with
+`technical_metadata_status: "pending"`; the ARQ worker probes them
+asynchronously. Job-produced media is probed in the existing worker before
+the derived Asset is committed. Probe failures leave the Asset available with
+`technical_metadata_status: "unavailable"` and nullable technical fields.
+Asset reads include the normalized summary and bounded stream details.
+
+After applying the metadata migration, backfill existing non-deleted Assets
+explicitly (the migration does not read media files):
+
+```bash
+docker compose exec api python -m app.scripts.backfill_asset_metadata
+```
+
+The command can be rerun safely; already available Assets are skipped. An
+optional `--project-id UUID` scopes the operation and `--batch-size N` controls
+the number of Asset IDs loaded at a time.
+
 ## Running tests
 
 Tests use an isolated SQLite database and run jobs eagerly (no Redis/arq

@@ -16,6 +16,7 @@ from app.core.config import settings
 
 RUN_JOB_TASK = "run_job"
 RUN_PLAN_TASK = "run_plan"
+RUN_ASSET_PROBE_TASK = "run_asset_probe"
 
 # How long cancel_job() waits to hear back from arq before giving up (the DB
 # is still updated immediately by services.jobs.cancel_job regardless).
@@ -58,5 +59,18 @@ async def enqueue_plan(plan_id: uuid.UUID) -> None:
     pool = await get_arq_pool()
     try:
         await pool.enqueue_job(RUN_PLAN_TASK, str(plan_id))
+    finally:
+        await pool.aclose()
+
+
+async def enqueue_asset_probe(asset_id: uuid.UUID) -> None:
+    """Queue asynchronous metadata probing for an uploaded Asset."""
+    pool = await get_arq_pool()
+    try:
+        await pool.enqueue_job(
+            RUN_ASSET_PROBE_TASK,
+            str(asset_id),
+            _job_id=f"asset-probe-{asset_id}",
+        )
     finally:
         await pool.aclose()

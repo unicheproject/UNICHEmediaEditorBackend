@@ -8,6 +8,7 @@ Every route is project-scoped: routes with ``project_id`` in the path guard via
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 from fastapi.responses import FileResponse
@@ -22,8 +23,14 @@ from app.schemas.asset import AssetRead, AssetUpdate
 from app.services import assets as svc
 from app.services.storage import get_storage
 from app.services.thumbnails import get_or_create_thumbnail
+from app.workers.queue import enqueue_asset_probe
 
 router = APIRouter(tags=["assets"])
+
+
+async def get_asset_probe_enqueuer() -> Callable[[uuid.UUID], Awaitable[None]]:
+    """Dependency seam for safely testing asynchronous upload probing."""
+    return enqueue_asset_probe
 
 
 @router.post(
@@ -36,6 +43,7 @@ async def upload_asset(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
     _project: Project = Depends(require_project),
+    enqueue_probe: Callable[[uuid.UUID], Awaitable[None]] = Depends(get_asset_probe_enqueuer),
 ) -> AssetRead:
     if not file.filename:
         raise ValidationError("An uploaded file with a filename is required")
@@ -46,6 +54,16 @@ async def upload_asset(
         src=file.file,
         content_type=file.content_type,
     )
+    try:
+        await enqueue_probe(asset.id)
+    except Exception as exc:  # noqa: BLE001 - upload success is independent of probing
+        from app.core.logging import get_logger
+
+        get_logger(__name__).warning(
+            "Could not enqueue technical metadata probe for asset %s (%s)",
+            asset.id,
+            type(exc).__name__,
+        )
     return AssetRead.model_validate(asset)
 
 
