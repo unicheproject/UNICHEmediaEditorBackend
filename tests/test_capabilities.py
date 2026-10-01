@@ -7,13 +7,20 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     resp = await client.get(f"{API}/capabilities")
     assert resp.status_code == 200
     caps = resp.json()
-    ids = {c["id"] for c in caps}
+    by_id = {c["id"]: c for c in caps}
+    ids = set(by_id)
     # A representative sample of the registered capabilities (14 AI + 20 tools).
     assert {"image.caption", "audio.transcribe", "video.upscale"} <= ids
     assert {"video.trim", "image.resize", "audio.normalize"} <= ids
     assert {"image.slideshow", "media.titlecard", "video.compose", "video.lowerthird"} <= ids
     assert "image.kenburns" in ids
-    assert len(caps) == 39
+    assert len(caps) == 40
+    for capability_id in ("audio.normalize", "audio.gain", "audio.fade", "audio.denoise"):
+        assert by_id[capability_id]["supported_media_types"] == ["video", "audio"]
+        assert "video input preserves the video stream" in by_id[capability_id]["description"]
+    extract = by_id["video.audio.extract"]
+    assert extract["supported_media_types"] == ["video"]
+    assert "separate AAC/M4A audio asset" in extract["description"]
 
 
 async def test_get_capability_detail(client: AsyncClient) -> None:

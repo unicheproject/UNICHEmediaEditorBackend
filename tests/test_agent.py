@@ -42,6 +42,17 @@ def test_catalog_text_exposes_compact_contract_without_ui_hints() -> None:
     assert "enum=[" in mix_line and "mix (Mix supplied audio" in mix_line
     assert "x-ui" not in text
 
+    normalize_line = next(
+        line for line in text.splitlines() if line.startswith("- audio.normalize ")
+    )
+    assert "video/audio" in normalize_line
+    assert "video input preserves the video stream" in normalize_line
+    extract_line = next(
+        line for line in text.splitlines() if line.startswith("- video.audio.extract ")
+    )
+    assert "separate AAC/M4A audio asset" in extract_line
+    assert "does not return video" in extract_line
+
     concat_line = next(
         line for line in text.splitlines() if line.startswith("- video.concat ")
     )

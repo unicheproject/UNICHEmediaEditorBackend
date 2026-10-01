@@ -102,6 +102,70 @@ async def _has_audio(path: str) -> bool:
     return bool(out.strip())
 
 
+async def probe_audio_duration(path: str) -> float:
+    """Return the first audio stream duration, falling back to container duration."""
+    out = await runner.run_stdout(
+        [
+            FFPROBE, "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=duration:format=duration", "-of", "json", path,
+        ],
+        timeout=60,
+    )
+    try:
+        payload = json.loads(out)
+        duration = payload.get("streams", [{}])[0].get("duration")
+        try:
+            return float(duration)
+        except (TypeError, ValueError):
+            return float(payload.get("format", {}).get("duration", 0.0))
+    except (json.JSONDecodeError, KeyError, IndexError, ValueError, TypeError):
+        return 0.0
+
+
+def _video_audio_codec(dst: str) -> tuple[str, str]:
+    """Choose a known audio encoder for the preserved source container."""
+    extension = Path(dst).suffix.lower()
+    if extension in {".mp4", ".mov", ".mkv"}:
+        return "aac", "192k"
+    if extension == ".webm":
+        return "libopus", "128k"
+    raise ToolError(
+        f"Audio processing is not supported for video container '{extension or 'unknown'}'"
+    )
+
+
+async def video_audio_transform(src: str, dst: str, audio_filter: str) -> None:
+    """Transform the first audio stream while stream-copying the first video.
+
+    Explicit mapping intentionally omits subtitle/data/other audio streams.
+    The selected convention is first video + first audio stream by input order.
+    """
+    if not await _has_audio(src):
+        raise ToolError("Cannot process soundtrack: video has no audio stream")
+    audio_codec, bitrate = _video_audio_codec(dst)
+    await runner.run(
+        [
+            *_BASE, "-i", src,
+            "-map", "0:v:0", "-map", "0:a:0",
+            "-c:v", "copy", "-c:a", audio_codec, "-b:a", bitrate,
+            "-filter:a", audio_filter,
+            dst,
+        ]
+    )
+
+
+async def video_audio_extract(src: str, dst: str) -> None:
+    """Extract the first audio stream as AAC in an M4A container."""
+    if not await _has_audio(src):
+        raise ToolError("Cannot extract audio: video has no audio stream")
+    await runner.run(
+        [
+            *_BASE, "-i", src, "-map", "0:a:0", "-vn", "-sn", "-dn",
+            "-c:a", "aac", "-b:a", "192k", "-f", "ipod", dst,
+        ]
+    )
+
+
 async def _concat_normalize(src: str, dst: str, width: int, height: int) -> None:
     """Re-encode a clip to uniform video + audio params for safe concatenation.
 
@@ -205,9 +269,20 @@ async def audio_gain(src: str, dst: str, gain_db: float) -> None:
     )
 
 
+async def video_audio_gain(src: str, dst: str, gain_db: float) -> None:
+    await video_audio_transform(
+        src, dst, f"volume={_num(gain_db, 'gain_db')}dB"
+    )
+
+
 async def audio_normalize(src: str, dst: str, target_i: float) -> None:
     filt = f"loudnorm=I={_num(target_i, 'target_i')}:TP=-1.5:LRA=11"
     await runner.run([*_BASE, "-i", src, "-filter:a", filt, dst])
+
+
+async def video_audio_normalize(src: str, dst: str, target_i: float) -> None:
+    filt = f"loudnorm=I={_num(target_i, 'target_i')}:TP=-1.5:LRA=11"
+    await video_audio_transform(src, dst, filt)
 
 
 async def audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> None:
@@ -223,6 +298,19 @@ async def audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> Non
     await runner.run([*_BASE, "-i", src, "-filter:a", ",".join(filters), dst])
 
 
+async def video_audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> None:
+    filters: list[str] = []
+    if fade_in:
+        filters.append(f"afade=t=in:st=0:d={_num(fade_in, 'fade_in')}")
+    if fade_out:
+        duration = await probe_audio_duration(src)
+        start = max(duration - float(fade_out), 0.0)
+        filters.append(f"afade=t=out:st={start}:d={_num(fade_out, 'fade_out')}")
+    if not filters:
+        raise ToolError("audio.fade requires fade_in and/or fade_out > 0")
+    await video_audio_transform(src, dst, ",".join(filters))
+
+
 DEFAULT_RNNOISE_MODEL = "/usr/share/rnnoise/model.rnnn"
 
 
@@ -230,6 +318,12 @@ async def audio_denoise(src: str, dst: str, strength: float | None) -> None:
     mix = 1.0 if strength is None else strength
     filt = f"arnndn=m={DEFAULT_RNNOISE_MODEL}:mix={_num(mix, 'strength')}"
     await runner.run([*_BASE, "-i", src, "-filter:a", filt, dst])
+
+
+async def video_audio_denoise(src: str, dst: str, strength: float | None) -> None:
+    mix = 1.0 if strength is None else strength
+    filt = f"arnndn=m={DEFAULT_RNNOISE_MODEL}:mix={_num(mix, 'strength')}"
+    await video_audio_transform(src, dst, filt)
 
 
 async def audio_transcode(src: str, dst: str, codec: str | None) -> None:

@@ -21,6 +21,16 @@ def _audio_out(ctx: JobContext, suffix: str, ext: str | None = None) -> OutputFi
     return OutputFile(path=ctx.out_path(filename), filename=filename, media_type=MediaType.audio)
 
 
+def _video_out(ctx: JobContext, suffix: str) -> OutputFile:
+    ext = input_ext(ctx)
+    filename = f"{input_stem(ctx)}_{suffix}.{ext}"
+    return OutputFile(path=ctx.out_path(filename), filename=filename, media_type=MediaType.video)
+
+
+def _video_input(ctx: JobContext) -> bool:
+    return ctx.input_asset_meta.get("media_type") == MediaType.video.value
+
+
 class AudioTrimHandler(LocalToolHandler):
     capability_id = "audio.trim"
 
@@ -54,6 +64,10 @@ class AudioGainHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
+        if _video_input(ctx):
+            out = _video_out(ctx, "gain")
+            await ffmpeg.video_audio_gain(src, str(out.path), require(ctx.params, "gain_db"))
+            return HandlerResult(data={"operation": "audio.gain"}, outputs=[out])
         out = _audio_out(ctx, "gain")
         await ffmpeg.audio_gain(src, str(out.path), require(ctx.params, "gain_db"))
         return HandlerResult(data={"operation": "audio.gain"}, outputs=[out])
@@ -64,8 +78,14 @@ class AudioNormalizeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _audio_out(ctx, "normalized")
         target = ctx.params.get("target_i", -16)
+        if _video_input(ctx):
+            out = _video_out(ctx, "normalized")
+            await ffmpeg.video_audio_normalize(src, str(out.path), target)
+            return HandlerResult(
+                data={"operation": "audio.normalize", "target_i": target}, outputs=[out]
+            )
+        out = _audio_out(ctx, "normalized")
         await ffmpeg.audio_normalize(src, str(out.path), target)
         return HandlerResult(
             data={"operation": "audio.normalize", "target_i": target}, outputs=[out]
@@ -77,11 +97,15 @@ class AudioFadeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
+        fade_in = ctx.params.get("fade_in", 0)
+        fade_out = ctx.params.get("fade_out", 0)
+        if _video_input(ctx):
+            out = _video_out(ctx, "fade")
+            await ffmpeg.video_audio_fade(src, str(out.path), fade_in, fade_out)
+            return HandlerResult(data={"operation": "audio.fade"}, outputs=[out])
         out = _audio_out(ctx, "fade")
         await ffmpeg.audio_fade(
-            src, str(out.path),
-            ctx.params.get("fade_in", 0),
-            ctx.params.get("fade_out", 0),
+            src, str(out.path), fade_in, fade_out,
         )
         return HandlerResult(data={"operation": "audio.fade"}, outputs=[out])
 
@@ -91,9 +115,29 @@ class AudioDenoiseHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
+        if _video_input(ctx):
+            out = _video_out(ctx, "denoise")
+            await ffmpeg.video_audio_denoise(src, str(out.path), ctx.params.get("strength"))
+            return HandlerResult(data={"operation": "audio.denoise"}, outputs=[out])
         out = _audio_out(ctx, "denoise")
         await ffmpeg.audio_denoise(src, str(out.path), ctx.params.get("strength"))
         return HandlerResult(data={"operation": "audio.denoise"}, outputs=[out])
+
+
+class VideoAudioExtractHandler(LocalToolHandler):
+    capability_id = "video.audio.extract"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        src = require_input(ctx)
+        filename = f"{input_stem(ctx)}_audio.m4a"
+        out = OutputFile(
+            path=ctx.out_path(filename), filename=filename, media_type=MediaType.audio
+        )
+        await ffmpeg.video_audio_extract(src, str(out.path))
+        return HandlerResult(
+            data={"operation": "video.audio.extract", "format": "m4a", "codec": "aac"},
+            outputs=[out],
+        )
 
 
 class AudioTranscodeHandler(LocalToolHandler):

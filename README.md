@@ -233,7 +233,16 @@ There are three handler families behind one uniform interface
    |--------|--------------|------|
    | video | `video.trim` `video.split` `video.concat` `video.transcode` `video.mute` `video.crop` `video.resize` `video.thumbnail` | FFmpeg |
    | image | `image.resize` `image.crop` `image.format` `image.colour.adjust` | ImageMagick |
-   | audio | `audio.trim` `audio.concat` `audio.gain` `audio.normalize` `audio.fade` `audio.transcode` | FFmpeg |
+   | audio | `audio.trim` `audio.concat` `audio.gain` `audio.normalize` `audio.fade` `audio.denoise` `audio.transcode` | FFmpeg |
+   | video audio | `video.audio.extract` | FFmpeg |
+
+   `audio.gain`, `audio.normalize`, `audio.fade` and `audio.denoise` accept
+   audio or video inputs. Audio inputs remain audio outputs; video inputs keep
+   the video stream via stream copy and return video with the processed
+   soundtrack. These transforms fail when the video has no audio stream.
+   `video.audio.extract` instead returns the first soundtrack as AAC/M4A and
+   fails for silent video. Video audio transforms map only the first video
+   and first audio streams; subtitle/data and additional tracks are omitted.
 
 3. **Not-implemented fallback** — every other registered capability resolves to
    `NotImplementedHandler`, whose jobs **succeed** with

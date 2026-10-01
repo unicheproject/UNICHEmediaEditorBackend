@@ -338,8 +338,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "audio.gain",
         "title": "Audio Gain",
-        "description": "Adjust the gain of an audio clip (gain_db).",
-        "media": _A,
+        "description": (
+            "Adjust the soundtrack gain (gain_db). Audio input produces audio; "
+            "video input preserves the video stream and produces video with processed audio."
+        ),
+        "media": _VA,
         "properties": {
             "gain_db": _number(
                 "Gain", "Gain adjustment applied to the audio.", **{"x-unit": "decibels"}
@@ -350,8 +353,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "audio.normalize",
         "title": "Audio Normalize",
-        "description": "Normalize loudness to a target integrated level (LUFS).",
-        "media": _A,
+        "description": (
+            "Normalize soundtrack loudness to a target integrated level (LUFS). Audio input "
+            "produces audio; video input preserves the video stream and produces video with "
+            "normalized audio."
+        ),
+        "media": _VA,
         "properties": {
             "target_i": _number(
                 "Target loudness",
@@ -366,8 +373,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "audio.fade",
         "title": "Audio Fade",
-        "description": "Apply fade-in and/or fade-out (seconds) to an audio clip.",
-        "media": _A,
+        "description": (
+            "Apply fade-in and/or fade-out (seconds) to a soundtrack. Audio input produces "
+            "audio; video input preserves the video stream and produces video with faded audio."
+        ),
+        "media": _VA,
         "properties": {
             "fade_in": _number(
                 "Fade in",
@@ -405,8 +415,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "audio.denoise",
         "title": "Audio Denoise",
-        "description": "Reduce background noise in an audio recording (RNNoise).",
-        "media": _A,
+        "description": (
+            "Reduce soundtrack background noise with RNNoise. Audio input produces audio; "
+            "video input preserves the video stream and produces video with denoised audio."
+        ),
+        "media": _VA,
         "properties": {
             "strength": _number(
                 "Denoise strength",
@@ -417,6 +430,16 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 **{"x-unit": "ratio"},
             )
         },
+    },
+    {
+        "id": "video.audio.extract",
+        "title": "Extract Video Audio",
+        "description": (
+            "Extract the first audio track from a video as a separate AAC/M4A audio asset. "
+            "Unlike audio transforms on video, this does not return video."
+        ),
+        "media": _V,
+        "properties": {},
     },
     # --- Composition capabilities ---
     {
