@@ -50,6 +50,21 @@ class ValidationError(AppError):
     code = "validation_error"
 
 
+class BadRequestError(AppError):
+    status_code = 400
+    code = "bad_request"
+
+
+class PreconditionFailedError(AppError):
+    status_code = 412
+    code = "precondition_failed"
+
+
+class PreconditionRequiredError(AppError):
+    status_code = 428
+    code = "precondition_required"
+
+
 class UnsupportedMediaTypeError(AppError):
     status_code = 415
     code = "unsupported_media_type"

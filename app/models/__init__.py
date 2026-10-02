@@ -3,6 +3,7 @@
 from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.asset import Asset
 from app.models.base import Base
+from app.models.composition import ProjectComposition, ProjectCompositionRevision
 from app.models.enums import (
     AgentPlanStatus,
     CostClass,
@@ -16,6 +17,8 @@ from app.models.project import Project
 __all__ = [
     "Base",
     "Project",
+    "ProjectComposition",
+    "ProjectCompositionRevision",
     "Asset",
     "Job",
     "AgentSession",

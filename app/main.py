@@ -31,6 +31,7 @@ app.add_middleware(
     allow_credentials=_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag"],
 )
 
 register_exception_handlers(app)

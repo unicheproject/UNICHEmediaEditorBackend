@@ -6,12 +6,16 @@ register a handler in app/capabilities/registry.py).
 
 from __future__ import annotations
 
+from app.capabilities.compose_contract import (
+    COMPOSE_DEFAULT_AUDIO_MODE,
+    COMPOSE_DEFAULT_MUSIC_VOLUME,
+    ComposeAudioMode,
+)
 from app.models.enums import CostClass, MediaType
 from app.schemas.capability import CapabilityRead
 
 # A CapabilityDef is just a CapabilityRead instance.
 CapabilityDef = CapabilityRead
-
 
 def _string(title: str, description: str, **keywords: object) -> dict:
     return {"type": "string", "title": title, "description": description, **keywords}
@@ -816,8 +820,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "type": "string",
                 "title": "Audio mode",
                 "description": "How the optional audio bed combines with timeline audio.",
-                "enum": ["mix", "duck", "replace"],
-                "default": "mix",
+                "enum": [mode.value for mode in ComposeAudioMode],
+                "default": COMPOSE_DEFAULT_AUDIO_MODE.value,
                 "x-enum-descriptions": {
                     "mix": "Mix the audio bed with timeline audio.",
                     "duck": "Mix the audio bed at no more than a 0.2 volume multiplier.",
@@ -827,7 +831,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "music_volume": _number(
                 "Music volume",
                 "Linear volume multiplier for the optional audio bed.",
-                default=0.3,
+                default=COMPOSE_DEFAULT_MUSIC_VOLUME,
                 **{"x-unit": "ratio"},
             ),
             "subtitle_asset_id": _asset_id(
