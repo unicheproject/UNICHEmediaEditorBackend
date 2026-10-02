@@ -23,6 +23,7 @@ from app.models.composition import ProjectCompositionRevision
 from app.models.job import Job
 from app.services.composition_render import resolve_composition_render
 from app.tools import compose_renderer
+from app.tools.compose_policy import DEFAULT_COMPOSE_RENDER_POLICY
 
 API = "/api/v1"
 
@@ -235,6 +236,7 @@ async def test_direct_compose_and_compiled_spec_use_shared_renderer(
                 "audio_mode": "duck",
                 "music_volume": 0.17,
                 "subtitle_path": None,
+                "policy": DEFAULT_COMPOSE_RENDER_POLICY,
             },
         )
     ]

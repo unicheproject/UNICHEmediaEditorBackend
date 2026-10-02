@@ -8,6 +8,10 @@ from pathlib import Path
 from app.composition.render import ComposeRenderRequest
 from app.core.errors import ValidationError
 from app.tools import ffmpeg
+from app.tools.compose_policy import (
+    DEFAULT_COMPOSE_RENDER_POLICY,
+    ComposeRenderPolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,7 @@ async def render_compose(
     dst: str,
     *,
     work_dir: Path,
+    policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
 ) -> None:
     """Execute canonical compose semantics through the existing FFmpeg tool."""
     if not request.video_asset_ids or len(request.video_asset_ids) != len(sources.video_paths):
@@ -43,4 +48,5 @@ async def render_compose(
         audio_mode=request.audio_mode.value,
         music_volume=request.music_volume,
         subtitle_path=sources.subtitle_path,
+        policy=policy,
     )

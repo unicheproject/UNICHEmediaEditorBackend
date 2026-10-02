@@ -84,7 +84,8 @@ def _probe(path: str) -> dict:
     proc = subprocess.run(
         [
             "ffprobe", "-v", "error", "-show_entries",
-            "stream=codec_type:format=duration", "-of", "json", path,
+            "stream=codec_type,codec_name,width,height:format=format_name,duration",
+            "-of", "json", path,
         ],
         capture_output=True,
         check=True,
@@ -174,6 +175,33 @@ async def test_slideshow_then_compose(client: AsyncClient, tmp_path) -> None:
     assert out["media_type"] == "video"
     meta = (await client.get(f"{API}/assets/{out['asset_id']}")).json()
     assert meta["source_asset_id"] is not None
+
+
+async def test_direct_video_compose_keeps_default_mp4_h264_aac_and_repeated_order(
+    client: AsyncClient, tmp_path
+) -> None:
+    pid = await _project(client)
+    source = tmp_path / "source.mp4"
+    _make_video(str(source))
+    asset_id = await _upload(client, pid, str(source), "source.mp4", "video/mp4")
+
+    job = await _run_job(
+        client,
+        {
+            "capability_id": "video.compose",
+            "project_id": pid,
+            "input": {"asset_ids": [asset_id, asset_id], "width": 320, "height": 240},
+        },
+    )
+    output = _first_output(job)
+    assert output["filename"].endswith(".mp4")
+    metadata = await _download_output(client, output, tmp_path / "composed.mp4")
+    streams = {stream["codec_type"]: stream for stream in metadata["streams"]}
+    assert "mp4" in metadata["format"]["format_name"]
+    assert streams["video"]["codec_name"] == "h264"
+    assert streams["audio"]["codec_name"] == "aac"
+    assert (streams["video"]["width"], streams["video"]["height"]) == (320, 240)
+    assert 3.8 <= float(metadata["format"]["duration"]) <= 4.2
 
 
 async def test_lowerthird(client: AsyncClient, tmp_path) -> None:

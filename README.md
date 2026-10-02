@@ -236,6 +236,13 @@ Key boundaries:
   render request; `app/services/composition_render.py` revalidates and resolves
   its project-owned Assets; `app/tools/compose_renderer.py` delegates to the
   same FFmpeg compose implementation used by direct `video.compose` Jobs.
+  Composition semantics (`ComposeRenderRequest`) remain separate from the
+  trusted encoding policy (`ComposeRenderPolicy`). Direct `video.compose`
+  defaults to its existing MP4/H.264/AAC behavior; the internal lossless
+  policy carries Matroska/FFV1/FLAC through normalized segments, stream-copy
+  concat, audio-bed processing, and subtitle burn-in. A future Archival
+  `project.export` can select that policy without changing saved compositions;
+  no export capability exists yet.
   This is an internal rendering boundary only; it does not add a public render
   endpoint or `project.export` capability.
 - **Provider selection happens in exactly one place**:

@@ -11,6 +11,10 @@ from pathlib import Path
 
 from app.core.errors import ToolError
 from app.tools import runner
+from app.tools.compose_policy import (
+    DEFAULT_COMPOSE_RENDER_POLICY,
+    ComposeRenderPolicy,
+)
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -482,11 +486,43 @@ async def overlay_lowerthird(
     )
 
 
-async def subtitle_embed(video: str, subtitle: str, dst: str, mode: str = "soft") -> None:
+def _compose_encode_args(policy: ComposeRenderPolicy) -> list[str]:
+    args = [
+        "-pix_fmt", policy.pixel_format.value,
+        "-c:v", policy.video_codec.value,
+        "-c:a", policy.audio_codec.value,
+    ]
+    if policy.audio_sample_format is not None:
+        args.extend(["-sample_fmt", policy.audio_sample_format.value])
+    return args
+
+
+def _compose_audio_encode_args(policy: ComposeRenderPolicy | None) -> list[str]:
+    if policy is None:
+        return []
+    args = ["-c:a", policy.audio_codec.value]
+    if policy.audio_sample_format is not None:
+        args.extend(["-sample_fmt", policy.audio_sample_format.value])
+    return args
+
+
+async def subtitle_embed(
+    video: str,
+    subtitle: str,
+    dst: str,
+    mode: str = "soft",
+    *,
+    compose_policy: ComposeRenderPolicy | None = None,
+) -> None:
     if mode == "burn":
-        await runner.run(
-            [*_BASE, "-i", video, "-vf", f"subtitles='{_escape_subs(subtitle)}'", *_PIX, dst]
-        )
+        args = [*_BASE, "-i", video, "-vf", f"subtitles='{_escape_subs(subtitle)}'"]
+        if compose_policy is None:
+            args.extend(_PIX)
+        else:
+            args.extend(["-map", "0:v:0", "-map", "0:a:0?"])
+            args.extend(_compose_encode_args(compose_policy))
+        args.append(dst)
+        await runner.run(args)
     else:  # soft mux
         await runner.run(
             [*_BASE, "-i", video, "-i", subtitle, "-c", "copy", "-c:s", "mov_text", dst]
@@ -494,7 +530,13 @@ async def subtitle_embed(video: str, subtitle: str, dst: str, mode: str = "soft"
 
 
 async def audio_mix(
-    media: str, music: str, dst: str, music_volume: float = 0.3, mode: str = "mix"
+    media: str,
+    music: str,
+    dst: str,
+    music_volume: float = 0.3,
+    mode: str = "mix",
+    *,
+    compose_policy: ComposeRenderPolicy | None = None,
 ) -> None:
     """Lay `music` under `media`'s audio. mode: mix | duck (≈low mix) | replace."""
     vol = music_volume if mode != "duck" else min(music_volume, 0.2)
@@ -502,32 +544,40 @@ async def audio_mix(
     if mode == "replace":
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
-             "-map", "0:v?", "-map", "1:a", "-c:v", "copy", "-shortest", dst]
+             "-map", "0:v?", "-map", "1:a", "-c:v", "copy",
+             *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
     if not has_audio:
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
              "-filter_complex", f"[1:a]volume={vol}[a]",
-             "-map", "0:v?", "-map", "[a]", "-c:v", "copy", "-shortest", dst]
+             "-map", "0:v?", "-map", "[a]", "-c:v", "copy",
+             *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
     filt = f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[a]"
     await runner.run(
         [*_BASE, "-i", media, "-i", music,
          "-filter_complex", filt, "-map", "0:v?", "-map", "[a]",
-         "-c:v", "copy", dst]
+         "-c:v", "copy", *_compose_audio_encode_args(compose_policy), dst]
     )
 
 
-async def _normalize_segment(src: str, dst: str, width: int, height: int) -> None:
+async def _normalize_segment(
+    src: str,
+    dst: str,
+    width: int,
+    height: int,
+    policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
+) -> None:
     """Re-encode a segment to uniform params (silent audio) for safe concat."""
     await runner.run(
         [
             *_BASE, "-i", src, *_ANULL,
             "-map", "0:v", "-map", "1:a",
             "-vf", _scale_pad(width, height),
-            *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+            *_compose_encode_args(policy), "-shortest", dst,
         ]
     )
 
@@ -543,19 +593,25 @@ async def compose(
     audio_mode: str = "mix",
     music_volume: float = 0.3,
     subtitle_path: str | None = None,
+    policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
 ) -> None:
-    """Timeline render: normalize -> concat -> optional audio bed -> optional burn."""
+    """Timeline render with one trusted encoding policy for every media stage."""
+    if Path(dst).suffix.lower() != policy.suffix:
+        raise ToolError(
+            f"Compose output suffix must be '{policy.suffix}' for this render policy"
+        )
+
     # 1. normalize each segment to identical codec/params
     normalized: list[Path] = []
     for i, seg in enumerate(segments):
-        out = work_dir / f"_norm_{i:03d}.mp4"
-        await _normalize_segment(seg, str(out), width, height)
+        out = work_dir / f"_norm_{i:03d}{policy.suffix}"
+        await _normalize_segment(seg, str(out), width, height, policy)
         normalized.append(out)
 
     # 2. concat via the demuxer (copy; params already identical)
     listing = work_dir / "_concat.txt"
     listing.write_text("".join(f"file '{p}'\n" for p in normalized), encoding="utf-8")
-    concat = work_dir / "_concat.mp4"
+    concat = work_dir / f"_concat{policy.suffix}"
     await runner.run(
         [*_BASE, "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(concat)]
     )
@@ -563,15 +619,19 @@ async def compose(
     current = concat
     # 3. optional audio bed over the whole timeline
     if audio_path:
-        with_audio = work_dir / "_audio.mp4"
+        with_audio = work_dir / f"_audio{policy.suffix}"
         await audio_mix(str(current), audio_path, str(with_audio),
-                        music_volume=music_volume, mode=audio_mode)
+                        music_volume=music_volume, mode=audio_mode,
+                        compose_policy=policy)
         current = with_audio
 
     # 4. optional subtitle burn-in (final re-encode)
     if subtitle_path:
-        burned = work_dir / "_subs.mp4"
-        await subtitle_embed(str(current), subtitle_path, str(burned), mode="burn")
+        burned = work_dir / f"_subs{policy.suffix}"
+        await subtitle_embed(
+            str(current), subtitle_path, str(burned), mode="burn",
+            compose_policy=policy,
+        )
         current = burned
 
     # 5. move final result to dst
