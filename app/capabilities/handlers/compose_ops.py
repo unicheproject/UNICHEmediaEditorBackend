@@ -10,9 +10,11 @@ from __future__ import annotations
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import input_stem, require, require_input
 from app.capabilities.handlers.base import LocalToolHandler
+from app.composition.render import compose_request_from_job_context
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
 from app.tools import ffmpeg, imagemagick, saliency
+from app.tools.compose_renderer import ComposeRenderSources, render_compose
 
 DEFAULT_W, DEFAULT_H = 1920, 1080
 
@@ -176,17 +178,19 @@ class VideoComposeHandler(LocalToolHandler):
         if len(ctx.input_paths) < 1:
             raise ValidationError("video.compose needs at least one segment (input.asset_ids)")
         assert ctx.work_dir is not None
-        w, h = _wh(ctx)
+        request = compose_request_from_job_context(ctx)
         out = _video_out(ctx, "composition")
-        await ffmpeg.compose(
-            ctx.input_paths, str(out.path),
-            width=w, height=h, work_dir=ctx.work_dir,
-            audio_path=ctx.named_input_paths.get("audio_asset_id"),
-            audio_mode=ctx.params.get("audio_mode", "mix"),
-            music_volume=ctx.params.get("music_volume", 0.3),
-            subtitle_path=ctx.named_input_paths.get("subtitle_asset_id"),
+        await render_compose(
+            request,
+            ComposeRenderSources(
+                video_paths=tuple(ctx.input_paths),
+                audio_path=ctx.named_input_paths.get("audio_asset_id"),
+                subtitle_path=ctx.named_input_paths.get("subtitle_asset_id"),
+            ),
+            str(out.path),
+            work_dir=ctx.work_dir,
         )
         return HandlerResult(
-            data={"operation": "video.compose", "segments": len(ctx.input_paths)},
+            data={"operation": "video.compose", "segments": len(request.video_asset_ids)},
             outputs=[out],
         )

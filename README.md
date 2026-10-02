@@ -231,6 +231,13 @@ Key boundaries:
   combinations at runtime. For `video.transcode`, codec fields are optional
   (omission keeps FFmpeg's container default), and the advertised option map
   describes which explicit codecs are supported for each output container.
+- Saved project compositions use immutable `CompositionRevision` documents.
+  `app/composition/render.py` compiles one revision into a typed semantic
+  render request; `app/services/composition_render.py` revalidates and resolves
+  its project-owned Assets; `app/tools/compose_renderer.py` delegates to the
+  same FFmpeg compose implementation used by direct `video.compose` Jobs.
+  This is an internal rendering boundary only; it does not add a public render
+  endpoint or `project.export` capability.
 - **Provider selection happens in exactly one place**:
   `app/providers/factory.py`, driven by `INFERENCE_PROVIDER`.
 

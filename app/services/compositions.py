@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.composition.document import canonical_document
 from app.core.errors import (
     BadRequestError,
     NotFoundError,
@@ -27,19 +26,6 @@ _INVALID_ASSET_REFERENCE = (
     "Composition references must be available, durable Assets of the expected "
     "media type in this project"
 )
-
-
-def canonical_document(document: CompositionDocument) -> tuple[dict, str]:
-    """Return normalized JSON data and its deterministic SHA-256 identity."""
-    data = document.model_dump(mode="json")
-    payload = json.dumps(
-        data,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return data, hashlib.sha256(payload).hexdigest()
 
 
 def etag_for_revision(revision_id: uuid.UUID) -> str:

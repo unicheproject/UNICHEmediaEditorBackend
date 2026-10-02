@@ -272,6 +272,7 @@ async def _build_job_context(
         input_path=input_path,
         input_asset_meta=input_asset_meta,
         input_paths=input_paths,
+        input_asset_ids=asset_ids,
         named_input_paths=named_input_paths,
         work_dir=work_dir,
         project_id=project_id,

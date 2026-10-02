@@ -26,6 +26,9 @@ class JobContext:
     input_asset_meta: dict[str, Any] = field(default_factory=dict)
     # All resolved input paths (primary first, then extras for multi-input ops).
     input_paths: list[str] = field(default_factory=list)
+    # Asset IDs in the same order as input_paths. Most handlers need only paths;
+    # typed multi-input render requests can preserve source identity as well.
+    input_asset_ids: list[uuid.UUID] = field(default_factory=list)
     # Named secondary inputs resolved from any `*_asset_id` param
     # (e.g. subtitle_asset_id, music_asset_id, audio_asset_id) -> file path.
     named_input_paths: dict[str, str] = field(default_factory=dict)
