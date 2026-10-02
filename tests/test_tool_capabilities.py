@@ -246,6 +246,48 @@ async def _run_job(client: AsyncClient, capability: str, asset_id: str, params: 
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+@pytest.mark.parametrize(
+    ("container", "video_codec", "audio_codec", "mime_type", "expected_video", "expected_audio"),
+    [
+        ("mp4", "libx264", "aac", "video/mp4", "h264", "aac"),
+        ("webm", "libvpx-vp9", "libopus", "video/webm", "vp9", "opus"),
+    ],
+)
+async def test_video_transcode_supported_mp4_and_webm_combinations(
+    client: AsyncClient,
+    tmp_path,
+    container: str,
+    video_codec: str,
+    audio_codec: str,
+    mime_type: str,
+    expected_video: str,
+    expected_audio: str,
+) -> None:
+    source = tmp_path / "source.mp4"
+    _make_av_mp4(str(source))
+    project_id = await _project(client, f"Transcode {container}")
+    asset_id = await _upload(client, project_id, str(source), source.name, "video/mp4")
+
+    job = await _run_job(
+        client,
+        "video.transcode",
+        asset_id,
+        {"format": container, "video_codec": video_codec, "audio_codec": audio_codec},
+    )
+    assert job["status"] == "succeeded", job.get("error")
+    output = job["output"]["outputs"][0]
+    assert output["media_type"] == "video"
+    downloaded = await client.get(output["download_path"])
+    assert downloaded.status_code == 200 and downloaded.content
+    assert downloaded.headers["content-type"].startswith(mime_type)
+    result = tmp_path / f"result.{container}"
+    result.write_bytes(downloaded.content)
+    streams = _ffprobe(str(result))["streams"]
+    assert next(s for s in streams if s["codec_type"] == "video")["codec_name"] == expected_video
+    assert next(s for s in streams if s["codec_type"] == "audio")["codec_name"] == expected_audio
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 async def test_video_concat_preserves_explicit_asset_order(
     client: AsyncClient, tmp_path
 ) -> None:

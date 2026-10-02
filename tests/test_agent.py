@@ -52,6 +52,12 @@ def test_catalog_text_exposes_compact_contract_without_ui_hints() -> None:
     assert "music_volume: number optional default=0.3 unit=ratio" in mix_line
     assert "enum=[" in mix_line and "mix (Mix supplied audio" in mix_line
     assert "x-ui" not in text
+    transcode_line = next(
+        line for line in text.splitlines() if line.startswith("- video.transcode ")
+    )
+    assert "libx264 (H.264 / AVC)" in transcode_line
+    assert "choices_when_format=" in transcode_line
+    assert "webm" in transcode_line and "libvpx-vp9" in transcode_line
     assert "video.trim keeps" in SYSTEM_INSTRUCTIONS
     assert "video.split divides the complete input" in SYSTEM_INSTRUCTIONS
     assert "ask a clarification question" in SYSTEM_INSTRUCTIONS
@@ -117,6 +123,7 @@ def test_bad_params_rejected() -> None:
         ("image.format", {"format": "bmp"}),
         ("video.concat", {"asset_ids": [VID]}),
         ("video.concat", {"asset_ids": ["not-a-uuid", VID]}),
+        ("video.transcode", {"format": "webm", "video_codec": "libx264"}),
     ],
 )
 def test_planner_rejects_same_malformed_contract_as_direct_jobs(

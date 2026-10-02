@@ -1,5 +1,8 @@
 from httpx import AsyncClient
 
+from app.capabilities import registry
+from app.capabilities.validation import validate_capability_input
+
 API = "/api/v1"
 
 
@@ -30,6 +33,45 @@ async def test_get_capability_detail(client: AsyncClient) -> None:
     assert cap["id"] == "image.caption"
     assert cap["cost_class"] == "hosted_ai"
     assert "image" in cap["supported_media_types"]
+
+
+async def test_video_transcode_schema_exposes_supported_dependent_choices(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(f"{API}/capabilities/video.transcode")
+    assert response.status_code == 200
+    schema = response.json()["input_schema"]
+    properties = schema["properties"]
+
+    assert properties["format"]["enum"] == ["mp4", "mov", "mkv", "webm"]
+    assert properties["video_codec"]["enum"] == ["libx264", "libx265", "libvpx-vp9"]
+    assert properties["audio_codec"]["enum"] == [
+        "aac", "libmp3lame", "libopus", "libvorbis", "flac"
+    ]
+    assert properties["video_codec"]["x-enum-descriptions"]["libx264"] == "H.264 / AVC"
+    assert properties["audio_codec"]["x-enum-descriptions"]["libopus"] == "Opus"
+    assert properties["video_codec"]["x-option-constraints"] == {
+        "depends_on": "format",
+        "allowed_values": {
+            "mp4": ["libx264"],
+            "mov": ["libx264"],
+            "mkv": ["libx264", "libx265", "libvpx-vp9"],
+            "webm": ["libvpx-vp9"],
+        },
+    }
+    assert schema["required"] == ["format"]
+    assert schema["allOf"]
+
+    capability = registry.get("video.transcode")
+    for container in properties["format"]["enum"]:
+        # Both codec controls stay optional; omission retains FFmpeg defaults.
+        validate_capability_input(capability, {"format": container})
+    for field in ("video_codec", "audio_codec"):
+        choices = properties[field]["enum"]
+        by_container = properties[field]["x-option-constraints"]["allowed_values"]
+        for choice in choices:
+            container = next(name for name, values in by_container.items() if choice in values)
+            validate_capability_input(capability, {"format": container, field: choice})
 
 
 async def test_capability_schema_exposes_execution_and_semantic_contract(

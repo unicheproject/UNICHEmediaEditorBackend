@@ -110,6 +110,72 @@ _INT = {"type": "integer"}
 _V, _A, _I = [MediaType.video], [MediaType.audio], [MediaType.image]
 _VA = [MediaType.video, MediaType.audio]
 
+# Stable portable transcode subset supported by the pinned Debian FFmpeg
+# build. The same matrix generates schema validation and generic dependent
+# option metadata; omitted codec parameters remain optional for FFmpeg defaults.
+_VIDEO_TRANSCODE_OPTIONS = {
+    "mp4": {"video_codec": ["libx264"], "audio_codec": ["aac"]},
+    "mov": {"video_codec": ["libx264"], "audio_codec": ["aac"]},
+    "mkv": {
+        "video_codec": ["libx264", "libx265", "libvpx-vp9"],
+        "audio_codec": ["aac", "libmp3lame", "libopus", "libvorbis", "flac"],
+    },
+    "webm": {"video_codec": ["libvpx-vp9"], "audio_codec": ["libopus", "libvorbis"]},
+}
+_VIDEO_CODEC_DESCRIPTIONS = {
+    "libx264": "H.264 / AVC",
+    "libx265": "H.265 / HEVC",
+    "libvpx-vp9": "VP9",
+}
+_AUDIO_CODEC_DESCRIPTIONS = {
+    "aac": "AAC",
+    "libmp3lame": "MP3",
+    "libopus": "Opus",
+    "libvorbis": "Vorbis",
+    "flac": "FLAC",
+}
+
+
+def _transcode_codec_schema(field: str, title: str, description: str) -> dict:
+    matrix = {
+        container: options[field] for container, options in _VIDEO_TRANSCODE_OPTIONS.items()
+    }
+    codec_descriptions = (
+        _VIDEO_CODEC_DESCRIPTIONS if field == "video_codec" else _AUDIO_CODEC_DESCRIPTIONS
+    )
+    enum = list(dict.fromkeys(codec for codecs in matrix.values() for codec in codecs))
+    return _string(
+        title,
+        description,
+        enum=enum,
+        **{
+            "x-enum-descriptions": {
+                codec: codec_descriptions[codec] for codec in enum
+            },
+            "x-option-constraints": {
+                "depends_on": "format",
+                "allowed_values": matrix,
+            },
+        },
+    )
+
+
+_VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS = [
+    {
+        "if": {
+            "properties": {"format": {"const": container}},
+            "required": ["format"],
+        },
+        "then": {
+            "properties": {
+                field: {"enum": options[field]}
+                for field in ("video_codec", "audio_codec")
+            }
+        },
+    }
+    for container, options in _VIDEO_TRANSCODE_OPTIONS.items()
+]
+
 # Declarative specs for the deterministic local-tool capabilities.
 _DETERMINISTIC_SPECS: list[dict] = [
     {
@@ -173,23 +239,38 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "video.transcode",
         "title": "Video Transcode",
-        "description": "Transcode a video to a target container/codec.",
+        "description": (
+            "Transcode a video to a supported container and optional codec combination. "
+            "Omitting a codec lets FFmpeg choose its default for the selected container."
+        ),
         "media": _V,
         "properties": {
             "format": _string(
-                "Output format",
-                "FFmpeg output container extension, without a leading dot.",
+                "Output container",
+                "Container extension for the output video, without a leading dot.",
+                enum=list(_VIDEO_TRANSCODE_OPTIONS),
+                **{
+                    "x-enum-descriptions": {
+                        "mp4": "MPEG-4 Part 14",
+                        "mov": "QuickTime Movie",
+                        "mkv": "Matroska",
+                        "webm": "WebM",
+                    }
+                },
             ),
-            "video_codec": _string(
+            "video_codec": _transcode_codec_schema(
+                "video_codec",
                 "Video codec",
-                "Optional FFmpeg video encoder name; omitted lets FFmpeg choose for the container.",
+                "Optional supported video encoder. Omit to let FFmpeg choose for the container.",
             ),
-            "audio_codec": _string(
+            "audio_codec": _transcode_codec_schema(
+                "audio_codec",
                 "Audio codec",
-                "Optional FFmpeg audio encoder name; omitted lets FFmpeg choose for the container.",
+                "Optional supported audio encoder. Omit to let FFmpeg choose for the container.",
             ),
         },
         "required": ["format"],
+        "allOf": _VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS,
     },
     {
         "id": "video.mute",
@@ -899,6 +980,7 @@ CAPABILITIES: list[CapabilityDef] = [
                 "type": "object",
                 "properties": spec["properties"],
                 "required": spec.get("required", []),
+                **({"allOf": spec["allOf"]} if "allOf" in spec else {}),
             },
             output_schema=_FILE_OUTPUT_SCHEMA,
         )

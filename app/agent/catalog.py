@@ -85,6 +85,13 @@ def _parameter_text(name: str, schema: dict[str, Any], *, required: bool) -> str
             for value in schema["enum"]
         ]
         facts.append(f"enum={options!r}")
+    option_constraints = schema.get("x-option-constraints")
+    if option_constraints:
+        dependency = option_constraints["depends_on"]
+        allowed_values = option_constraints["allowed_values"]
+        facts.append(
+            f"choices_when_{dependency}={allowed_values!r}"
+        )
     if schema.get("x-unit"):
         facts.append(f"unit={schema['x-unit']}")
     media = schema.get("x-media-asset")

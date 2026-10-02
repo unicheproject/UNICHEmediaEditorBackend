@@ -224,6 +224,13 @@ Key boundaries:
   capability handler, and the handler calls the configured provider.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
+- Capability `input_schema` values are the shared execution/discovery
+  contract: finite choices use JSON Schema `enum`; dependent finite choices
+  may add property-level `x-option-constraints` with `depends_on` and an
+  `allowed_values` map. Standard JSON Schema conditionals enforce the same
+  combinations at runtime. For `video.transcode`, codec fields are optional
+  (omission keeps FFmpeg's container default), and the advertised option map
+  describes which explicit codecs are supported for each output container.
 - **Provider selection happens in exactly one place**:
   `app/providers/factory.py`, driven by `INFERENCE_PROVIDER`.
 

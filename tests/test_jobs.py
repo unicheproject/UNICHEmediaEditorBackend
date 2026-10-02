@@ -158,6 +158,11 @@ async def test_invalid_capability_rejected(client: AsyncClient) -> None:
         ("video.concat", {"asset_ids": [str(uuid.uuid4())]}),
         ("video.concat", {"asset_ids": ["not-a-uuid", str(uuid.uuid4())]}),
         ("image.format", {"format": "bmp"}),
+        ("video.transcode", {"format": "avi"}),
+        ("video.transcode", {"format": "mp4", "video_codec": "h264"}),
+        ("video.transcode", {"format": "mp4", "audio_codec": "mp3"}),
+        ("video.transcode", {"format": "webm", "video_codec": "libx264"}),
+        ("video.transcode", {"format": "webm", "audio_codec": "aac"}),
     ],
 )
 async def test_direct_job_rejects_invalid_canonical_input(
