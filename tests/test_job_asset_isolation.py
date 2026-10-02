@@ -378,7 +378,7 @@ async def test_agent_execution_rejects_cross_project_secondary_asset(
         plan = AgentPlan(
             session_id=agent_session.id,
             summary="cross-project regression",
-            status=AgentPlanStatus.approved,
+            status=AgentPlanStatus.proposed,
             steps=[
                 {
                     "id": "mix",
@@ -396,7 +396,10 @@ async def test_agent_execution_rejects_cross_project_secondary_asset(
         await session.commit()
         await session.refresh(plan)
 
-        completed = await execute_plan(session, plan.id)
+        from app.services import agent as agent_svc
+
+        approved, attempt, _, _ = await agent_svc.approve_plan(session, plan.id)
+        completed = await execute_plan(session, approved.id, attempt.id)
         assert completed.status == AgentPlanStatus.failed
         assert "not in the job's project" in (completed.error or "")
         assert completed.step_runs == []

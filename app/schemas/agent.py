@@ -43,10 +43,25 @@ class AgentPlanRead(ORMModel):
     steps: list[dict[str, Any]]
     step_runs: list[dict[str, Any]]
     execution_summary: dict[str, Any] | None = None
+    attempts: list[AgentPlanAttemptRead] = Field(default_factory=list)
     result_asset_ids: list[uuid.UUID]
     error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AgentPlanAttemptRead(ORMModel):
+    id: uuid.UUID
+    attempt_number: int
+    status: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    step_runs: list[dict[str, Any]]
+    execution_summary: dict[str, Any] | None
+    job_ids: list[uuid.UUID]
+    result_asset_ids: list[uuid.UUID]
+    error: str | None
 
 
 class AgentMessageResponse(BaseModel):

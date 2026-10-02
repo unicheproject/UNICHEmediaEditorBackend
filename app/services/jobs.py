@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import tempfile
 import uuid
@@ -363,6 +364,17 @@ async def execute_job(
         job.progress = 100
         job.finished_at = datetime.now(UTC)
         await session.commit()
+    except asyncio.CancelledError:
+        # Cooperative ARQ aborts must not strand the physical Job as running.
+        # The runner handles killing an active subprocess before this point.
+        await session.rollback()
+        current = await session.get(Job, job_id)
+        if current is not None and current.status in {JobStatus.queued, JobStatus.running}:
+            current.status = JobStatus.cancelled
+            current.error = "Worker execution was cooperatively cancelled."
+            current.finished_at = datetime.now(UTC)
+            await session.commit()
+        raise
     except AppError as exc:
         await _fail(session, job, exc.message)
     except Exception as exc:  # noqa: BLE001 - record any failure on the job

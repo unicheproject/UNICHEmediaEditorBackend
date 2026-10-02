@@ -7,6 +7,7 @@ each step's output asset feeds dependent steps via '@stepN' references.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import shutil
 import tempfile
@@ -21,12 +22,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.agent import render as render_compiler
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ValidationError
 from app.core.logging import get_logger
-from app.models.agent import AgentPlan, AgentSession
+from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.enums import AgentPlanStatus, JobStatus, MediaType
 from app.models.job import Job
 from app.schemas.job import JobCreate
+from app.services import agent as agent_svc
 from app.services import jobs as jobs_svc
 from app.services.assets import ensure_asset_binary_available, get_asset
 
@@ -90,48 +92,57 @@ def _consumed_step_ids(plan: Plan) -> set[str]:
     return consumed
 
 
-async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
-    plan_row = await session.get(AgentPlan, plan_id)
-    if plan_row is None:
-        raise ValueError(f"AgentPlan '{plan_id}' not found")
+async def execute_plan(
+    session: AsyncSession, plan_id: uuid.UUID, attempt_id: uuid.UUID | None
+) -> AgentPlan:
+    claimed = (
+        await agent_svc.claim_plan_attempt(session, plan_id, attempt_id)
+        if attempt_id is not None
+        else await agent_svc.claim_legacy_approved_plan(session, plan_id)
+    )
+    if claimed is None:
+        return await agent_svc.get_plan(session, plan_id)
+    plan_row, attempt = claimed
     agent_session = await session.get(AgentSession, plan_row.session_id)
     if agent_session is None:
-        raise NotFoundError(f"Agent session '{plan_row.session_id}' not found")
+        plan_row.status = AgentPlanStatus.failed
+        plan_row.error = "Agent session not found"
+        await _finish_attempt(session, plan_row, attempt, "failed", plan_row.error)
+        return plan_row
     project_id = agent_session.project_id
-
     plan = Plan.model_validate(
         {"type": "plan", "summary": plan_row.summary, "steps": plan_row.steps}
     )
-    summary = plan_row.execution_summary
-    if summary is not None:
-        if summary.get("optimizer_version") != render_compiler.OPTIMIZER_VERSION:
-            plan_row.status = AgentPlanStatus.failed
-            plan_row.error = "The approved render plan is stale; please request a new plan."
-            await session.commit()
-            return plan_row
-        if summary.get("input_fingerprint") != render_compiler.plan_fingerprint(plan):
-            plan_row.status = AgentPlanStatus.failed
-            plan_row.error = "The approved plan inputs changed; please request a new plan."
-            await session.commit()
-            return plan_row
-        try:
-            await _validate_render_sources(session, summary, project_id)
-        except (NotFoundError, ValidationError) as exc:
-            plan_row.status = AgentPlanStatus.failed
-            plan_row.error = str(exc)
-            await session.commit()
-            return plan_row
-    plan_row.status = AgentPlanStatus.running
-    await session.commit()
-
-    consumed = _consumed_step_ids(plan)
-    outputs: dict[str, str | None] = {}
+    summary = render_compiler.reset_execution_summary(attempt.execution_summary)
     step_runs: list[dict] = []
+    plan_row.step_runs = []
+    plan_row.result_asset_ids = []
+    plan_row.error = None
+    if summary is not None:
+        plan_row.execution_summary = copy.deepcopy(summary)
+        attempt.execution_summary = copy.deepcopy(summary)
+        flag_modified(plan_row, "execution_summary")
+        await session.commit()
+
     try:
+        if summary is not None:
+            if summary.get("optimizer_version") != render_compiler.OPTIMIZER_VERSION:
+                raise ValidationError(
+                    "The approved render plan is stale; please request a new plan."
+                )
+            if summary.get("input_fingerprint") != render_compiler.plan_fingerprint(plan):
+                raise ValidationError(
+                    "The approved plan inputs changed; please request a new plan."
+                )
+            await _validate_render_sources(session, summary, project_id)
+
+        consumed = _consumed_step_ids(plan)
+        outputs: dict[str, str | None] = {}
         if summary is None:
-            # Plans persisted before the additive optimizer column retain their
-            # original per-capability execution behavior.
-            await _execute_legacy_steps(session, plan, project_id, outputs, step_runs)
+            await _execute_legacy_steps(
+                session, plan, project_id, outputs, step_runs,
+                plan_row=plan_row, attempt=attempt,
+            )
         else:
             steps_by_id = {step.id: step for step in plan.steps}
             for node in summary["nodes"]:
@@ -149,19 +160,16 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
                             "render_group_id": node["id"], "job_id": None,
                             "output_asset_id": None,
                         })
-                    plan_row.execution_summary = copy.deepcopy(summary)
-                    flag_modified(plan_row, "execution_summary")
-                    plan_row.step_runs = list(step_runs)
-                    await session.commit()
+                    await _save_running_attempt(
+                        session, plan_row, attempt, step_runs, summary
+                    )
                     continue
                 if node["kind"] == "render_group":
                     terminal_step = node["step_ids"][-1]
                     job, output_asset_id = await _execute_render_group(
-                        session,
-                        plan_row,
-                        project_id,
-                        node,
+                        session, plan_row, project_id, node,
                         is_intermediate=terminal_step in consumed,
+                        step_runs=step_runs, summary=summary,
                     )
                     node["job_id"] = str(job.id)
                     node["status"] = job.status.value
@@ -184,72 +192,98 @@ async def execute_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
                         outputs[step_id] = output_asset_id
                         _update_summary_step(
                             summary, step_id, status=status, identity=is_identity,
-                            job_id=str(job.id), output_asset_id=(
-                                output_asset_id if step_id == terminal_active else None
-                            ),
+                            job_id=str(job.id),
+                            output_asset_id=output_asset_id if step_id == terminal_active else None,
                         )
-                    plan_row.execution_summary = copy.deepcopy(summary)
-                    flag_modified(plan_row, "execution_summary")
-                    plan_row.step_runs = list(step_runs)
-                    await session.commit()
+                    await _save_running_attempt(
+                        session, plan_row, attempt, step_runs, summary
+                    )
+                    if job.status == JobStatus.cancelled:
+                        raise asyncio.CancelledError
                     if job.status == JobStatus.failed:
                         raise RuntimeError(f"Render group '{node['id']}' failed: {job.error}")
                     continue
 
                 step = steps_by_id[node["step_id"]]
                 await _execute_standard_step(
-                    session,
-                    project_id,
-                    step,
-                    outputs,
-                    step_runs,
-                    plan_row,
-                    summary,
+                    session, project_id, step, outputs, step_runs, plan_row,
+                    summary, attempt=attempt,
                     is_intermediate=step.id in consumed,
                 )
 
-        # Outputs consumed by a later step are intermediate; leaves are finals.
         finals: list[str] = []
         for run in step_runs:
             if run.get("render_group_id"):
                 continue
             out_assets = run.get("output_asset_ids") or ([run["output_asset_id"]]
                          if run.get("output_asset_id") else [])
-            for out_asset in out_assets:
-                if run["step_id"] in consumed:
-                    continue
-                elif out_asset not in finals:
-                    finals.append(out_asset)
+            if run["step_id"] not in consumed:
+                finals.extend(asset_id for asset_id in out_assets if asset_id not in finals)
         for node in (summary or {}).get("nodes", []):
-            if node.get("kind") != "render_group" or not node.get("output_asset_id"):
-                continue
-            terminal_step = node["step_ids"][-1]
-            asset_id = node["output_asset_id"]
-            if terminal_step in consumed:
-                continue
-            elif asset_id not in finals:
-                finals.append(asset_id)
-        # Identity-only leaf steps return their unchanged source without creating
-        # a Job or a derived Asset.
+            if node.get("kind") == "render_group" and node.get("output_asset_id"):
+                terminal_step = node["step_ids"][-1]
+                asset_id = node["output_asset_id"]
+                if terminal_step not in consumed and asset_id not in finals:
+                    finals.append(asset_id)
         for node in (summary or {}).get("nodes", []):
-            if (
-                node.get("kind") == "identity"
-                and any(step_id not in consumed for step_id in node["step_ids"])
-                and node["output_asset_id"] not in finals
-            ):
+            if (node.get("kind") == "identity"
+                    and any(step_id not in consumed for step_id in node["step_ids"])
+                    and node["output_asset_id"] not in finals):
                 finals.append(node["output_asset_id"])
         plan_row.status = AgentPlanStatus.succeeded
         plan_row.result_asset_ids = finals
+        await _finish_attempt(session, plan_row, attempt, "succeeded", None, step_runs, summary)
+    except asyncio.CancelledError:
+        plan_row.status = AgentPlanStatus.failed
+        plan_row.error = "Agent plan execution was cooperatively cancelled."
+        await _finish_attempt(
+            session, plan_row, attempt, "cancelled", plan_row.error, step_runs, summary
+        )
+        raise
     except Exception as exc:  # noqa: BLE001 - record failure on the plan
         logger.exception("Plan %s failed", plan_id)
         plan_row.status = AgentPlanStatus.failed
         plan_row.error = str(exc)
-    finally:
-        plan_row.step_runs = list(step_runs)
-        await session.commit()
+        await _finish_attempt(session, plan_row, attempt, "failed", str(exc), step_runs, summary)
 
     await session.refresh(plan_row)
     return plan_row
+
+
+async def _save_running_attempt(
+    session: AsyncSession, plan_row: AgentPlan, attempt: AgentPlanAttempt,
+    step_runs: list[dict], summary: dict | None,
+) -> None:
+    plan_row.step_runs = list(step_runs)
+    if summary is not None:
+        plan_row.execution_summary = copy.deepcopy(summary)
+        flag_modified(plan_row, "execution_summary")
+    await agent_svc.snapshot_plan_attempt(
+        session, attempt, step_runs=step_runs,
+        execution_summary=summary if summary is not None else plan_row.execution_summary,
+        result_asset_ids=[],
+    )
+    await session.commit()
+
+
+async def _finish_attempt(
+    session: AsyncSession, plan_row: AgentPlan, attempt: AgentPlanAttempt,
+    status: str, error: str | None, step_runs: list[dict] | None = None,
+    summary: dict | None = None,
+) -> None:
+    now = datetime.now(UTC)
+    plan_row.active_attempt_id = None
+    plan_row.step_runs = list(step_runs if step_runs is not None else plan_row.step_runs)
+    if summary is not None:
+        plan_row.execution_summary = copy.deepcopy(summary)
+        flag_modified(plan_row, "execution_summary")
+    await agent_svc.snapshot_plan_attempt(
+        session, attempt, step_runs=plan_row.step_runs,
+        execution_summary=plan_row.execution_summary,
+        result_asset_ids=[str(value) for value in plan_row.result_asset_ids or []],
+        status=status, error=error, finished_at=now,
+    )
+    await session.commit()
 
 
 async def _validate_render_sources(
@@ -285,6 +319,7 @@ async def _execute_standard_step(
     plan_row: AgentPlan,
     summary: dict,
     *,
+    attempt: AgentPlanAttempt,
     is_intermediate: bool = False,
 ) -> None:
     asset_id, job_input = _build_job_input(step, outputs)
@@ -297,9 +332,25 @@ async def _execute_standard_step(
             input=job_input,
         ),
     )
-    job = await jobs_svc.execute_job(
-        session, job.id, is_intermediate_output=is_intermediate
-    )
+    try:
+        job = await jobs_svc.execute_job(
+            session, job.id, is_intermediate_output=is_intermediate
+        )
+    except asyncio.CancelledError:
+        await session.refresh(job)
+        output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
+        run = {
+            "step_id": step.id, "capability_id": step.capability_id,
+            "job_id": str(job.id), "status": JobStatus.cancelled.value,
+            "output_asset_id": None, "output_asset_ids": output_ids,
+        }
+        step_runs.append(run)
+        _update_summary_step(
+            summary, step.id, status=JobStatus.cancelled.value,
+            job_id=str(job.id), output_asset_id=None,
+        )
+        await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
+        raise
     output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
     output_id = output_ids[0] if len(output_ids) == 1 else None
     outputs[step.id] = output_id
@@ -314,10 +365,7 @@ async def _execute_standard_step(
         summary, step.id, status=job.status.value, job_id=str(job.id),
         output_asset_id=output_id, output_asset_ids=output_ids,
     )
-    plan_row.execution_summary = copy.deepcopy(summary)
-    flag_modified(plan_row, "execution_summary")
-    plan_row.step_runs = list(step_runs)
-    await session.commit()
+    await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
     if job.status == JobStatus.failed:
         raise RuntimeError(f"Step '{step.id}' failed: {job.error}")
 
@@ -328,6 +376,9 @@ async def _execute_legacy_steps(
     project_id: uuid.UUID,
     outputs: dict[str, str | None],
     step_runs: list[dict],
+    *,
+    plan_row: AgentPlan,
+    attempt: AgentPlanAttempt,
 ) -> None:
     """Preserve old persisted-plan behavior when no optimizer summary exists."""
     consumed = _consumed_step_ids(plan)
@@ -338,11 +389,19 @@ async def _execute_legacy_steps(
             JobCreate(capability_id=step.capability_id, project_id=project_id,
                       asset_id=asset_id, input=job_input),
         )
-        job = await jobs_svc.execute_job(
-            session,
-            job.id,
-            is_intermediate_output=step.id in consumed,
-        )
+        try:
+            job = await jobs_svc.execute_job(
+                session, job.id, is_intermediate_output=step.id in consumed,
+            )
+        except asyncio.CancelledError:
+            await session.refresh(job)
+            step_runs.append({
+                "step_id": step.id, "capability_id": step.capability_id,
+                "job_id": str(job.id), "status": JobStatus.cancelled.value,
+                "output_asset_id": None, "output_asset_ids": [],
+            })
+            await _save_running_attempt(session, plan_row, attempt, step_runs, None)
+            raise
         output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
         output_id = output_ids[0] if output_ids else None
         outputs[step.id] = output_id
@@ -351,6 +410,7 @@ async def _execute_legacy_steps(
             "job_id": str(job.id), "status": job.status.value,
             "output_asset_id": output_id, "output_asset_ids": output_ids,
         })
+        await _save_running_attempt(session, plan_row, attempt, step_runs, None)
         if job.status == JobStatus.failed:
             raise RuntimeError(f"Step '{step.id}' failed: {job.error}")
 
@@ -369,6 +429,8 @@ async def _execute_render_group(
     group: dict,
     *,
     is_intermediate: bool,
+    step_runs: list[dict],
+    summary: dict,
 ) -> tuple[Job, str | None]:
     """Execute and persist one physical Agent-only render-group Job."""
     source_asset = await get_asset(session, uuid.UUID(group["source_asset_id"]))
@@ -430,6 +492,36 @@ async def _execute_render_group(
         job.progress = 100
         job.finished_at = datetime.now(UTC)
         await session.commit()
+    except asyncio.CancelledError:
+        await session.rollback()
+        current_job = await session.get(Job, job.id)
+        if current_job is not None and current_job.status != JobStatus.cancelled:
+            current_job.status = JobStatus.cancelled
+            current_job.error = "Render group was cooperatively cancelled."
+            current_job.finished_at = datetime.now(UTC)
+        group["job_id"] = str(job.id)
+        group["status"] = JobStatus.cancelled.value
+        group["output_asset_id"] = None
+        for op in group["operations"]:
+            step_id = op["step_id"]
+            step_runs.append({
+                "step_id": step_id,
+                "capability_id": op["capability_id"],
+                "status": "identity" if op["identity"] else JobStatus.cancelled.value,
+                "identity": bool(op["identity"]),
+                "render_group_id": group["id"],
+                "job_id": str(job.id),
+                "output_asset_id": None,
+            })
+        plan_row.step_runs = list(step_runs)
+        plan_row.execution_summary = copy.deepcopy(summary)
+        for node in plan_row.execution_summary.get("nodes", []):
+            if node.get("id") == group["id"]:
+                node.update(job_id=str(job.id), status=JobStatus.cancelled.value,
+                            output_asset_id=None)
+        flag_modified(plan_row, "execution_summary")
+        await session.commit()
+        raise
     except Exception as exc:  # noqa: BLE001 - persist physical group failure
         logger.exception("Agent render group %s failed", group["id"])
         job.status = JobStatus.failed

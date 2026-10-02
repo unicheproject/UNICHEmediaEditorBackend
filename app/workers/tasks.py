@@ -23,11 +23,12 @@ async def run_job(ctx: dict, job_id: str) -> str:
     return job.status.value
 
 
-async def run_plan(ctx: dict, plan_id: str) -> str:
+async def run_plan(ctx: dict, plan_id: str, attempt_id: str | None = None) -> str:
     """Execute an approved agent plan as a chained job sequence."""
     logger.info("Running plan %s", plan_id)
+    parsed_attempt_id = uuid.UUID(attempt_id) if attempt_id is not None else None
     async with async_session_factory() as session:
-        plan = await execute_plan(session, uuid.UUID(plan_id))
+        plan = await execute_plan(session, uuid.UUID(plan_id), parsed_attempt_id)
     logger.info("Plan %s finished with status=%s", plan_id, plan.status.value)
     return plan.status.value
 

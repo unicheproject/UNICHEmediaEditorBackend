@@ -1,6 +1,6 @@
 """ORM models. Importing this package registers all tables on Base.metadata."""
 
-from app.models.agent import AgentPlan, AgentSession
+from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.asset import Asset
 from app.models.base import Base
 from app.models.enums import (
@@ -20,6 +20,7 @@ __all__ = [
     "Job",
     "AgentSession",
     "AgentPlan",
+    "AgentPlanAttempt",
     "MediaType",
     "TechnicalMetadataStatus",
     "JobStatus",

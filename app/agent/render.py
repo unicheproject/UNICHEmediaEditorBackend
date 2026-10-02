@@ -6,6 +6,7 @@ existing handlers and FFmpeg calls.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from dataclasses import dataclass
@@ -68,6 +69,22 @@ def _canonical_hash(value: Any) -> str:
 
 def plan_fingerprint(plan: Plan) -> str:
     return _canonical_hash([step.model_dump(mode="json") for step in plan.steps])
+
+
+def reset_execution_summary(summary: dict | None) -> dict | None:
+    """Clear prior-attempt outputs while retaining the compiled execution graph."""
+    if summary is None:
+        return None
+    result = copy.deepcopy(summary)
+    for node in result.get("nodes", []):
+        if node.get("kind") != "identity":
+            node.pop("job_id", None)
+            node.pop("status", None)
+            node.pop("output_asset_id", None)
+    for step in result.get("steps", []):
+        step.update(status="planned", job_id=None, output_asset_id=None)
+        step.pop("output_asset_ids", None)
+    return result
 
 
 def _adapter_eligible(step: PlanStep) -> bool:

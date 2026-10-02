@@ -120,9 +120,9 @@ def _get_noop_canceller():
     return _noop_cancel
 
 
-async def _eager_run_plan(plan_id: uuid.UUID) -> None:
+async def _eager_run_plan(plan_id: uuid.UUID, attempt_id: uuid.UUID) -> None:
     async with async_session_factory() as session:
-        await execute_plan(session, plan_id)
+        await execute_plan(session, plan_id, attempt_id)
 
 
 async def _noop_asset_probe(asset_id: uuid.UUID) -> None:

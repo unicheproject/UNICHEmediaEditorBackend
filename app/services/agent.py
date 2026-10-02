@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import llm
-from app.agent.render import compile_execution_plan
+from app.agent.render import compile_execution_plan, reset_execution_summary
 from app.agent.schemas import Plan, PlannerResult
 from app.core.errors import NotFoundError, ValidationError
-from app.models.agent import AgentPlan, AgentSession
+from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.asset import Asset
 from app.models.enums import AgentPlanStatus, TechnicalMetadataStatus
 from app.services.assets import get_asset
@@ -139,11 +140,199 @@ async def get_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
     return plan
 
 
-async def approve_plan(session: AsyncSession, plan_id: uuid.UUID) -> AgentPlan:
+async def approve_plan(
+    session: AsyncSession, plan_id: uuid.UUID
+) -> tuple[AgentPlan, AgentPlanAttempt, AgentPlanStatus, str | None]:
     plan = await get_plan(session, plan_id)
     if plan.status not in (AgentPlanStatus.proposed, AgentPlanStatus.failed):
         raise ValidationError(f"Plan '{plan_id}' is not approvable (status={plan.status.value})")
-    plan.status = AgentPlanStatus.approved
+
+    previous_status = plan.status
+    previous_error = plan.error
+    attempt_number = int(
+        await session.scalar(
+            select(func.coalesce(func.max(AgentPlanAttempt.attempt_number), 0)).where(
+                AgentPlanAttempt.plan_id == plan_id
+            )
+        )
+        or 0
+    ) + 1
+    attempt_id = uuid.uuid4()
+    claimed = await session.execute(
+        update(AgentPlan)
+        .where(AgentPlan.id == plan_id, AgentPlan.status == previous_status)
+        .values(
+            status=AgentPlanStatus.approved,
+            active_attempt_id=attempt_id,
+            error=None,
+        )
+    )
+    if getattr(claimed, "rowcount", 0) != 1:
+        await session.rollback()
+        raise ValidationError(f"Plan '{plan_id}' is not approvable")
+
+    attempt = AgentPlanAttempt(
+        id=attempt_id,
+        plan_id=plan_id,
+        attempt_number=attempt_number,
+        status="approved",
+        execution_summary=reset_execution_summary(plan.execution_summary),
+    )
+    session.add(attempt)
     await session.commit()
     await session.refresh(plan)
-    return plan
+    await session.refresh(attempt)
+    return plan, attempt, previous_status, previous_error
+
+
+async def release_unqueued_attempt(
+    session: AsyncSession,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    previous_status: AgentPlanStatus,
+    previous_error: str | None,
+    error: str,
+) -> None:
+    """Restore the pre-approval state only if the worker has not claimed it."""
+    changed = await session.execute(
+        update(AgentPlan)
+        .where(
+            AgentPlan.id == plan_id,
+            AgentPlan.status == AgentPlanStatus.approved,
+            AgentPlan.active_attempt_id == attempt_id,
+        )
+        .values(
+            status=previous_status,
+            active_attempt_id=None,
+            error=previous_error,
+        )
+    )
+    attempt = await session.get(AgentPlanAttempt, attempt_id)
+    if getattr(changed, "rowcount", 0) == 1 and attempt is not None:
+        attempt.status = "failed"
+        attempt.error = error
+        attempt.finished_at = datetime.now(UTC)
+    await session.commit()
+
+
+async def list_plan_attempts(
+    session: AsyncSession, plan_id: uuid.UUID
+) -> list[AgentPlanAttempt]:
+    result = await session.scalars(
+        select(AgentPlanAttempt)
+        .where(AgentPlanAttempt.plan_id == plan_id)
+        .order_by(AgentPlanAttempt.attempt_number)
+    )
+    return list(result)
+
+
+async def claim_plan_attempt(
+    session: AsyncSession, plan_id: uuid.UUID, attempt_id: uuid.UUID
+) -> tuple[AgentPlan, AgentPlanAttempt] | None:
+    """Atomically transfer an approved attempt to exactly one worker."""
+    attempt = await session.get(AgentPlanAttempt, attempt_id)
+    if attempt is None or attempt.plan_id != plan_id or attempt.status != "approved":
+        await session.rollback()
+        return None
+    claimed = await session.execute(
+        update(AgentPlan)
+        .where(
+            AgentPlan.id == plan_id,
+            AgentPlan.status == AgentPlanStatus.approved,
+            AgentPlan.active_attempt_id == attempt_id,
+        )
+        .values(status=AgentPlanStatus.running)
+    )
+    if getattr(claimed, "rowcount", 0) != 1:
+        await session.rollback()
+        return None
+    attempt.status = "running"
+    attempt.started_at = datetime.now(UTC)
+    await session.commit()
+    plan = await get_plan(session, plan_id)
+    await session.refresh(attempt)
+    return plan, attempt
+
+
+async def claim_legacy_approved_plan(
+    session: AsyncSession, plan_id: uuid.UUID
+) -> tuple[AgentPlan, AgentPlanAttempt] | None:
+    """Claim a pre-upgrade ARQ delivery that has no persisted attempt token.
+
+    This path is safe only while the plan has no active token. New approvals
+    always set one, so a stale legacy delivery cannot claim a later retry.
+    """
+    attempt_number = int(
+        await session.scalar(
+            select(func.coalesce(func.max(AgentPlanAttempt.attempt_number), 0)).where(
+                AgentPlanAttempt.plan_id == plan_id
+            )
+        )
+        or 0
+    ) + 1
+    plan = await session.get(AgentPlan, plan_id)
+    if plan is None:
+        await session.rollback()
+        return None
+    attempt_id = uuid.uuid4()
+    started_at = datetime.now(UTC)
+    claimed = await session.execute(
+        update(AgentPlan)
+        .where(
+            AgentPlan.id == plan_id,
+            AgentPlan.status == AgentPlanStatus.approved,
+            AgentPlan.active_attempt_id.is_(None),
+        )
+        .values(status=AgentPlanStatus.running, active_attempt_id=attempt_id)
+    )
+    if getattr(claimed, "rowcount", 0) != 1:
+        await session.rollback()
+        return None
+    attempt = AgentPlanAttempt(
+        id=attempt_id,
+        plan_id=plan_id,
+        attempt_number=attempt_number,
+        status="running",
+        started_at=started_at,
+        execution_summary=reset_execution_summary(plan.execution_summary),
+    )
+    session.add(attempt)
+    await session.commit()
+    plan = await get_plan(session, plan_id)
+    await session.refresh(attempt)
+    return plan, attempt
+
+
+async def snapshot_plan_attempt(
+    session: AsyncSession,
+    attempt: AgentPlanAttempt,
+    *,
+    step_runs: list[dict],
+    execution_summary: dict | None,
+    result_asset_ids: list[str],
+    status: str | None = None,
+    error: str | None = None,
+    finished_at: datetime | None = None,
+) -> None:
+    """Persist the latest truthful attempt view alongside the plan's live view."""
+    attempt.step_runs = list(step_runs)
+    attempt.execution_summary = execution_summary
+    attempt.result_asset_ids = list(result_asset_ids)
+    job_ids: list[str] = []
+    for run in step_runs:
+        job_id = run.get("job_id")
+        if job_id and job_id not in job_ids:
+            job_ids.append(job_id)
+    if execution_summary:
+        for node in execution_summary.get("nodes", []):
+            job_id = node.get("job_id")
+            if job_id and job_id not in job_ids:
+                job_ids.append(job_id)
+    attempt.job_ids = job_ids
+    if status is not None:
+        attempt.status = status
+    if error is not None:
+        attempt.error = error
+    if finished_at is not None:
+        attempt.finished_at = finished_at
+    await session.flush()

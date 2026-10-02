@@ -55,10 +55,15 @@ async def cancel_job(job_id: uuid.UUID) -> bool:
         await pool.aclose()
 
 
-async def enqueue_plan(plan_id: uuid.UUID) -> None:
+async def enqueue_plan(plan_id: uuid.UUID, attempt_id: uuid.UUID) -> None:
     pool = await get_arq_pool()
     try:
-        await pool.enqueue_job(RUN_PLAN_TASK, str(plan_id))
+        await pool.enqueue_job(
+            RUN_PLAN_TASK,
+            str(plan_id),
+            str(attempt_id),
+            _job_id=f"agent-plan-{plan_id}-{attempt_id}",
+        )
     finally:
         await pool.aclose()
 
