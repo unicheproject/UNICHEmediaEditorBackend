@@ -338,16 +338,16 @@ def test_video_compose_capability_contract_remains_unchanged() -> None:
         "music_volume",
         "subtitle_asset_id",
     }
-    assert not registry.exists("project.export")
+    assert registry.exists("project.export")
 
 
-async def test_no_public_composition_render_route_or_export_capability(
+async def test_no_public_composition_render_route_before_export_jobs(
     client: AsyncClient,
 ) -> None:
     openapi = (await client.get("/openapi.json")).json()
     paths = openapi["paths"]
     assert "/api/v1/projects/{project_id}/composition/render" not in paths
-    assert not registry.exists("project.export")
+    assert registry.exists("project.export")
 
 
 async def test_runtime_resolver_conceals_revision_from_another_project(

@@ -25,6 +25,8 @@ class ResolvedCompositionRender:
     compiled: CompiledCompositionRender
     project_id: uuid.UUID
     sources: ComposeRenderSources
+    ordered_video_checksums: tuple[str, ...]
+    audio_checksum: str | None
 
 
 async def resolve_composition_render(
@@ -65,6 +67,7 @@ async def resolve_composition_render(
     )
     assets = {asset.id: asset for asset in result_assets}
     paths: dict[uuid.UUID, str] = {}
+    checksums: dict[uuid.UUID, str] = {}
     for asset_id, media_type in expected.items():
         asset = assets.get(asset_id)
         if (
@@ -83,6 +86,9 @@ async def resolve_composition_render(
             raise ValidationError(
                 _UNAVAILABLE, code="composition_asset_unavailable"
             ) from exc
+        if not asset.checksum_sha256:
+            raise ValidationError(_UNAVAILABLE, code="composition_asset_unavailable")
+        checksums[asset_id] = asset.checksum_sha256
 
     audio_path = str(paths[audio_id]) if audio_id is not None else None
     return ResolvedCompositionRender(
@@ -92,4 +98,8 @@ async def resolve_composition_render(
             video_paths=tuple(paths[asset_id] for asset_id in compiled.request.video_asset_ids),
             audio_path=audio_path,
         ),
+        ordered_video_checksums=tuple(
+            checksums[asset_id] for asset_id in compiled.request.video_asset_ids
+        ),
+        audio_checksum=checksums[audio_id] if audio_id is not None else None,
     )

@@ -12,12 +12,13 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     caps = resp.json()
     by_id = {c["id"]: c for c in caps}
     ids = set(by_id)
-    # A representative sample of the registered capabilities (14 AI + 20 tools).
+    # A representative sample of the registered capabilities (14 AI + tools).
     assert {"image.caption", "audio.transcribe", "video.upscale"} <= ids
     assert {"video.trim", "image.resize", "audio.normalize"} <= ids
     assert {"image.slideshow", "media.titlecard", "video.compose", "video.lowerthird"} <= ids
+    assert "project.export" in ids
     assert "image.kenburns" in ids
-    assert len(caps) == 40
+    assert len(caps) == 41
     for capability_id in ("audio.normalize", "audio.gain", "audio.fade", "audio.denoise"):
         assert by_id[capability_id]["supported_media_types"] == ["video", "audio"]
         assert "video input preserves the video stream" in by_id[capability_id]["description"]

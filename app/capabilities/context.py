@@ -10,9 +10,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.enums import MediaType
+
+if TYPE_CHECKING:
+    from app.services.project_exports import ProjectExportExecution
 
 
 @dataclass
@@ -36,6 +39,9 @@ class JobContext:
     work_dir: Path | None = None
     project_id: uuid.UUID | None = None
     source_asset_id: uuid.UUID | None = None
+    # Present only for the source-less project.export capability; the worker
+    # resolves it from the exact revision before invoking the handler.
+    project_export: ProjectExportExecution | None = None
 
     def out_path(self, filename: str) -> Path:
         """Absolute path inside the scratch dir for a named output file."""

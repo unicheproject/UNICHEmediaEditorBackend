@@ -50,6 +50,17 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     )
     if project_id is not None:
         await get_project(session, project_id)
+    stored_input = dict(data.input)
+    if data.capability_id == "project.export":
+        if project_id is None or data.asset_id is not None:
+            raise ValidationError(
+                "project.export requires project_id and does not accept a primary asset"
+            )
+        from app.services.project_exports import create_export_execution_snapshot
+
+        stored_input["execution_snapshot"] = await create_export_execution_snapshot(
+            session, project_id=project_id, request=dict(data.input)
+        )
     if data.asset_id is not None:
         asset = await get_asset(session, data.asset_id)
         if asset.media_type not in cap.supported_media_types:
@@ -64,7 +75,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
         asset_id=data.asset_id,
         capability_id=data.capability_id,
         status=JobStatus.queued,
-        input=data.input,
+        input=stored_input,
         progress=0,
     )
     session.add(job)
@@ -220,14 +231,47 @@ async def _build_job_context(
 ) -> JobContext:
     """Resolve input assets to paths and assemble the handler context."""
     capability = registry.get(job.capability_id)
-    validate_job_input(capability, dict(job.input or {}))
+    job_input = dict(job.input or {})
+    request_input = (
+        {key: value for key, value in job_input.items() if key != "execution_snapshot"}
+        if job.capability_id == "project.export"
+        else job_input
+    )
+    validate_job_input(capability, request_input)
     project_id = await resolve_job_project(
         session,
         project_id=job.project_id,
         asset_id=job.asset_id,
-        job_input=job.input,
+        job_input=request_input,
     )
-    await _validate_referenced_asset_media_types(session, capability, dict(job.input or {}))
+    await _validate_referenced_asset_media_types(session, capability, request_input)
+
+    if job.capability_id == "project.export":
+        if project_id is None or job.project_id != project_id or job.asset_id is not None:
+            raise ValidationError("Project export Job scope is invalid")
+        from app.services.project_exports import resolve_project_export_execution
+
+        execution = await resolve_project_export_execution(
+            session, project_id=project_id, job_input=job_input
+        )
+        video_ids = list(execution.compiled.request.video_asset_ids)
+        video_paths = list(execution.sources.video_paths)
+        first_path = video_paths[0] if video_paths else None
+        audio_path = execution.sources.audio_path
+        return JobContext(
+            capability_id=job.capability_id,
+            params=request_input,
+            input_path=first_path,
+            input_paths=video_paths,
+            input_asset_ids=video_ids,
+            named_input_paths=(
+                {"audio_asset_id": audio_path} if audio_path is not None else {}
+            ),
+            work_dir=work_dir,
+            project_id=project_id,
+            source_asset_id=video_ids[0] if video_ids else None,
+            project_export=execution,
+        )
     storage = get_storage()
     input_path: str | None = None
     input_asset_meta: dict = {}

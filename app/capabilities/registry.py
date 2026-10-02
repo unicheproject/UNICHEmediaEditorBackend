@@ -9,6 +9,7 @@ from app.capabilities.handlers.audio_tts import AudioTtsHandler
 from app.capabilities.handlers.base import CapabilityHandler
 from app.capabilities.handlers.image_caption import ImageCaptionHandler
 from app.capabilities.handlers.not_implemented import NotImplementedHandler
+from app.capabilities.handlers.project_export import ProjectExportHandler
 from app.core.errors import NotFoundError
 
 # Deterministic local-tool handlers (FFmpeg / ImageMagick / Real-ESRGAN / PySceneDetect).
@@ -50,6 +51,7 @@ _HANDLERS: dict[str, CapabilityHandler] = {
     "image.caption": ImageCaptionHandler(),
     "audio.transcribe": AudioTranscribeHandler(),
     "audio.tts": AudioTtsHandler(),
+    "project.export": ProjectExportHandler(),
     **{h.capability_id: h for h in _TOOL_HANDLERS},
 }
 _FALLBACK_HANDLER = NotImplementedHandler()

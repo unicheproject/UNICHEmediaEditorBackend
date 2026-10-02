@@ -11,6 +11,12 @@ from app.capabilities.compose_contract import (
     COMPOSE_DEFAULT_MUSIC_VOLUME,
     ComposeAudioMode,
 )
+from app.capabilities.media_options import (
+    AUDIO_CODEC_DESCRIPTIONS,
+    VIDEO_CODEC_DESCRIPTIONS,
+    VIDEO_TRANSCODE_OPTIONS,
+)
+from app.composition.export_presets import project_export_input_schema
 from app.models.enums import CostClass, MediaType
 from app.schemas.capability import CapabilityRead
 
@@ -114,38 +120,16 @@ _INT = {"type": "integer"}
 _V, _A, _I = [MediaType.video], [MediaType.audio], [MediaType.image]
 _VA = [MediaType.video, MediaType.audio]
 
-# Stable portable transcode subset supported by the pinned Debian FFmpeg
-# build. The same matrix generates schema validation and generic dependent
-# option metadata; omitted codec parameters remain optional for FFmpeg defaults.
-_VIDEO_TRANSCODE_OPTIONS = {
-    "mp4": {"video_codec": ["libx264"], "audio_codec": ["aac"]},
-    "mov": {"video_codec": ["libx264"], "audio_codec": ["aac"]},
-    "mkv": {
-        "video_codec": ["libx264", "libx265", "libvpx-vp9"],
-        "audio_codec": ["aac", "libmp3lame", "libopus", "libvorbis", "flac"],
-    },
-    "webm": {"video_codec": ["libvpx-vp9"], "audio_codec": ["libopus", "libvorbis"]},
-}
-_VIDEO_CODEC_DESCRIPTIONS = {
-    "libx264": "H.264 / AVC",
-    "libx265": "H.265 / HEVC",
-    "libvpx-vp9": "VP9",
-}
-_AUDIO_CODEC_DESCRIPTIONS = {
-    "aac": "AAC",
-    "libmp3lame": "MP3",
-    "libopus": "Opus",
-    "libvorbis": "Vorbis",
-    "flac": "FLAC",
-}
+# The matrix in app.capabilities.media_options is also intersected with the
+# smaller set verified by project.export's delivery renderer.
 
 
 def _transcode_codec_schema(field: str, title: str, description: str) -> dict:
     matrix = {
-        container: options[field] for container, options in _VIDEO_TRANSCODE_OPTIONS.items()
+        container: options[field] for container, options in VIDEO_TRANSCODE_OPTIONS.items()
     }
     codec_descriptions = (
-        _VIDEO_CODEC_DESCRIPTIONS if field == "video_codec" else _AUDIO_CODEC_DESCRIPTIONS
+        VIDEO_CODEC_DESCRIPTIONS if field == "video_codec" else AUDIO_CODEC_DESCRIPTIONS
     )
     enum = list(dict.fromkeys(codec for codecs in matrix.values() for codec in codecs))
     return _string(
@@ -177,7 +161,7 @@ _VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS = [
             }
         },
     }
-    for container, options in _VIDEO_TRANSCODE_OPTIONS.items()
+    for container, options in VIDEO_TRANSCODE_OPTIONS.items()
 ]
 
 # Declarative specs for the deterministic local-tool capabilities.
@@ -252,7 +236,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "format": _string(
                 "Output container",
                 "Container extension for the output video, without a leading dot.",
-                enum=list(_VIDEO_TRANSCODE_OPTIONS),
+                enum=list(VIDEO_TRANSCODE_OPTIONS),
                 **{
                     "x-enum-descriptions": {
                         "mp4": "MPEG-4 Part 14",
@@ -1028,6 +1012,19 @@ CAPABILITIES: list[CapabilityDef] = [
                 }
             },
         },
+    ),
+    _def(
+        id="project.export",
+        title="Export Project Composition",
+        description=(
+            "Render the selected immutable project composition revision using a named "
+            "delivery preset. Social requires an explicit canvas; Archival is locked "
+            "lossless FFV1/FLAC; Advanced accepts only constrained H.264/AAC settings."
+        ),
+        media=[],
+        cost_class=CostClass.deterministic,
+        input_schema=project_export_input_schema(),
+        output_schema=_FILE_OUTPUT_SCHEMA,
     ),
 ]
 

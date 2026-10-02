@@ -15,6 +15,12 @@ from app.tools.compose_policy import (
     DEFAULT_COMPOSE_RENDER_POLICY,
     ComposeRenderPolicy,
 )
+from app.tools.export_policy import (
+    CompositionPolicyId,
+    EffectiveExportSettings,
+    ExportContainer,
+    FitPolicy,
+)
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -637,3 +643,53 @@ async def compose(
     # 5. move final result to dst
     if str(current) != dst:
         await runner.run([*_BASE, "-i", str(current), "-c", "copy", dst])
+
+
+async def export_delivery_transform(
+    src: str, dst: str, settings: EffectiveExportSettings
+) -> None:
+    """Encode a validated lossy delivery profile without accepting CLI fragments."""
+    if settings.composition_policy != CompositionPolicyId.DEFAULT:
+        raise ToolError("Lossless archival settings must render directly through compose")
+
+    args = [*_BASE, "-i", src, "-map", "0:v:0", "-map", "0:a:0?"]
+    video_filter: str | None = None
+    if settings.target_width is not None and settings.target_height is not None:
+        if settings.fit != FitPolicy.PAD:
+            raise ToolError("Exact delivery canvases require the preserve-and-pad fit policy")
+        width, height = settings.target_width, settings.target_height
+        video_filter = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
+            f"force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+    elif settings.max_width is not None and settings.max_height is not None:
+        if settings.fit != FitPolicy.FIT:
+            raise ToolError("Maximum delivery bounds require the aspect-preserving fit policy")
+        video_filter = (
+            f"scale=w='min(iw,{settings.max_width})':h='min(ih,{settings.max_height})':"
+            "force_original_aspect_ratio=decrease:force_divisible_by=2"
+        )
+    if video_filter is not None:
+        args.extend(["-vf", video_filter])
+
+    args.extend(
+        [
+            "-c:v", settings.video_codec.value,
+            "-pix_fmt", settings.pixel_format.value,
+        ]
+    )
+    if settings.profile is not None:
+        args.extend(["-profile:v", settings.profile])
+    if settings.crf is not None:
+        args.extend(["-crf", str(settings.crf)])
+    args.extend(["-c:a", settings.audio_codec.value])
+    if settings.audio_bitrate_kbps is not None:
+        args.extend(["-b:a", f"{settings.audio_bitrate_kbps}k"])
+    if settings.audio_channels is not None:
+        args.extend(["-ac", str(settings.audio_channels)])
+    if settings.faststart:
+        if settings.container != ExportContainer.MP4:
+            raise ToolError("Faststart is supported only for MP4 delivery")
+        args.extend(["-movflags", "+faststart"])
+    args.extend(["-f", "mp4" if settings.container == ExportContainer.MP4 else "matroska", dst])
+    await runner.run(args)

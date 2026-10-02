@@ -241,10 +241,23 @@ Key boundaries:
   defaults to its existing MP4/H.264/AAC behavior; the internal lossless
   policy carries Matroska/FFV1/FLAC through normalized segments, stream-copy
   concat, audio-bed processing, and subtitle burn-in. A future Archival
-  `project.export` can select that policy without changing saved compositions;
-  no export capability exists yet.
-  This is an internal rendering boundary only; it does not add a public render
-  endpoint or `project.export` capability.
+  `project.export` selects that policy from the start without changing saved
+  compositions. `project.export` is a normal asynchronous Job bound to the
+  exact submitted revision; its immutable Job input snapshots the revision hash,
+  compiler/preset versions, ordered source checksums, and fully resolved typed
+  settings. Web, Social, and Preview render the composition with the unchanged
+  default policy and apply one bounded H.264/AAC delivery transform. Archival
+  renders directly to MKV/FFV1/FLAC with no lossy composition intermediate.
+  The final result is one ordinary visible derived Asset; renderer-local files
+  remain inside the Job work directory.
+- Export presets are defined once in `app/composition/export_presets.py`.
+  Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
+  Social requires `square` (1080×1080) or `portrait` (1080×1920) and
+  preserves aspect ratio with padding (CRF 21, AAC 128 kbps); Preview fits
+  without upscaling inside 1280×720 (CRF 28, AAC 96 kbps); Archival is locked
+  lossless FFV1/FLAC; Advanced is constrained to MP4/MKV with H.264/AAC plus
+  optional even maximum dimensions, CRF 18–35, and AAC bitrate 64–320 kbps.
+  MP4 deliveries use faststart. No arbitrary FFmpeg options are accepted.
 - **Provider selection happens in exactly one place**:
   `app/providers/factory.py`, driven by `INFERENCE_PROVIDER`.
 
