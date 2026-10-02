@@ -273,6 +273,17 @@ operation's output `asset_id` can feed straight into the next operation as input
 (`input.asset_ids` for multi-input ops like `*.concat`). This composability is
 what a future agentic planner will use to chain capabilities as tools.
 
+**Same-plan Agent retry reuse.** On re-approval of a failed/cancelled
+`AgentPlan`, a conservative, explicitly versioned allowlist may reuse a
+successful, single-output physical Job from an earlier attempt of that same
+plan and project. Fused video operations are reused as one complete render
+group, never as individual logical steps. Reused nodes have `reused: true`, a
+null `job_id`, source Job/attempt references, and the original output Asset ID
+in the new attempt's step/group audit. The attempt's `job_ids` contains only
+Jobs physically created by that attempt. Temp Asset retention is not extended;
+expired, deleted, missing, incomplete, or mismatched outputs are misses. There
+is no direct-Job or cross-plan cache in this phase.
+
 **Audio uses FFmpeg** (not SoX) so every accepted format — including m4a/AAC —
 works; the handler layer stays modular if a SoX backend is wanted later.
 

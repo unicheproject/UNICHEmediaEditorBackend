@@ -20,9 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.agent import render as render_compiler
+from app.agent import reuse as reuse_svc
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
-from app.core.errors import ValidationError
+from app.core.errors import AppError, ValidationError
 from app.core.logging import get_logger
 from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.enums import AgentPlanStatus, JobStatus, MediaType
@@ -169,9 +170,12 @@ async def execute_plan(
                     job, output_asset_id = await _execute_render_group(
                         session, plan_row, project_id, node,
                         is_intermediate=terminal_step in consumed,
-                        step_runs=step_runs, summary=summary,
+                        step_runs=step_runs, summary=summary, attempt=attempt,
                     )
-                    node["job_id"] = str(job.id)
+                    reused = bool(node.get("reused"))
+                    node["job_id"] = None if reused else str(job.id)
+                    if reused:
+                        node["source_job_id"] = str(job.id)
                     node["status"] = job.status.value
                     node["output_asset_id"] = output_asset_id
                     active_entries = [op for op in node["operations"] if not op["identity"]]
@@ -184,7 +188,14 @@ async def execute_plan(
                         step_runs.append({
                             "step_id": step_id, "capability_id": step.capability_id,
                             "status": status, "identity": is_identity,
-                            "render_group_id": node["id"], "job_id": str(job.id),
+                            "render_group_id": node["id"],
+                            "job_id": None if reused else str(job.id),
+                            "reused": reused and not is_identity,
+                            "source_job_id": str(job.id) if reused and not is_identity else None,
+                            "source_attempt_id": (
+                                node.get("source_attempt_id")
+                                if reused and not is_identity else None
+                            ),
                             "output_asset_id": (
                                 output_asset_id if step_id == terminal_active else None
                             ),
@@ -192,7 +203,15 @@ async def execute_plan(
                         outputs[step_id] = output_asset_id
                         _update_summary_step(
                             summary, step_id, status=status, identity=is_identity,
-                            job_id=str(job.id),
+                            job_id=None if reused else str(job.id),
+                            reused=reused and not is_identity,
+                            source_job_id=(
+                                node.get("source_job_id") if reused and not is_identity else None
+                            ),
+                            source_attempt_id=(
+                                node.get("source_attempt_id")
+                                if reused and not is_identity else None
+                            ),
                             output_asset_id=output_asset_id if step_id == terminal_active else None,
                         )
                     await _save_running_attempt(
@@ -323,6 +342,59 @@ async def _execute_standard_step(
     is_intermediate: bool = False,
 ) -> None:
     asset_id, job_input = _build_job_input(step, outputs)
+    execution_identity = await reuse_svc.build_execution_identity(
+        session,
+        project_id=project_id,
+        capability_id=step.capability_id,
+        asset_id=asset_id,
+        params=job_input,
+    )
+    reusable = None
+    if execution_identity is not None:
+        reusable = await reuse_svc.find_reusable_output(
+            session,
+            plan_id=plan_row.id,
+            current_attempt=attempt,
+            project_id=project_id,
+            identity=execution_identity,
+    )
+    if reusable is not None:
+        cached_output_id = str(reusable.asset.id)
+        outputs[step.id] = cached_output_id
+        step_runs.append({
+            "step_id": step.id,
+            "capability_id": step.capability_id,
+            "job_id": None,
+            "status": JobStatus.succeeded.value,
+            "output_asset_id": cached_output_id,
+            "output_asset_ids": [cached_output_id],
+            "reused": True,
+            "source_job_id": str(reusable.job.id),
+            "source_attempt_id": str(reusable.attempt.id),
+        })
+        _update_summary_step(
+            summary,
+            step.id,
+            status=JobStatus.succeeded.value,
+            job_id=None,
+            output_asset_id=cached_output_id,
+            output_asset_ids=[cached_output_id],
+            reused=True,
+            source_job_id=str(reusable.job.id),
+            source_attempt_id=str(reusable.attempt.id),
+        )
+        await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
+        logger.info(
+            "Agent retry reuse hit plan=%s attempt=%s step=%s source_job=%s asset=%s",
+            plan_row.id, attempt.id, step.id, reusable.job.id, reusable.asset.id,
+        )
+        return
+
+    if execution_identity is not None:
+        logger.debug(
+            "Agent retry reuse miss plan=%s attempt=%s node=%s reason=no_valid_prior_output",
+            plan_row.id, attempt.id, step.id,
+        )
     job = await jobs_svc.create_job(
         session,
         JobCreate(
@@ -339,12 +411,12 @@ async def _execute_standard_step(
     except asyncio.CancelledError:
         await session.refresh(job)
         output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
-        run = {
+        cancelled_run = {
             "step_id": step.id, "capability_id": step.capability_id,
             "job_id": str(job.id), "status": JobStatus.cancelled.value,
             "output_asset_id": None, "output_asset_ids": output_ids,
         }
-        step_runs.append(run)
+        step_runs.append(cancelled_run)
         _update_summary_step(
             summary, step.id, status=JobStatus.cancelled.value,
             job_id=str(job.id), output_asset_id=None,
@@ -353,17 +425,39 @@ async def _execute_standard_step(
         raise
     output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
     output_id = output_ids[0] if len(output_ids) == 1 else None
+    if execution_identity is not None and job.status == JobStatus.succeeded and output_id:
+        try:
+            persisted_asset = await get_asset(session, uuid.UUID(output_id))
+            if (
+                persisted_asset.project_id == project_id
+                and persisted_asset.checksum_sha256
+                and persisted_asset.size_bytes > 0
+                and persisted_asset.physical_expired_at is None
+                and persisted_asset.technical_metadata_status != "pending"
+            ):
+                ensure_asset_binary_available(persisted_asset)
+                job.agent_plan_id = plan_row.id
+                job.agent_attempt_id = attempt.id
+                job.execution_identity = execution_identity
+                await session.commit()
+        except (AppError, ValueError):
+            # Successful processing is still successful, but incomplete output
+            # cannot be published as a future retry hit.
+            await session.rollback()
+            await session.refresh(job)
     outputs[step.id] = output_id
-    run = {
+    run: dict[str, Any] = {
         "step_id": step.id, "capability_id": step.capability_id,
         "job_id": str(job.id), "status": job.status.value,
         "output_asset_id": output_id,
         "output_asset_ids": output_ids,
+        "reused": False,
     }
     step_runs.append(run)
     _update_summary_step(
         summary, step.id, status=job.status.value, job_id=str(job.id),
         output_asset_id=output_id, output_asset_ids=output_ids,
+        reused=False,
     )
     await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
     if job.status == JobStatus.failed:
@@ -431,11 +525,41 @@ async def _execute_render_group(
     is_intermediate: bool,
     step_runs: list[dict],
     summary: dict,
+    attempt: AgentPlanAttempt,
 ) -> tuple[Job, str | None]:
     """Execute and persist one physical Agent-only render-group Job."""
     source_asset = await get_asset(session, uuid.UUID(group["source_asset_id"]))
     if source_asset.project_id != project_id:
         raise ValidationError("Render input is not in the Agent plan's project.")
+    execution_identity = reuse_svc.render_group_identity(
+        project_id, group, optimizer_version=render_compiler.OPTIMIZER_VERSION
+    )
+    if execution_identity is not None:
+        reusable = await reuse_svc.find_reusable_output(
+            session,
+            plan_id=plan_row.id,
+            current_attempt=attempt,
+            project_id=project_id,
+            identity=execution_identity,
+        )
+        if reusable is not None:
+            group.update(
+                job_id=None,
+                status=JobStatus.succeeded.value,
+                output_asset_id=str(reusable.asset.id),
+                reused=True,
+                source_job_id=str(reusable.job.id),
+                source_attempt_id=str(reusable.attempt.id),
+            )
+            logger.info(
+                "Agent retry reuse hit plan=%s attempt=%s group=%s source_job=%s asset=%s",
+                plan_row.id, attempt.id, group["id"], reusable.job.id, reusable.asset.id,
+            )
+            return reusable.job, str(reusable.asset.id)
+        logger.debug(
+            "Agent retry reuse miss plan=%s attempt=%s node=%s reason=no_valid_prior_output",
+            plan_row.id, attempt.id, group["id"],
+        )
     job_input = {
         "render_group_id": group["id"],
         "logical_step_ids": group["step_ids"],
@@ -491,6 +615,19 @@ async def _execute_render_group(
         job.status = JobStatus.succeeded
         job.progress = 100
         job.finished_at = datetime.now(UTC)
+        if execution_identity is not None:
+            persisted_asset = await get_asset(session, uuid.UUID(output_asset_id))
+            if (
+                persisted_asset.project_id == project_id
+                and persisted_asset.checksum_sha256
+                and persisted_asset.size_bytes > 0
+                and persisted_asset.physical_expired_at is None
+                and persisted_asset.technical_metadata_status != "pending"
+            ):
+                ensure_asset_binary_available(persisted_asset)
+                job.agent_plan_id = plan_row.id
+                job.agent_attempt_id = attempt.id
+                job.execution_identity = execution_identity
         await session.commit()
     except asyncio.CancelledError:
         await session.rollback()
