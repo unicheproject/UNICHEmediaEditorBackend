@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers.base import ProviderBackedHandler
+from app.core.errors import ProviderError
 from app.models.enums import MediaType
 from app.providers.base import InferenceRequest
 from app.providers.factory import get_provider
@@ -29,8 +30,8 @@ class AudioTtsHandler(ProviderBackedHandler):
         )
         data = await provider.infer(request)
         audio_bytes = data.pop(AUDIO_BYTES_KEY, None)
-        if audio_bytes is None:
-            return HandlerResult(data=data, outputs=[])
+        if not audio_bytes:
+            raise ProviderError("Speech synthesis returned no audio output")
 
         filename = data.pop(AUDIO_FILENAME_KEY, "speech.mp3")
         out_path = ctx.out_path(filename)

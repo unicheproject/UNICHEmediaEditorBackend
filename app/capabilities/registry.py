@@ -6,11 +6,12 @@ from app.capabilities.definitions import CAPABILITIES, CAPABILITIES_BY_ID, Capab
 from app.capabilities.handlers import audio_ops, compose_ops, image_ops, video_ops
 from app.capabilities.handlers.audio_transcribe import AudioTranscribeHandler
 from app.capabilities.handlers.audio_tts import AudioTtsHandler
-from app.capabilities.handlers.base import CapabilityHandler
+from app.capabilities.handlers.base import CapabilityHandler, ProviderBackedHandler
 from app.capabilities.handlers.image_caption import ImageCaptionHandler
 from app.capabilities.handlers.not_implemented import NotImplementedHandler
 from app.capabilities.handlers.project_export import ProjectExportHandler
 from app.core.errors import NotFoundError
+from app.schemas.capability import DeploymentRequirement, ImplementationReadiness
 
 # Deterministic local-tool handlers (FFmpeg / ImageMagick / Real-ESRGAN / PySceneDetect).
 _TOOL_HANDLERS: list[CapabilityHandler] = [
@@ -74,3 +75,27 @@ def get(capability_id: str) -> CapabilityDef:
 
 def get_handler(capability_id: str) -> CapabilityHandler:
     return _HANDLERS.get(capability_id, _FALLBACK_HANDLER)
+
+
+def validate_implementation_registry() -> None:
+    """Fail startup on declaration/handler drift, before advertising definitions."""
+    if len(CAPABILITIES_BY_ID) != len(CAPABILITIES):
+        raise RuntimeError("Duplicate capability definitions")
+    for capability in CAPABILITIES:
+        handler = _HANDLERS.get(capability.id)
+        implemented = handler is not None and not isinstance(handler, NotImplementedHandler)
+        declared = capability.implementation == ImplementationReadiness.AVAILABLE
+        if implemented != declared:
+            raise RuntimeError(f"Implementation readiness/handler mismatch: {capability.id}")
+        if handler is not None and handler.capability_id != capability.id:
+            raise RuntimeError(f"Handler identity mismatch: {capability.id}")
+        if (
+            isinstance(handler, ProviderBackedHandler)
+            and capability.deployment_requirement != DeploymentRequirement.INFERENCE_PROVIDER
+        ):
+            raise RuntimeError(f"Provider deployment requirement missing: {capability.id}")
+    if set(_HANDLERS) - set(CAPABILITIES_BY_ID):
+        raise RuntimeError("Handlers without capability definitions")
+
+
+validate_implementation_registry()

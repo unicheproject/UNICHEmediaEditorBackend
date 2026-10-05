@@ -22,7 +22,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.agent import render as render_compiler
 from app.agent import reuse as reuse_svc
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
+from app.capabilities import registry
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
+from app.capabilities.readiness import require_executable
 from app.core.errors import AppError, ValidationError
 from app.core.logging import get_logger
 from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
@@ -126,6 +128,8 @@ async def execute_plan(
         await session.commit()
 
     try:
+        for step in plan.steps:
+            require_executable(registry.get(step.capability_id))
         if summary is not None:
             if summary.get("optimizer_version") != render_compiler.OPTIMIZER_VERSION:
                 raise ValidationError(

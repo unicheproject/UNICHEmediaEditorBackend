@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent import llm
 from app.agent.render import compile_execution_plan, reset_execution_summary
 from app.agent.schemas import Plan, PlannerResult
+from app.capabilities import registry
+from app.capabilities.readiness import require_executable
 from app.core.errors import NotFoundError, ValidationError
 from app.models.agent import AgentPlan, AgentPlanAttempt, AgentSession
 from app.models.asset import Asset
@@ -146,6 +148,9 @@ async def approve_plan(
     plan = await get_plan(session, plan_id)
     if plan.status not in (AgentPlanStatus.proposed, AgentPlanStatus.failed):
         raise ValidationError(f"Plan '{plan_id}' is not approvable (status={plan.status.value})")
+
+    for step in plan.steps:
+        require_executable(registry.get(step["capability_id"]))
 
     previous_status = plan.status
     previous_error = plan.error

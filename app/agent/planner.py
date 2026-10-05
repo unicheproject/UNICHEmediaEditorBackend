@@ -13,6 +13,7 @@ from typing import Any
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities import registry
 from app.capabilities.applicability import validate_primary_asset_applicability
+from app.capabilities.readiness import require_executable
 from app.capabilities.validation import (
     CapabilityInputValidationError,
     iter_media_asset_references,
@@ -72,8 +73,10 @@ def validate_plan(
             cap = registry.get(step.capability_id)
         except NotFoundError as exc:
             raise PlanValidationError(str(exc)) from exc
-        if not cap.enabled:
-            raise PlanValidationError(f"Capability '{step.capability_id}' is disabled.")
+        try:
+            require_executable(cap)
+        except ValidationError as exc:
+            raise PlanValidationError(exc.message) from exc
         if deterministic_only and cap.cost_class != CostClass.deterministic:
             raise PlanValidationError(
                 f"Capability '{step.capability_id}' is not available to the agent; "

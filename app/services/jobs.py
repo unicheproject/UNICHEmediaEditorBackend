@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.capabilities import registry
 from app.capabilities.applicability import validate_job_applicability
 from app.capabilities.context import HandlerResult, JobContext
+from app.capabilities.readiness import require_executable, require_worker_readiness
 from app.capabilities.validation import (
     CapabilityInputValidationError,
     iter_media_asset_references,
@@ -25,7 +26,7 @@ from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import JobStatus
 from app.models.job import Job
-from app.schemas.capability import CapabilityRead
+from app.schemas.capability import CapabilityMetadata
 from app.schemas.job import JobCreate
 from app.services import assets as assets_svc
 from app.services.assets import ensure_asset_binary_available, get_asset
@@ -38,8 +39,7 @@ logger = get_logger(__name__)
 async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     """Validate references and persist a queued job. Does NOT execute work."""
     cap = registry.get(data.capability_id)  # raises NotFoundError if unknown
-    if not cap.enabled:
-        raise ValidationError(f"Capability '{data.capability_id}' is disabled")
+    require_executable(cap)
     validate_job_input(cap, data.input)
     validate_job_applicability(
         cap,
@@ -95,7 +95,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     return job
 
 
-def validate_job_input(capability: CapabilityRead, job_input: dict) -> None:
+def validate_job_input(capability: CapabilityMetadata, job_input: dict) -> None:
     """Map canonical schema failures to the application's 422 error contract."""
     try:
         validate_capability_input(capability, job_input)
@@ -104,7 +104,7 @@ def validate_job_input(capability: CapabilityRead, job_input: dict) -> None:
 
 
 async def _validate_referenced_asset_media_types(
-    session: AsyncSession, capability: CapabilityRead, job_input: dict
+    session: AsyncSession, capability: CapabilityMetadata, job_input: dict
 ) -> None:
     """Enforce x-media-asset declarations after project isolation checks."""
     for reference in iter_media_asset_references(capability, job_input):
@@ -394,6 +394,7 @@ async def execute_job(
 
     work_dir = Path(tempfile.mkdtemp(prefix=f"job-{job_id}-"))
     try:
+        await require_worker_readiness(registry.get(job.capability_id))
         ctx = await _build_job_context(session, job, work_dir)
         handler = registry.get_handler(job.capability_id)
         job.progress = 50

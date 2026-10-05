@@ -10,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
-from app.schemas.capability import CapabilityRead
+from app.schemas.capability import CapabilityMetadata
 
 
 class CapabilityInputValidationError(ValueError):
@@ -46,7 +46,7 @@ def _format_checker(*, allow_step_refs: bool) -> FormatChecker:
 
 
 def validate_capability_input(
-    capability: CapabilityRead,
+    capability: CapabilityMetadata,
     value: Mapping[str, Any],
     *,
     allow_step_refs: bool = False,
@@ -67,7 +67,7 @@ def validate_capability_input(
 
 
 def iter_media_asset_references(
-    capability: CapabilityRead, value: Mapping[str, Any]
+    capability: CapabilityMetadata, value: Mapping[str, Any]
 ) -> Iterator[MediaAssetReference]:
     """Yield references declared by the schema's shared x-media-asset semantics."""
     properties = capability.input_schema.get("properties", {})

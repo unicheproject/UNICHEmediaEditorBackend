@@ -9,6 +9,8 @@ from app.api.v1.jobs import get_enqueuer
 from app.capabilities import registry
 from app.capabilities.context import HandlerResult, JobContext
 from app.capabilities.handlers import audio_tts as audio_tts_module
+from app.capabilities.handlers import base as handler_base
+from app.core.config import settings
 from app.core.database import async_session_factory
 from app.main import app
 from app.providers.base import BaseInferenceProvider, InferenceRequest
@@ -16,6 +18,24 @@ from app.providers.openrouter import AUDIO_BYTES_KEY
 from app.services.jobs import execute_job
 
 API = "/api/v1"
+
+
+@pytest.fixture(autouse=True)
+def configured_http_provider(monkeypatch: pytest.MonkeyPatch):
+    """Job orchestration uses a configured provider with deterministic fake I/O.
+
+    Public mock-provider readiness stays false. Provider wire tests live in
+    test_providers; these tests exercise Job persistence/status/output behavior.
+    """
+    class FakeHTTPProvider(BaseInferenceProvider):
+        name = "http"
+
+        async def infer(self, request: InferenceRequest) -> dict:
+            return {"caption": "Test caption", "text": "Test transcript", "provider": self.name}
+
+    monkeypatch.setattr(settings, "inference_provider", "http")
+    monkeypatch.setattr(settings, "inference_base_url", "http://inference.test")
+    monkeypatch.setattr(handler_base, "get_provider", lambda: FakeHTTPProvider())
 
 
 async def _project_with_asset(
@@ -44,7 +64,7 @@ async def test_image_caption_job_succeeds(client: AsyncClient, make_project) -> 
     assert job["status"] == "succeeded"
     assert job["progress"] == 100
     assert "caption" in job["output"]
-    assert job["output"]["provider"] == "mock"
+    assert job["output"]["provider"] == "http"
 
 
 async def test_audio_transcribe_job_succeeds(client: AsyncClient, make_project) -> None:
@@ -59,9 +79,10 @@ async def test_audio_transcribe_job_succeeds(client: AsyncClient, make_project) 
     assert "text" in job["output"]
 
 
-async def test_audio_tts_job_succeeds_with_mock_provider(
-    client: AsyncClient, make_project
+async def test_audio_tts_job_rejects_mock_provider(
+    client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(settings, "inference_provider", "mock")
     pid = await make_project("TTS")
     resp = await client.post(
         f"{API}/jobs",
@@ -71,13 +92,9 @@ async def test_audio_tts_job_succeeds_with_mock_provider(
             "input": {"text": "Hello there", "voice": "alloy"},
         },
     )
-    assert resp.status_code == 201
-    job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
-    assert job["status"] == "succeeded"
-    assert job["output"]["provider"] == "mock"
-    assert job["output"]["text"] == "Hello there"
-    # The mock provider doesn't synthesize audio, so no derived asset.
-    assert "outputs" not in job["output"]
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "capability_unavailable"
+    assert "provider_not_configured" in resp.json()["error"]["message"]
 
 
 async def test_primary_asset_applicability_is_enforced_before_queue(
@@ -130,6 +147,8 @@ async def test_project_export_rejects_primary_asset_generically(
 async def test_audio_tts_job_persists_derived_audio_asset(
     client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(settings, "inference_provider", "openrouter")
+    monkeypatch.setattr(settings, "openrouter_api_key", "test-only-key")
     fake_audio = b"\xff\xfb\x90\x00fake-mp3-bytes"
 
     class _FakeOpenRouterProvider(BaseInferenceProvider):
@@ -175,7 +194,7 @@ async def test_audio_tts_job_persists_derived_audio_asset(
     assert download.content == fake_audio
 
 
-async def test_not_implemented_capability_returns_payload(
+async def test_not_implemented_capability_is_rejected(
     client: AsyncClient, make_project
 ) -> None:
     pid, aid = await _project_with_asset(
@@ -190,10 +209,9 @@ async def test_not_implemented_capability_returns_payload(
             "input": {},
         },
     )
-    assert resp.status_code == 201
-    job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
-    assert job["status"] == "succeeded"
-    assert job["output"]["status"] == "not_implemented"
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "capability_unavailable"
+    assert "not_implemented" in resp.json()["error"]["message"]
 
 
 async def test_invalid_capability_rejected(client: AsyncClient) -> None:
@@ -454,7 +472,7 @@ async def test_job_history_retains_audit_data_and_filters_by_status(
     assert oldest["capability_id"] == "image.caption"
     assert oldest["asset_id"] == aid
     assert oldest["input"] == {"prompt": "audit-0"}
-    assert oldest["output"]["provider"] == "mock"
+    assert oldest["output"]["provider"] == "http"
     assert oldest["started_at"] is not None
     assert oldest["finished_at"] is not None
 

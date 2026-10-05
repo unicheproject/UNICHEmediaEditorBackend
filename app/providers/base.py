@@ -1,8 +1,7 @@
 """Inference provider abstraction.
 
 Providers turn a (capability, payload, optional file) into an output dict.
-Provider selection happens in the worker/handler layer only — API routes and
-job-creation code never reference a provider.
+Provider selection and configuration checks stay behind the provider boundary.
 """
 
 from __future__ import annotations
@@ -27,6 +26,13 @@ class BaseInferenceProvider(abc.ABC):
     """Common interface for all inference providers."""
 
     name: str = "base"
+
+    def configuration_ready(self, capability_id: str) -> bool:
+        """Cheap local configuration check; never inference or a live health check.
+
+        Providers opt in to real execution. The mock intentionally stays false.
+        """
+        return False
 
     @abc.abstractmethod
     async def infer(self, request: InferenceRequest) -> dict[str, Any]:

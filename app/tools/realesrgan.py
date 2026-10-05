@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 from typing import Any
 
-from app.core.errors import ToolError
+from app.core.errors import CapabilityUnavailableError, ToolError
 
 MODEL_PATH = "/opt/realesrgan/RealESRGAN_x4plus.pth"
 NET_SCALE = 4
@@ -31,6 +32,26 @@ _VALID_SCALES = {2, 3, 4}
 # other's state. One GPU has no real parallelism to give up anyway.
 _lock = threading.Lock()
 _upsampler: Any = None
+
+
+def check_runtime_readiness() -> None:
+    """Worker-only prerequisite probe, without model construction or inference."""
+    try:
+        import torch
+
+        available = torch.cuda.is_available()
+    except (ImportError, OSError, RuntimeError) as exc:
+        raise CapabilityUnavailableError(
+            "CUDA worker runtime is not configured (configuration_required)."
+        ) from exc
+    if not available:
+        raise CapabilityUnavailableError(
+            "CUDA worker has no available GPU (gpu_unavailable); no CPU fallback."
+        )
+    if not Path(MODEL_PATH).is_file():
+        raise CapabilityUnavailableError(
+            "CUDA worker model is not configured (configuration_required)."
+        )
 
 
 def _get_upsampler() -> Any:

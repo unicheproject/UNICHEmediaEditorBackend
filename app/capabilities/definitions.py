@@ -19,13 +19,15 @@ from app.capabilities.media_options import (
 from app.composition.export_presets import project_export_input_schema
 from app.models.enums import CostClass, MediaType
 from app.schemas.capability import (
-    CapabilityRead,
+    CapabilityDefinition,
+    DeploymentRequirement,
+    ImplementationReadiness,
     PrimaryAssetApplicability,
     ProjectContextApplicability,
 )
 
-# A CapabilityDef is just a CapabilityRead instance.
-CapabilityDef = CapabilityRead
+# Definitions hold code-owned readiness; API reads add deployment availability.
+CapabilityDef = CapabilityDefinition
 
 def _string(title: str, description: str, **keywords: object) -> dict:
     return {"type": "string", "title": title, "description": description, **keywords}
@@ -83,9 +85,11 @@ def _def(
     description: str,
     media: list[MediaType],
     cost_class: CostClass,
+    implementation: ImplementationReadiness,
     output_schema: dict,
     input_schema: dict | None = None,
     enabled: bool = True,
+    deployment_requirement: DeploymentRequirement = DeploymentRequirement.LOCAL,
     primary_asset: PrimaryAssetApplicability = PrimaryAssetApplicability.REQUIRED,
     project_context: ProjectContextApplicability = ProjectContextApplicability.DERIVED,
 ) -> CapabilityDef:
@@ -98,6 +102,8 @@ def _def(
         supported_media_types=media,
         cost_class=cost_class,
         enabled=enabled,
+        implementation=implementation,
+        deployment_requirement=deployment_requirement,
         applicability={
             "primary_asset": primary_asset,
             "project_context": project_context,
@@ -385,6 +391,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.upscale",
+        "deployment_requirement": DeploymentRequirement.CUDA_WORKER,
         "title": "Image Upscale",
         "description": "Increase image resolution while preserving detail (Real-ESRGAN).",
         "media": _I,
@@ -849,6 +856,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
 CAPABILITIES: list[CapabilityDef] = [
     _def(
         id="audio.transcribe",
+        implementation=ImplementationReadiness.AVAILABLE,
+        deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Audio Transcription",
         description="Transcribe speech in an audio asset to text.",
         media=[MediaType.audio, MediaType.video],
@@ -860,6 +869,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="subtitle.autogenerate",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Subtitle Auto-generation",
         description="Generate time-coded subtitles from audio/video.",
         media=[MediaType.audio, MediaType.video],
@@ -868,6 +878,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.tts",
+        implementation=ImplementationReadiness.AVAILABLE,
+        deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Text to Speech",
         description="Synthesize speech audio from text.",
         media=[],
@@ -886,6 +898,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.music.generate",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Music Generation",
         description="Generate music audio from a text prompt.",
         media=[],
@@ -901,6 +914,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.separate.stems",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Stem Separation",
         description="Separate an audio track into instrument/vocal stems.",
         media=[MediaType.audio],
@@ -912,6 +926,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.background.remove",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Background Removal",
         description="Remove the background from an image.",
         media=[MediaType.image],
@@ -920,6 +935,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.inpaint",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Inpainting",
         description="Fill or replace masked regions of an image.",
         media=[MediaType.image],
@@ -941,6 +957,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.restore.face",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Face Restoration",
         description="Restore and enhance faces in an image.",
         media=[MediaType.image],
@@ -949,6 +966,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.caption",
+        implementation=ImplementationReadiness.AVAILABLE,
+        deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Image Captioning",
         description="Generate a natural-language caption for an image.",
         media=[MediaType.image],
@@ -957,6 +976,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.tag",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Tagging",
         description="Generate descriptive tags/keywords for an image.",
         media=[MediaType.image],
@@ -968,6 +988,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="video.upscale",
+        implementation=ImplementationReadiness.UNAVAILABLE,
         title="Video Upscale",
         description="Increase video resolution.",
         media=[MediaType.video],
@@ -980,6 +1001,10 @@ CAPABILITIES: list[CapabilityDef] = [
     *(
         _def(
             id=spec["id"],
+            implementation=ImplementationReadiness.AVAILABLE,
+            deployment_requirement=spec.get(
+                "deployment_requirement", DeploymentRequirement.LOCAL
+            ),
             title=spec["title"],
             description=spec["description"],
             media=spec["media"],
@@ -1004,6 +1029,7 @@ CAPABILITIES: list[CapabilityDef] = [
     # _FILE_OUTPUT_SCHEMA / _DETERMINISTIC_SPECS above.
     _def(
         id="video.shot.detect",
+        implementation=ImplementationReadiness.AVAILABLE,
         title="Shot Detection",
         description="Detect shot/scene boundaries in a video (PySceneDetect content-aware cuts).",
         media=_V,
@@ -1041,6 +1067,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="project.export",
+        implementation=ImplementationReadiness.AVAILABLE,
         title="Export Project Composition",
         description=(
             "Render the selected immutable project composition revision using a named "

@@ -6,14 +6,14 @@ import uuid
 
 from app.core.errors import ValidationError
 from app.schemas.capability import (
-    CapabilityRead,
+    CapabilityMetadata,
     PrimaryAssetApplicability,
     ProjectContextApplicability,
 )
 
 
 def validate_job_applicability(
-    capability: CapabilityRead,
+    capability: CapabilityMetadata,
     *,
     asset_id: uuid.UUID | None,
     requested_project_id: uuid.UUID | None,
@@ -41,7 +41,7 @@ def validate_job_applicability(
 
 
 def validate_primary_asset_applicability(
-    capability: CapabilityRead, *, has_primary_asset: bool
+    capability: CapabilityMetadata, *, has_primary_asset: bool
 ) -> None:
     """Apply the registry's primary-Asset rule for Jobs and Agent plan steps."""
     primary_asset = capability.applicability.primary_asset

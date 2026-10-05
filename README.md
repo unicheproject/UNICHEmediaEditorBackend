@@ -241,7 +241,37 @@ Key boundaries:
   `x-media-asset` and constraints such as `minItems`. Job admission enforces
   this contract both at the API boundary and in the Job service. This is
   structural applicability, not institutional readiness/policy; `enabled`
-  retains its existing separate meaning.
+  remains the legacy code-owned global switch.
+- **ME-16 readiness** is separate from applicability. Every definition declares
+  implementation `available` or `unavailable` and a deployment requirement.
+  Capability responses add `readiness: {implementation, deployment, reason_code}`
+  and `availability: {executable, reason_code}`. Deployment is `ready`,
+  `configuration_required`, or `unavailable`. Executability requires the global
+  switch, an available implementation, and ready deployment configuration.
+  Institutional policy is not included in Phase 1. Clients use applicability for
+  input selection and `availability.executable` for execution, never `enabled`
+  alone. Definitions with no implementation remain listed with `not_implemented`.
+  Job service admission rejects unavailable operations with HTTP 422
+  `capability_unavailable` before persistence/queueing; workers recheck readiness
+  and fail old queued Jobs truthfully. Agent catalogs include executable
+  operations only; plan validation, approval, and execution enforce readiness.
+  Registry startup checks prevent declaration/handler drift.
+- Provider readiness performs configuration checks only, with no live health
+  checks. Mock inference is for provider-level development/tests and is never
+  publicly executable. HTTP supports caption/transcription when its base URL and
+  operation path are configured; OpenRouter supports TTS/transcription when its
+  key, base URL and model are configured. Other combinations return
+  `provider_not_configured`. Transient failures remain ordinary failed Jobs and
+  do not change capability readiness. Credentials are never exposed in readiness.
+- `image.upscale` has an available CUDA-only implementation. The API has no worker
+  GPU device, so it uses the explicit deployment declaration
+  `IMAGE_UPSCALE_WORKER_READY` (default false: `configuration_required`). Set it to
+  true in API and worker only after verifying CUDA and the vendored model on all
+  workers that receive Jobs. The worker checks CUDA/model locally before work;
+  missing CUDA fails with `gpu_unavailable`, missing model/runtime with
+  `configuration_required`. Listing never loads a model or performs inference.
+  There is no CPU fallback. `video.upscale` remains implementation-unavailable
+  with `not_implemented`.
 - Saved project compositions use immutable `CompositionRevision` documents.
   `app/composition/render.py` compiles one revision into a typed semantic
   render request; `app/services/composition_render.py` revalidates and resolves
@@ -298,10 +328,10 @@ There are three handler families behind one uniform interface
    fails for silent video. Video audio transforms map only the first video
    and first audio streams; subtitle/data and additional tracks are omitted.
 
-3. **Not-implemented fallback** — every other registered capability resolves to
-   `NotImplementedHandler`, whose jobs **succeed** with
-   `{"status": "not_implemented", ...}`, keeping the registry complete without
-   integrating every provider at once.
+3. **Not-implemented fallback** — definitions without implementations explicitly
+   declare unavailable readiness. Admission rejects them, and
+   `NotImplementedHandler` raises a controlled unavailable error if reached by
+   legacy Jobs or a programming error. It never reports success or creates Assets.
 
 **Derived assets & chaining.** Local-tool jobs write outputs under
 `job.output.outputs[] = {asset_id, filename, media_type, size_bytes,
@@ -334,7 +364,8 @@ execute them are skipped if the binaries are absent.
 Selected by env var; the same job-creation path works for both:
 
 - `INFERENCE_PROVIDER=mock` (default) — `MockInferenceProvider` returns
-  deterministic output derived from asset metadata. Works offline, no keys.
+  deterministic placeholders for provider-level development/tests. Capability
+  readiness reports `provider_not_configured`; public Jobs are rejected.
 - `INFERENCE_PROVIDER=http` — `HTTPInferenceProvider` POSTs the asset file
   (multipart) plus the job `input` JSON to a configured endpoint, with
   `Authorization: Bearer <INFERENCE_API_KEY>`. It stores the JSON response in
@@ -344,7 +375,7 @@ Selected by env var; the same job-creation path works for both:
 Relevant env vars:
 
 ```
-INFERENCE_PROVIDER=mock          # mock | http
+INFERENCE_PROVIDER=mock          # mock | http | openrouter
 INFERENCE_BASE_URL=
 INFERENCE_API_KEY=
 INFERENCE_TIMEOUT_SECONDS=120
@@ -360,7 +391,8 @@ restart the `worker` (and `api`). No code changes.
 
 1. Add a `CapabilityDef` entry to `app/capabilities/definitions.py`
    (id, title, description, input/output JSON schema, supported media types,
-   `cost_class`, `enabled`). It is now listed by `GET /capabilities`.
+   `cost_class`, `enabled`, explicit implementation readiness and deployment
+   requirement). It is now listed by `GET /capabilities`.
 2. If it should do real work, create a handler in
    `app/capabilities/handlers/` and register it in `_HANDLERS` in
    `app/capabilities/registry.py`:
@@ -374,8 +406,9 @@ restart the `worker` (and `api`). No code changes.
 3. If the capability uses the HTTP provider, add its endpoint-path setting in
    `app/core/config.py` and map it in `HTTPInferenceProvider._paths`.
 
-Until a handler is registered, the capability is fully usable end-to-end via
-`NotImplementedHandler`.
+Declare implementation-unavailable until a real handler is registered. Registry
+startup invariants reject mismatched declarations; unavailable definitions can
+be discovered but cannot execute.
 
 ## Conversational agent
 
@@ -384,8 +417,8 @@ calls, asks for missing parameters, and — after you approve — executes the
 sequence, chaining each step's output asset into the next.
 
 It is **registry-driven**: the planner's tool catalog is built from
-`registry.list_enabled()`, so adding a capability automatically extends what the
-agent can do — no agent code changes.
+the executable subset of `registry.list_enabled()`, so adding a ready capability
+extends what the agent can do — no agent code changes.
 
 Flow:
 

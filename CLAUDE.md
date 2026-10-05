@@ -108,9 +108,11 @@ API route → service → enqueue ─▶ Redis ─▶ arq worker → services.jo
 
 - **Capabilities are code-defined**, not DB rows: `app/capabilities/definitions.py`
   (id, schemas, `supported_media_types`, `cost_class`, `enabled`), exposed
-  read-only via `GET /capabilities`. `app/capabilities/registry.py` maps each id
-  to a handler; anything unmapped falls back to `NotImplementedHandler` (job
-  succeeds with `{"status":"not_implemented"}`).
+  read-only via `GET /capabilities`. Explicit implementation/deployment
+  requirements feed `app/capabilities/readiness.py`; discovery adds typed
+  readiness/availability, and admission/Agent/worker enforce executability.
+  `app/capabilities/registry.py` checks handler/declaration invariants. Unmapped
+  definitions are unavailable; `NotImplementedHandler` raises a controlled failure.
 - **One uniform handler interface**: `CapabilityHandler.run(ctx: JobContext) ->
   HandlerResult` (`app/capabilities/context.py`). Three families:
   - `ProviderBackedHandler` — AI ops; routes to the configured inference

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import mimetypes
 import wave
+from collections.abc import Awaitable, Callable
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -45,12 +46,26 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._operations: dict[
+            str, tuple[Callable[[InferenceRequest], Awaitable[dict[str, Any]]], str]
+        ] = {
+            "audio.tts": (self._speech, settings.openrouter_tts_model),
+            "audio.transcribe": (self._transcribe, settings.openrouter_transcribe_model),
+        }
+
+    def configuration_ready(self, capability_id: str) -> bool:
+        operation = self._operations.get(capability_id)
+        return bool(
+            operation
+            and operation[1].strip()
+            and self._settings.openrouter_api_key.strip()
+            and self._settings.openrouter_base_url.strip()
+        )
 
     async def infer(self, request: InferenceRequest) -> dict[str, Any]:
-        if request.capability_id == "audio.tts":
-            return await self._speech(request)
-        if request.capability_id == "audio.transcribe":
-            return await self._transcribe(request)
+        operation = self._operations.get(request.capability_id)
+        if operation is not None:
+            return await operation[0](request)
         raise ProviderError(
             f"OpenRouter provider does not support capability "
             f"'{request.capability_id}'"

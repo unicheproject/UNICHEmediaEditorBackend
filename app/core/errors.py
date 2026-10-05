@@ -55,6 +55,12 @@ class BadRequestError(AppError):
     code = "bad_request"
 
 
+class CapabilityUnavailableError(ValidationError):
+    """Safe readiness rejection at admission or during queued execution."""
+
+    code = "capability_unavailable"
+
+
 class PreconditionFailedError(AppError):
     status_code = 412
     code = "precondition_failed"

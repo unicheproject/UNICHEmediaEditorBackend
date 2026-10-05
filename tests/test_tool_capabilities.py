@@ -589,7 +589,10 @@ def test_video_audio_codec_is_compatible_with_supported_container(
 @pytest.mark.skipif(
     not HAVE_REALESRGAN, reason="requires a CUDA GPU (no CPU fallback by design)"
 )
-async def test_image_upscale_execution(client: AsyncClient, tmp_path) -> None:
+async def test_image_upscale_execution(client: AsyncClient, tmp_path, monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "image_upscale_worker_ready", True)
     src = tmp_path / "i.png"
     _make_image(str(src))
     pid = await _project(client, "I")

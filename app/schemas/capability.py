@@ -32,7 +32,45 @@ class CapabilityApplicability(BaseModel):
     project_context: ProjectContextApplicability = ProjectContextApplicability.DERIVED
 
 
-class CapabilityRead(BaseModel):
+class ImplementationReadiness(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class DeploymentReadiness(StrEnum):
+    READY = "ready"
+    CONFIGURATION_REQUIRED = "configuration_required"
+    UNAVAILABLE = "unavailable"
+
+
+class ReadinessReason(StrEnum):
+    NOT_IMPLEMENTED = "not_implemented"
+    PROVIDER_NOT_CONFIGURED = "provider_not_configured"
+    GPU_UNAVAILABLE = "gpu_unavailable"
+    CONFIGURATION_REQUIRED = "configuration_required"
+    CAPABILITY_DISABLED = "capability_disabled"
+
+
+class DeploymentRequirement(StrEnum):
+    """Code-owned execution requirements; independent of input applicability."""
+
+    LOCAL = "local"
+    INFERENCE_PROVIDER = "inference_provider"
+    CUDA_WORKER = "cuda_worker"
+
+
+class CapabilityReadiness(BaseModel):
+    implementation: ImplementationReadiness
+    deployment: DeploymentReadiness
+    reason_code: ReadinessReason | None = None
+
+
+class CapabilityAvailability(BaseModel):
+    executable: bool
+    reason_code: ReadinessReason | None = None
+
+
+class CapabilityMetadata(BaseModel):
     id: str
     title: str
     description: str
@@ -44,7 +82,7 @@ class CapabilityRead(BaseModel):
     applicability: CapabilityApplicability = Field(default_factory=CapabilityApplicability)
 
     @model_validator(mode="after")
-    def primary_media_matches_applicability(self) -> CapabilityRead:
+    def primary_media_matches_applicability(self) -> CapabilityMetadata:
         if self.applicability.primary_asset == PrimaryAssetApplicability.FORBIDDEN:
             if self.supported_media_types:
                 raise ValueError(
@@ -57,3 +95,17 @@ class CapabilityRead(BaseModel):
                 "supported_media_types"
             )
         return self
+
+
+class CapabilityDefinition(CapabilityMetadata):
+    """Static code-owned declaration. Deployment readiness is resolved separately."""
+
+    implementation: ImplementationReadiness
+    deployment_requirement: DeploymentRequirement = DeploymentRequirement.LOCAL
+
+
+class CapabilityRead(CapabilityMetadata):
+    """Public metadata with the installation's current readiness resolution."""
+
+    readiness: CapabilityReadiness
+    availability: CapabilityAvailability

@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     inference_image_caption_path: str = "/image/caption"
     inference_audio_transcribe_path: str = "/audio/transcribe"
 
+    # The API does not share the worker's CUDA device. Operators assert readiness
+    # only after verifying CUDA + vendored model in the worker; execution still
+    # checks those prerequisites locally. Safe default for non-GPU installations.
+    image_upscale_worker_ready: bool = False
+
     # --- Agent planner ---
     agent_provider: str = "mock"  # "mock" | "openrouter"
     openrouter_api_key: str = ""

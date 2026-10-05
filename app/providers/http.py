@@ -42,6 +42,12 @@ class HTTPInferenceProvider(BaseInferenceProvider):
             )
         return f"{base}/{path.lstrip('/')}"
 
+    def configuration_ready(self, capability_id: str) -> bool:
+        return bool(
+            self._settings.inference_base_url.strip()
+            and self._paths.get(capability_id, "").strip()
+        )
+
     async def infer(self, request: InferenceRequest) -> dict[str, Any]:
         url = self._endpoint_for(request.capability_id)
         headers: dict[str, str] = {}
