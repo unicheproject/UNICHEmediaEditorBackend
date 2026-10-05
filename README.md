@@ -237,8 +237,13 @@ Key boundaries:
   project) or `derived` (the project may be inferred from a primary or nested
   Asset reference). `supported_media_types` describes only an accepted
   top-level primary Asset and is empty when primary Assets are forbidden.
-  Nested/multi-Asset inputs remain declared on JSON Schema properties with
-  `x-media-asset` and constraints such as `minItems`. Job admission enforces
+  Parameter Asset references use `x-media-asset: {role, media_types}` on the
+  UUID schema node. For arrays, read `items.x-media-asset`: its `media_types`
+  constrains every referenced Asset, independently of primary selection.
+  Array-level `x-media-asset` remains as a compatibility copy of the same
+  declaration; `minItems` and ordering are unchanged. Scalar references carry
+  the same metadata directly on their property. Job and Agent validation use
+  these canonical declarations and authoritative Asset records. Job admission enforces
   this contract both at the API boundary and in the Job service. This is
   structural applicability, not institutional readiness/policy; `enabled`
   remains the legacy code-owned global switch.

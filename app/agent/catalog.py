@@ -11,6 +11,7 @@ from typing import Any
 
 from app.capabilities import registry
 from app.capabilities.readiness import resolve_availability
+from app.capabilities.validation import media_asset_semantics
 from app.core.config import settings
 from app.models.enums import CostClass
 
@@ -100,7 +101,7 @@ def _parameter_text(name: str, schema: dict[str, Any], *, required: bool) -> str
         )
     if schema.get("x-unit"):
         facts.append(f"unit={schema['x-unit']}")
-    media = schema.get("x-media-asset")
+    media = media_asset_semantics(schema)
     if media:
         facts.append(f"asset_role={media['role']}")
         facts.append(f"asset_media={media.get('media_types', [])!r}")

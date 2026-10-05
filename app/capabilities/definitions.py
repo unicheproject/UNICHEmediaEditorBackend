@@ -58,13 +58,15 @@ def _asset_ids(
     media_types: list[str],
     min_items: int,
 ) -> dict:
+    item_schema = _asset_id(title, description, role=role, media_types=media_types)
     return {
         "type": "array",
         "title": title,
         "description": description,
-        "items": {"type": "string", "format": "uuid"},
+        "items": item_schema,
         "minItems": min_items,
-        "x-media-asset": {"role": role, "media_types": media_types},
+        # Preserve the legacy container annotation from the same declaration.
+        "x-media-asset": item_schema["x-media-asset"].copy(),
     }
 
 

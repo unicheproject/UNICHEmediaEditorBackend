@@ -66,13 +66,22 @@ def validate_capability_input(
     raise CapabilityInputValidationError(f"{location}: {error.message}")
 
 
+def media_asset_semantics(schema: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Read item-level Asset semantics, retaining legacy array annotations."""
+    reference_schema = schema.get("items", {}) if schema.get("type") == "array" else schema
+    semantics: Mapping[str, Any] | None = (
+        reference_schema.get("x-media-asset") or schema.get("x-media-asset")
+    )
+    return semantics
+
+
 def iter_media_asset_references(
     capability: CapabilityMetadata, value: Mapping[str, Any]
 ) -> Iterator[MediaAssetReference]:
     """Yield references declared by the schema's shared x-media-asset semantics."""
     properties = capability.input_schema.get("properties", {})
     for parameter, property_schema in properties.items():
-        semantics = property_schema.get("x-media-asset")
+        semantics = media_asset_semantics(property_schema)
         if not semantics or parameter not in value or value[parameter] in (None, ""):
             continue
         raw_values = (
