@@ -127,6 +127,7 @@ async def test_failed_plan_retry_reuses_successful_physical_job_node(
         source_job = await session.get(Job, uuid.UUID(original_source_job_id))
         assert temp_asset is not None and temp_asset.is_intermediate
         assert source_job is not None and source_job.execution_identity
+        assert source_job.project_id == uuid.UUID(project_id)
         original_expiry = temp_asset.temp_expires_at
         original_path = temp_asset.storage_path
 
@@ -383,6 +384,7 @@ async def test_fused_render_group_reuses_as_one_physical_node(
         source_job = await session.get(Job, uuid.UUID(source_job_id))
         assert checkpoint is not None and checkpoint.is_intermediate
         assert source_job is not None and source_job.capability_id == "agent.render_group"
+        assert source_job.project_id == uuid.UUID(project_id)
         original_expiry = checkpoint.temp_expires_at
 
     await client.post(f"{API}/agent/plans/{plan_id}/approve")

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.capabilities import registry
 from app.capabilities.applicability import validate_job_applicability
 from app.core.database import get_session
+from app.core.errors import NotFoundError
 from app.core.security import Principal, get_current_principal
 from app.models.asset import Asset
 from app.models.job import Job
@@ -61,10 +62,11 @@ async def require_job_access(
     catalogue: CatalogueClient = Depends(get_catalogue_client),
 ) -> Job:
     job = await jobs_svc.get_job(session, job_id)
-    if job.project_id is not None:
-        await projects_svc.require_project_access(
-            session, catalogue, principal, job.project_id
-        )
+    if job.project_id is None:
+        raise NotFoundError(f"Job '{job_id}' not found")
+    await projects_svc.require_project_access(
+        session, catalogue, principal, job.project_id
+    )
     return job
 
 

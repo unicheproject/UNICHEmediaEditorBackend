@@ -26,6 +26,7 @@ from app.core.database import async_session_factory
 from app.main import app
 from app.models.asset import Asset
 from app.models.composition import ProjectCompositionRevision
+from app.models.job import Job
 from app.services.jobs import execute_job
 from app.services.storage import get_storage
 from app.tools import ffmpeg
@@ -308,6 +309,10 @@ async def test_project_export_schema_and_source_less_async_job_snapshot(
     assert job["status"] == "queued"
     assert job["asset_id"] is None
     assert job["project_id"] == project_id
+    async with async_session_factory() as session:
+        persisted_job = await session.get(Job, uuid.UUID(job["id"]))
+        assert persisted_job is not None
+        assert persisted_job.project_id == uuid.UUID(project_id)
     snapshot = job["input"]["execution_snapshot"]
     assert snapshot["composition_revision_id"] == revision["revision_id"]
     assert snapshot["composition_document_hash"] == revision["document_hash"]
