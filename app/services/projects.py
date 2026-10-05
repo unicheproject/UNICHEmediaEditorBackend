@@ -5,7 +5,7 @@ are *companion* rows keyed by the catalogue's project UUID:
 
 - **access + lazy-JIT** (`require_project_access`): a single `GET /projects/{id}`
   with the user's token is both the access check and the provisioning source;
-  a 404 means no-access-or-deleted and soft-deletes the local row.
+  a 404 means no-access-or-deleted and leaves shared local state unchanged.
 - **create-up** (`create_project`): create in the catalogue, then store the
   companion row keyed by the returned UUID (plus editor-local description).
 - **picker** (`list_projects_for_user`): built live from the user's token.
@@ -106,13 +106,12 @@ async def require_project_access(
 ) -> Project:
     """Authorize via the catalogue (user token) and lazy-provision the row.
 
-    Returns the companion row on success; raises NotFoundError when the
-    catalogue denies access or the project is gone (also soft-deleting any
-    stale local row).
+    Returns the companion row on success; raises NotFoundError without local
+    mutation when the catalogue denies access or the project is gone.
     """
     cat = await catalogue.get_project(str(project_id), principal.token)
     if cat is None:
-        await soft_delete_local(session, project_id)
+        # A user-scoped 404 conceals denial as well as absence; it is not a deletion signal.
         raise NotFoundError(f"Project '{project_id}' not found")
     return await upsert_companion(
         session,

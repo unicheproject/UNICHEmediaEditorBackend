@@ -28,7 +28,8 @@ incoming user tokens and forwards the same token on outbound catalogue calls.
 - **Projects are companion rows keyed by the catalogue UUID** (`projects.id` = catalogue id; no
   local UUID minting). `app/api/deps.py::require_project_access` is the single access+lazy-JIT gate:
   one `GET /projects/{id}` with the user token authorizes the request *and* provisions/refreshes the
-  local row; a 404 soft-deletes the stale local row (lazy delete). The picker (`GET /projects`) is
+  local row; a user-scoped 404 conceals denial/absence and never mutates local state.
+  Only a successful explicit Catalogue deletion soft-deletes the companion. The picker (`GET /projects`) is
   built live from `/me/authorization` ∩ each org's projects filtered to `tool.slug==media-editor`.
   `description` is **editor-local only** (the catalogue has no such field). Edit/delete proxy to the
   catalogue (manager-only there).
