@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.services.jobs import execute_job
 from app.services.media_metadata import probe_asset_metadata
 from app.services.temp_assets import cleanup_expired_temp_assets
+from app.services.waveforms import enrich_asset_waveform
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,7 @@ async def run_asset_probe(ctx: dict, asset_id: str) -> str:
     logger.info("Probing technical metadata for asset %s", asset_id)
     async with async_session_factory() as session:
         status = await probe_asset_metadata(session, uuid.UUID(asset_id))
+        await enrich_asset_waveform(session, uuid.UUID(asset_id))
     return status.value if status is not None else "skipped"
 
 

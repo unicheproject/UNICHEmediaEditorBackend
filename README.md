@@ -108,6 +108,42 @@ The command can be rerun safely; already available Assets are skipped. An
 optional `--project-id UUID` scopes the operation and `--batch-size N` controls
 the number of Asset IDs loaded at a time.
 
+## Asset waveform previews
+
+Audio Assets and video Assets containing audio receive best-effort waveform
+enrichment. Uploads use the existing asynchronous ARQ enrichment task; derived
+outputs are enriched in their worker after persistence. Preview failures do not
+fail uploads or media Jobs. Images/subtitles are unsupported; silent video is
+`unavailable` with reason `no_audio`.
+
+`GET /api/v1/assets/{id}/waveform` uses owning-project authorization and returns
+version-1 JSON: `status`, `version`, `channels`, `sample_rate`, `bucket_samples`,
+`bucket_count`, `duration_seconds`, and `peaks`. The first audio stream is
+downmixed to mono at 8000 Hz. At most 1024 chronological min/max pairs are
+normalized to [-1,1] from signed 16-bit PCM (not normalized to each Asset's
+maximum amplitude). Each pair covers `bucket_samples / sample_rate` seconds;
+only the final bucket may be shorter. Streaming reduction, a 120-second decoder
+timeout, and a 64-KiB sidecar limit bound resource use and artifact size.
+
+Pending previews return HTTP 202 with `Retry-After: 5`; unavailable previews
+return HTTP 200 with `status: "unavailable"` and a stable `reason_code`, without
+peaks. Asset reads expose independent `waveform_status`/`waveform_reason` fields.
+Deleted/inaccessible Assets remain concealed (404); physically expired Temp
+Assets return 410. Retrieval never decodes media. Private checksum/version-bound
+sidecars are cached inside the Asset directory, reused across renames, and
+removed by existing Temp cleanup. Missing/corrupt sidecars are reported as
+unavailable rather than returning invented data.
+
+After applying migration 0013, explicitly backfill old Assets or repair missing
+previews (no automatic startup scan):
+
+```bash
+docker compose exec api python -m app.scripts.backfill_asset_waveforms --batch-size 100
+```
+
+Optional `--project-id UUID` limits scope. Batches must be 1–1000. Reruns are
+safe: valid cached previews skip decoding; failed/missing previews are retried.
+
 ## Running tests
 
 Tests use an isolated SQLite database and run jobs eagerly (no Redis/arq
@@ -171,7 +207,7 @@ curl -s -X POST $BASE/jobs \
 |------|---------------|
 | System | `GET /health` |
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
-| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `DELETE /api/v1/assets/{id}` |
+| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |

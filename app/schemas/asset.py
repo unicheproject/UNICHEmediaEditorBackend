@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import MediaType, TechnicalMetadataStatus
+from app.models.enums import MediaType, TechnicalMetadataStatus, WaveformReason, WaveformStatus
 from app.schemas.common import ORMModel
 
 
@@ -44,6 +44,8 @@ class AssetRead(ORMModel):
     audio_channels: int | None
     bit_rate: int | None
     technical_streams: dict | None
+    waveform_status: WaveformStatus
+    waveform_reason: WaveformReason | None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +20,10 @@ from app.core.errors import ValidationError
 from app.models.asset import Asset
 from app.models.project import Project
 from app.schemas.asset import AssetRead, AssetUpdate
+from app.schemas.waveform import WaveformResponse
 from app.services import assets as svc
 from app.services.thumbnails import get_or_create_thumbnail
+from app.services.waveforms import read_waveform
 from app.workers.queue import enqueue_asset_probe
 
 router = APIRouter(tags=["assets"])
@@ -103,6 +105,20 @@ async def get_asset_thumbnail(
     svc.ensure_asset_binary_available(asset)
     path = await get_or_create_thumbnail(asset)
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get(
+    "/assets/{asset_id}/waveform", response_model=WaveformResponse,
+    responses={202: {"model": WaveformResponse, "description": "Enrichment pending"}},
+)
+async def get_asset_waveform(
+    response: Response, asset: Asset = Depends(require_asset_access),
+) -> WaveformResponse:
+    result = read_waveform(asset)
+    if result.status == "pending":
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Retry-After"] = "5"
+    return result
 
 
 @router.patch("/assets/{asset_id}", response_model=AssetRead)

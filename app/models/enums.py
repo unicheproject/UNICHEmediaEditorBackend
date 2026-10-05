@@ -19,6 +19,20 @@ class TechnicalMetadataStatus(enum.StrEnum):
     unavailable = "unavailable"
 
 
+class WaveformStatus(enum.StrEnum):
+    pending = "pending"
+    available = "available"
+    unavailable = "unavailable"
+
+
+class WaveformReason(enum.StrEnum):
+    unsupported_media = "unsupported_media"
+    no_audio = "no_audio"
+    generation_failed = "generation_failed"
+    artifact_missing = "artifact_missing"
+    identity_mismatch = "identity_mismatch"
+
+
 class JobStatus(enum.StrEnum):
     queued = "queued"
     running = "running"

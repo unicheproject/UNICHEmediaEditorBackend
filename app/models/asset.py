@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import false as sa_false
 
 from app.models.base import Base, JSONType, SoftDeleteMixin, TimestampMixin
-from app.models.enums import MediaType, TechnicalMetadataStatus
+from app.models.enums import MediaType, TechnicalMetadataStatus, WaveformStatus
 
 if TYPE_CHECKING:
     from app.models.project import Project
@@ -77,6 +77,12 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     audio_channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bit_rate: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     technical_streams: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+
+    waveform_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=WaveformStatus.pending.value,
+        server_default=WaveformStatus.pending.value,
+    )
+    waveform_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     project: Mapped[Project] = relationship(
         back_populates="assets", lazy="noload"

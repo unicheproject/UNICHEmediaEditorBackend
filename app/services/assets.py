@@ -25,6 +25,7 @@ from app.schemas.asset import AssetUpdate
 from app.services.media_metadata import apply_metadata, probe_media_safely
 from app.services.projects import get_project
 from app.services.storage import get_storage, safe_filename
+from app.services.waveforms import enrich_asset_waveform, initial_waveform_state
 
 logger = get_logger(__name__)
 
@@ -95,6 +96,7 @@ async def create_asset(
         "application/octet-stream"
     )
 
+    waveform_status, waveform_reason = initial_waveform_state(media_type)
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -107,6 +109,8 @@ async def create_asset(
         storage_path=storage_path,
         checksum_sha256=checksum,
         technical_metadata_status=TechnicalMetadataStatus.pending.value,
+        waveform_status=waveform_status.value,
+        waveform_reason=waveform_reason.value if waveform_reason else None,
     )
     session.add(asset)
     await session.commit()
@@ -188,6 +192,7 @@ async def create_derived_asset(
     metadata = await probe_media_safely(src_path, media_type)
 
     persisted_at = datetime.now(UTC)
+    waveform_status, waveform_reason = initial_waveform_state(media_type)
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -205,11 +210,16 @@ async def create_derived_asset(
             persisted_at + timedelta(hours=72) if is_intermediate else None
         ),
         technical_metadata_status=metadata.status.value,
+        waveform_status=waveform_status.value,
+        waveform_reason=waveform_reason.value if waveform_reason else None,
     )
     apply_metadata(asset, metadata)
     session.add(asset)
     await session.commit()
     await session.refresh(asset)
+    if media_type in (MediaType.audio, MediaType.video):
+        await enrich_asset_waveform(session, asset.id)
+        await session.refresh(asset)
     return asset
 
 
