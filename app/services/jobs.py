@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
+from app.capabilities.applicability import validate_job_applicability
 from app.capabilities.context import HandlerResult, JobContext
 from app.capabilities.validation import (
     CapabilityInputValidationError,
@@ -40,6 +41,11 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     if not cap.enabled:
         raise ValidationError(f"Capability '{data.capability_id}' is disabled")
     validate_job_input(cap, data.input)
+    validate_job_applicability(
+        cap,
+        asset_id=data.asset_id,
+        requested_project_id=data.project_id,
+    )
 
     project_id = await resolve_job_project(
         session,
@@ -48,14 +54,19 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
         job_input=data.input,
         lock_assets=True,
     )
+    validate_job_applicability(
+        cap,
+        asset_id=data.asset_id,
+        requested_project_id=data.project_id,
+        resolved_project_id=project_id,
+        project_resolution_complete=True,
+    )
     if project_id is not None:
         await get_project(session, project_id)
     stored_input = dict(data.input)
     if data.capability_id == "project.export":
-        if project_id is None or data.asset_id is not None:
-            raise ValidationError(
-                "project.export requires project_id and does not accept a primary asset"
-            )
+        if project_id is None:
+            raise ValidationError("project.export requires project context")
         from app.services.project_exports import create_export_execution_snapshot
 
         stored_input["execution_snapshot"] = await create_export_execution_snapshot(

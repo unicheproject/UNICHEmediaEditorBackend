@@ -31,6 +31,7 @@ def build_catalog() -> list[dict[str, Any]]:
                 "title": cap.title,
                 "description": cap.description,
                 "supported_media_types": [m.value for m in cap.supported_media_types],
+                "applicability": cap.applicability.model_dump(mode="json"),
                 "cost_class": cap.cost_class.value,
                 "input_schema": cap.input_schema,
             }
@@ -49,8 +50,12 @@ def catalog_text() -> str:
             for name, prop in sorted((schema.get("properties") or {}).items())
         ]
         media = "/".join(c["supported_media_types"]) or "none"
+        applicability = c["applicability"]
         lines.append(
-            f"- {c['capability_id']} ({media}): {c['description']} params: [{'; '.join(params)}]"
+            f"- {c['capability_id']} ({media}; primary_asset="
+            f"{applicability['primary_asset']}; project_context="
+            f"{applicability['project_context']}): {c['description']} "
+            f"params: [{'; '.join(params)}]"
         )
     return "\n".join(lines)
 

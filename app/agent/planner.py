@@ -12,12 +12,13 @@ from typing import Any
 
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 from app.capabilities import registry
+from app.capabilities.applicability import validate_primary_asset_applicability
 from app.capabilities.validation import (
     CapabilityInputValidationError,
     iter_media_asset_references,
     validate_capability_input,
 )
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationError
 from app.models.enums import CostClass
 
 
@@ -78,6 +79,14 @@ def validate_plan(
                 f"Capability '{step.capability_id}' is not available to the agent; "
                 "only deterministic (local-tool) capabilities may be used."
             )
+        try:
+            validate_primary_asset_applicability(
+                cap, has_primary_asset=step.asset is not None
+            )
+        except ValidationError as exc:
+            raise PlanValidationError(
+                f"Step '{step.id}' ({step.capability_id}): {exc.message}"
+            ) from exc
 
         # params + derived asset_ids validate against the capability schema
         effective_input = _effective_input(step)

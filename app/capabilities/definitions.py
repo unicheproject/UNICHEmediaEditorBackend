@@ -18,7 +18,11 @@ from app.capabilities.media_options import (
 )
 from app.composition.export_presets import project_export_input_schema
 from app.models.enums import CostClass, MediaType
-from app.schemas.capability import CapabilityRead
+from app.schemas.capability import (
+    CapabilityRead,
+    PrimaryAssetApplicability,
+    ProjectContextApplicability,
+)
 
 # A CapabilityDef is just a CapabilityRead instance.
 CapabilityDef = CapabilityRead
@@ -82,6 +86,8 @@ def _def(
     output_schema: dict,
     input_schema: dict | None = None,
     enabled: bool = True,
+    primary_asset: PrimaryAssetApplicability = PrimaryAssetApplicability.REQUIRED,
+    project_context: ProjectContextApplicability = ProjectContextApplicability.DERIVED,
 ) -> CapabilityDef:
     return CapabilityDef(
         id=id,
@@ -92,6 +98,10 @@ def _def(
         supported_media_types=media,
         cost_class=cost_class,
         enabled=enabled,
+        applicability={
+            "primary_asset": primary_asset,
+            "project_context": project_context,
+        },
     )
 
 
@@ -213,6 +223,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Concatenate",
         "description": "Concatenate multiple video clips into one (input.asset_ids).",
         "media": _V,
+        "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
             "asset_ids": _asset_ids(
                 "Video clips",
@@ -405,6 +416,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Concatenate",
         "description": "Concatenate multiple audio clips into one (input.asset_ids).",
         "media": _A,
+        "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
             "asset_ids": _asset_ids(
                 "Audio clips",
@@ -531,6 +543,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "showing each for seconds_per_image."
         ),
         "media": _I,
+        "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
             "asset_ids": _asset_ids(
                 "Slideshow images",
@@ -617,7 +630,9 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "Generate a title-card video clip from text (no input asset needed). "
             "Use as an intro/section card to feed into video.compose."
         ),
-        "media": _V,
+        "media": [],
+        "primary_asset": PrimaryAssetApplicability.FORBIDDEN,
+        "project_context": ProjectContextApplicability.REQUIRED,
         "properties": {
             "text": _string("Text", "Text rendered on the title card."),
             "duration": _number(
@@ -772,6 +787,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "(input.subtitle_asset_id)."
         ),
         "media": _V,
+        "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
             "asset_ids": _asset_ids(
                 "Video segments",
@@ -854,8 +870,10 @@ CAPABILITIES: list[CapabilityDef] = [
         id="audio.tts",
         title="Text to Speech",
         description="Synthesize speech audio from text.",
-        media=[MediaType.audio],
+        media=[],
         cost_class=CostClass.hosted_ai,
+        primary_asset=PrimaryAssetApplicability.FORBIDDEN,
+        project_context=ProjectContextApplicability.REQUIRED,
         input_schema={
             "type": "object",
             "properties": {
@@ -870,8 +888,10 @@ CAPABILITIES: list[CapabilityDef] = [
         id="audio.music.generate",
         title="Music Generation",
         description="Generate music audio from a text prompt.",
-        media=[MediaType.audio],
+        media=[],
         cost_class=CostClass.hosted_ai,
+        primary_asset=PrimaryAssetApplicability.FORBIDDEN,
+        project_context=ProjectContextApplicability.REQUIRED,
         input_schema={
             "type": "object",
             "properties": {"prompt": _string("Prompt", "Description of the music to generate.")},
@@ -971,6 +991,12 @@ CAPABILITIES: list[CapabilityDef] = [
                 **({"allOf": spec["allOf"]} if "allOf" in spec else {}),
             },
             output_schema=_FILE_OUTPUT_SCHEMA,
+            primary_asset=spec.get(
+                "primary_asset", PrimaryAssetApplicability.REQUIRED
+            ),
+            project_context=spec.get(
+                "project_context", ProjectContextApplicability.DERIVED
+            ),
         )
         for spec in _DETERMINISTIC_SPECS
     ),
@@ -1023,6 +1049,8 @@ CAPABILITIES: list[CapabilityDef] = [
         ),
         media=[],
         cost_class=CostClass.deterministic,
+        primary_asset=PrimaryAssetApplicability.FORBIDDEN,
+        project_context=ProjectContextApplicability.REQUIRED,
         input_schema=project_export_input_schema(),
         output_schema=_FILE_OUTPUT_SCHEMA,
     ),

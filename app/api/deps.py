@@ -17,6 +17,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
+from app.capabilities.applicability import validate_job_applicability
 from app.core.database import get_session
 from app.core.security import Principal, get_current_principal
 from app.models.asset import Asset
@@ -76,6 +77,11 @@ async def require_job_create_access(
     """Authorize the project a new job will run against (from body or its asset)."""
     capability = registry.get(data.capability_id)
     jobs_svc.validate_job_input(capability, data.input)
+    validate_job_applicability(
+        capability,
+        asset_id=data.asset_id,
+        requested_project_id=data.project_id,
+    )
 
     # When the caller names a project, authorization must precede every asset
     # lookup so asset existence/ownership cannot be used as an oracle.
@@ -91,10 +97,24 @@ async def require_job_create_access(
         await projects_svc.require_project_access(
             session, catalogue, principal, project_id
         )
-        await jobs_svc.resolve_job_project(
+        resolved_project_id = await jobs_svc.resolve_job_project(
             session,
             project_id=project_id,
             asset_id=data.asset_id,
             job_input=data.input,
+        )
+        validate_job_applicability(
+            capability,
+            asset_id=data.asset_id,
+            requested_project_id=data.project_id,
+            resolved_project_id=resolved_project_id,
+            project_resolution_complete=True,
+        )
+    else:
+        validate_job_applicability(
+            capability,
+            asset_id=data.asset_id,
+            requested_project_id=data.project_id,
+            project_resolution_complete=True,
         )
     return data

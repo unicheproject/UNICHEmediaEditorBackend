@@ -20,6 +20,7 @@ from app.agent.llm import SYSTEM_INSTRUCTIONS
 from app.agent.planner import PlanValidationError, validate_plan
 from app.agent.render import compile_execution_plan, render_group
 from app.agent.schemas import Plan
+from app.capabilities import registry
 from app.core.database import async_session_factory
 from app.core.errors import ValidationError
 from app.models.agent import AgentPlan
@@ -41,6 +42,16 @@ def test_catalog_reflects_registry() -> None:
     assert {"video.trim", "image.slideshow", "video.compose"} <= ids
     for c in build_catalog():
         assert "input_schema" in c and "supported_media_types" in c
+        assert c["applicability"] == registry.get(c["capability_id"]).applicability.model_dump(
+            mode="json"
+        )
+    project_export = next(
+        c for c in build_catalog() if c["capability_id"] == "project.export"
+    )
+    assert project_export["applicability"] == {
+        "primary_asset": "forbidden",
+        "project_context": "required",
+    }
 
 
 def test_catalog_text_exposes_compact_contract_without_ui_hints() -> None:
@@ -52,6 +63,8 @@ def test_catalog_text_exposes_compact_contract_without_ui_hints() -> None:
     assert "music_volume: number optional default=0.3 unit=ratio" in mix_line
     assert "enum=[" in mix_line and "mix (Mix supplied audio" in mix_line
     assert "x-ui" not in text
+    assert "primary_asset=required" in text
+    assert "project_context=required" in text
     transcode_line = next(
         line for line in text.splitlines() if line.startswith("- video.transcode ")
     )
@@ -100,6 +113,32 @@ def test_valid_plan_passes() -> None:
          "params": {"width": 64, "height": 48}, "asset": IMG},
     ])
     validate_plan(plan, SCOPE)  # no raise
+
+
+def test_planner_enforces_primary_asset_applicability_generically() -> None:
+    missing_primary = _plan(
+        [{"id": "s1", "capability_id": "video.trim", "params": {"start": 0, "end": 1}}]
+    )
+    with pytest.raises(PlanValidationError, match="requires a primary asset"):
+        validate_plan(missing_primary, SCOPE)
+
+    forbidden_primary = _plan(
+        [{"id": "s1", "capability_id": "media.titlecard", "asset": VID,
+          "params": {"text": "Intro"}}]
+    )
+    with pytest.raises(PlanValidationError, match="does not accept a primary asset"):
+        validate_plan(forbidden_primary, SCOPE)
+
+    source_less = _plan(
+        [{"id": "s1", "capability_id": "media.titlecard", "params": {"text": "Intro"}}]
+    )
+    validate_plan(source_less, SCOPE)
+
+    multi_input = _plan(
+        [{"id": "s1", "capability_id": "video.compose", "assets": [VID],
+          "params": {}}]
+    )
+    validate_plan(multi_input, SCOPE)
 
 
 def test_unknown_capability_rejected() -> None:

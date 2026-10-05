@@ -2,11 +2,21 @@ from httpx import AsyncClient
 
 from app.capabilities import registry
 from app.capabilities.validation import validate_capability_input
+from app.schemas.capability import (
+    PrimaryAssetApplicability,
+    ProjectContextApplicability,
+)
 
 API = "/api/v1"
 
 
 async def test_list_capabilities(client: AsyncClient) -> None:
+    assert {value.value for value in PrimaryAssetApplicability} == {
+        "required", "optional", "forbidden"
+    }
+    assert {value.value for value in ProjectContextApplicability} == {
+        "required", "derived"
+    }
     resp = await client.get(f"{API}/capabilities")
     assert resp.status_code == 200
     caps = resp.json()
@@ -19,12 +29,41 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     assert "project.export" in ids
     assert "image.kenburns" in ids
     assert len(caps) == 41
+    for capability in caps:
+        applicability = capability["applicability"]
+        assert applicability["primary_asset"] in {"required", "optional", "forbidden"}
+        assert applicability["project_context"] in {"required", "derived"}
+        if applicability["primary_asset"] == "forbidden":
+            assert capability["supported_media_types"] == []
+        else:
+            assert capability["supported_media_types"]
+        assert "x-ui" not in str(capability)
     for capability_id in ("audio.normalize", "audio.gain", "audio.fade", "audio.denoise"):
         assert by_id[capability_id]["supported_media_types"] == ["video", "audio"]
         assert "video input preserves the video stream" in by_id[capability_id]["description"]
     extract = by_id["video.audio.extract"]
     assert extract["supported_media_types"] == ["video"]
     assert "separate AAC/M4A audio asset" in extract["description"]
+
+    by_id = {capability["id"]: capability for capability in caps}
+    assert by_id["video.trim"]["applicability"] == {
+        "primary_asset": "required",
+        "project_context": "derived",
+    }
+    assert by_id["image.resize"]["applicability"]["primary_asset"] == "required"
+    assert by_id["audio.gain"]["applicability"]["primary_asset"] == "required"
+    for capability_id in (
+        "video.concat", "audio.concat", "image.slideshow", "video.compose"
+    ):
+        assert by_id[capability_id]["applicability"]["primary_asset"] == "optional"
+    for capability_id in (
+        "audio.tts", "audio.music.generate", "media.titlecard", "project.export"
+    ):
+        assert by_id[capability_id]["applicability"] == {
+            "primary_asset": "forbidden",
+            "project_context": "required",
+        }
+        assert by_id[capability_id]["supported_media_types"] == []
 
 
 async def test_get_capability_detail(client: AsyncClient) -> None:

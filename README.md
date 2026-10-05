@@ -231,6 +231,17 @@ Key boundaries:
   combinations at runtime. For `video.transcode`, codec fields are optional
   (omission keeps FFmpeg's container default), and the advertised option map
   describes which explicit codecs are supported for each output container.
+- Capability `applicability` is the generic input-scope contract serialized by
+  `GET /capabilities`: `primary_asset` is `required`, `optional`, or
+  `forbidden`; `project_context` is `required` (the caller must name the
+  project) or `derived` (the project may be inferred from a primary or nested
+  Asset reference). `supported_media_types` describes only an accepted
+  top-level primary Asset and is empty when primary Assets are forbidden.
+  Nested/multi-Asset inputs remain declared on JSON Schema properties with
+  `x-media-asset` and constraints such as `minItems`. Job admission enforces
+  this contract both at the API boundary and in the Job service. This is
+  structural applicability, not institutional readiness/policy; `enabled`
+  retains its existing separate meaning.
 - Saved project compositions use immutable `CompositionRevision` documents.
   `app/composition/render.py` compiles one revision into a typed semantic
   render request; `app/services/composition_render.py` revalidates and resolves

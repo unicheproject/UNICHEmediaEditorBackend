@@ -80,6 +80,53 @@ async def test_audio_tts_job_succeeds_with_mock_provider(
     assert "outputs" not in job["output"]
 
 
+async def test_primary_asset_applicability_is_enforced_before_queue(
+    client: AsyncClient, make_project
+) -> None:
+    project_id = await make_project("Applicability")
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "audio.normalize",
+            "project_id": project_id,
+            "input": {},
+        },
+    )
+    assert response.status_code == 422
+    assert "requires a primary asset_id" in response.json()["error"]["message"]
+
+
+async def test_source_less_project_capability_requires_project_context(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        f"{API}/jobs",
+        json={"capability_id": "audio.tts", "input": {"text": "Hello"}},
+    )
+    assert response.status_code == 422
+    assert "requires an explicit project_id" in response.json()["error"]["message"]
+
+
+async def test_project_export_rejects_primary_asset_generically(
+    client: AsyncClient, make_project
+) -> None:
+    project_id = await make_project("No primary asset")
+    response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": "project.export",
+            "project_id": project_id,
+            "asset_id": str(uuid.uuid4()),
+            "input": {
+                "composition_revision_id": str(uuid.uuid4()),
+                "preset": "web",
+            },
+        },
+    )
+    assert response.status_code == 422
+    assert "does not accept a primary asset_id" in response.json()["error"]["message"]
+
+
 async def test_audio_tts_job_persists_derived_audio_asset(
     client: AsyncClient, make_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -131,10 +178,17 @@ async def test_audio_tts_job_persists_derived_audio_asset(
 async def test_not_implemented_capability_returns_payload(
     client: AsyncClient, make_project
 ) -> None:
-    pid = await make_project("NI")
+    pid, aid = await _project_with_asset(
+        client, make_project, "face.png", "image/png"
+    )
     resp = await client.post(
         f"{API}/jobs",
-        json={"capability_id": "image.restore.face", "project_id": pid, "input": {}},
+        json={
+            "capability_id": "image.restore.face",
+            "project_id": pid,
+            "asset_id": aid,
+            "input": {},
+        },
     )
     assert resp.status_code == 201
     job = (await client.get(f"{API}/jobs/{resp.json()['id']}")).json()
