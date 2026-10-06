@@ -43,8 +43,7 @@ class VideoSplitHandler(LocalToolHandler):
             raise ValidationError("'markers' must be a non-empty list of seconds")
         ext = input_ext(ctx)
         pattern = str(ctx.out_path(f"{input_stem(ctx)}_seg%03d.{ext}"))
-        await ffmpeg.video_split(src, pattern, markers)
-        files = ffmpeg.segment_outputs(pattern)
+        files = await ffmpeg.video_split(src, pattern, markers)
         if not files:
             raise ValidationError("Split produced no segments")
         outputs = [

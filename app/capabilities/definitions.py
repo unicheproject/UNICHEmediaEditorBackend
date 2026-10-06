@@ -208,7 +208,9 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Split",
         "description": (
             "Divide the complete input video at the given time markers and return "
-            "multiple segment Assets. Splitting does not choose which segment to keep; "
+            "multiple segment Assets. Cuts are frame-resolution accurate, not keyframe-only; "
+            "the first source soundtrack is retained when present. "
+            "Splitting does not choose which segment to keep; "
             "use video.trim to keep one interval."
         ),
         "media": _V,
@@ -217,10 +219,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "type": "array",
                 "title": "Split markers",
                 "description": (
-                    "Times in seconds where the complete video is divided into segments."
+                    "Strictly increasing, distinct positive times in seconds before the video "
+                    "ends. Each interval must contain video frames."
                 ),
-                "items": {"type": "number"},
+                "items": {"type": "number", "exclusiveMinimum": 0},
                 "minItems": 1,
+                "uniqueItems": True,
                 "x-unit": "seconds",
             }
         },

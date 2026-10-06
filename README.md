@@ -144,6 +144,30 @@ docker compose exec api python -m app.scripts.backfill_asset_waveforms --batch-s
 Optional `--project-id UUID` limits scope. Batches must be 1–1000. Reruns are
 safe: valid cached previews skip decoding; failed/missing previews are retried.
 
+## Video splitting
+
+`video.split` divides the complete first video stream at `markers` (timestamps
+in seconds), producing N+1 ordered segment Assets. Markers must be finite,
+positive, distinct, strictly increasing and before the measured video end;
+every interval must contain frames. Invalid static values return HTTP 422;
+duration/frame-dependent invalidity fails the Job without publishing Assets.
+
+Cuts snap to the first source frame at or after each marker, not to existing
+keyframes. Explicit interval re-encoding preserves each frame's ownership and
+uses the canonical container-compatible codec choices (H.264/AAC for MP4,
+VP9/Opus for WebM; MOV/MKV retain their supported container). The first source
+soundtrack is trimmed to the same snapped intervals; silent input remains
+silent. No multiple-track or stream-copy mode is provided.
+
+All segments are probed before publication: frame counts must agree exactly,
+and video duration tolerance is one measured source frame (the longest
+observed frame interval for variable-rate video), plus 2 ms for container
+timestamp quantization. Combined tolerance accumulates per segment. Audio
+encoder delay is not included in video duration. Frame probing streams bounded
+records with the existing 60-second timeout; unknown/ambiguous final-frame
+duration fails cleanly instead of guessing. Splitting re-decodes each interval
+and is not a lossless operation.
+
 ## Running tests
 
 Tests use an isolated SQLite database and run jobs eagerly (no Redis/arq

@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import json
 import math
+from contextlib import suppress
 from pathlib import Path
 
-from app.core.errors import ToolError
+from app.capabilities.media_options import VIDEO_TRANSCODE_OPTIONS
+from app.core.errors import ToolError, ValidationError
+from app.models.enums import MediaType
+from app.services.media_metadata import MetadataProbeError, probe_media, probe_video_timeline
 from app.tools import runner
 from app.tools.compose_policy import (
     DEFAULT_COMPOSE_RENDER_POLICY,
@@ -66,24 +70,95 @@ async def video_trim(src: str, dst: str, start: float, end: float) -> None:
     )
 
 
-async def video_split(src: str, dst_pattern: str, markers: list[float]) -> None:
-    csv = ",".join(_num(m, "markers") for m in markers)
-    await runner.run(
-        [
-            *_BASE,
-            "-i",
-            src,
-            "-f",
-            "segment",
-            "-segment_times",
-            csv,
-            "-reset_timestamps",
-            "1",
-            "-c",
-            "copy",
-            dst_pattern,
-        ]
-    )
+async def video_split(src: str, dst_pattern: str, markers: list[float]) -> list[Path]:
+    """Render and validate all frame-owned intervals before Asset publication."""
+    if not isinstance(markers, list) or not markers:
+        raise ValidationError("Split markers must be a non-empty list of seconds")
+    for marker in markers:
+        if isinstance(marker, bool) or not isinstance(marker, (int, float)):
+            raise ValidationError("Split markers must be finite numbers")
+        try:
+            finite = math.isfinite(marker)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise ValidationError("Split markers must be finite numbers")
+        if marker <= 0:
+            raise ValidationError("Split marker must be greater than 0 seconds")
+    if any(right <= left for left, right in zip(markers, markers[1:], strict=False)):
+        raise ValidationError("Split markers must be strictly increasing")
+    options = VIDEO_TRANSCODE_OPTIONS.get(Path(dst_pattern).suffix.lstrip(".").lower())
+    if options is None:
+        raise ValidationError("Video split does not support this output container")
+    try:
+        metadata = await probe_media(Path(src), MediaType.video)
+        if not metadata.has_video_stream or not metadata.width or not metadata.height:
+            raise MetadataProbeError("no_video_stream")
+        timeline = await probe_video_timeline(
+            Path(src), tuple(markers), frame_rate=metadata.frame_rate
+        )
+    except MetadataProbeError as exc:
+        messages = {
+            "marker_outside_video": "Split marker must be before the end of the video",
+            "empty_video_interval": "Split markers must produce distinct non-empty video intervals",
+        }
+        raise ValidationError(messages.get(
+            exc.reason, "Cannot establish reliable source video timing for split"
+        )) from exc
+    prefix, separator, suffix = dst_pattern.rpartition("%03d")
+    if not separator:
+        raise ToolError("Invalid internal split output pattern")
+    files = [Path(f"{prefix}{index:03d}{suffix}") for index in range(len(markers) + 1)]
+    validated = False
+    try:
+        for path, interval in zip(files, timeline.intervals, strict=True):
+            args = [*_BASE, "-copyts", "-i", src, "-map", "0:v:0"]
+            args += [
+                "-vf", f"trim=start_frame={interval.first_frame}:"
+                f"end_frame={interval.first_frame + interval.frame_count},setpts=PTS-STARTPTS",
+                "-fps_mode", "passthrough", "-c:v", options["video_codec"][0],
+                "-pix_fmt", "yuv420p",
+            ]
+            if metadata.has_audio_stream:
+                args += [
+                    "-map", "0:a:0", "-af",
+                    f"asetpts=PTS-({timeline.start_seconds})/TB,"
+                    f"atrim=start={interval.start_seconds}:end={interval.end_seconds},"
+                    f"asetpts=PTS-({interval.start_seconds})/TB",
+                    "-c:a", options["audio_codec"][0], "-b:a", "128k",
+                ]
+            else:
+                args += ["-an"]
+            await runner.run([*args, str(path)])
+        measured_duration = 0.0
+        for path, interval in zip(files, timeline.intervals, strict=True):
+            if not path.is_file() or path.stat().st_size == 0:
+                raise ToolError("Split output is missing or empty")
+            output = await probe_media(path, MediaType.video)
+            if not output.has_video_stream or not output.width or not output.height:
+                raise ToolError("Split output does not contain valid video")
+            actual = await probe_video_timeline(path, frame_rate=output.frame_rate)
+            expected_duration = interval.end_seconds - interval.start_seconds
+            tolerance = timeline.frame_tolerance + 0.002  # Matroska millisecond timebase.
+            if (actual.intervals[0].frame_count != interval.frame_count
+                    or abs(actual.duration_seconds - expected_duration) > tolerance):
+                raise ToolError("Split output did not match the requested boundary")
+            if metadata.has_audio_stream and not output.has_audio_stream:
+                raise ToolError("Split output did not preserve the source soundtrack")
+            measured_duration += actual.duration_seconds
+        if abs(measured_duration - timeline.duration_seconds) > len(files) * tolerance:
+            raise ToolError("Split output coverage did not match the source video")
+        validated = True
+        return files
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot validate split output video timing") from exc
+    finally:
+        # The handler receives files only after complete validation. On any
+        # failure/cancellation, remove this operation's files, not arbitrary glob matches.
+        if not validated:
+            for path in files:
+                with suppress(OSError):
+                    path.unlink(missing_ok=True)
 
 
 async def probe_video_size(path: str) -> tuple[int, int]:

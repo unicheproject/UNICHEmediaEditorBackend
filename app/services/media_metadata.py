@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import uuid
+from bisect import bisect_right
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -50,6 +51,113 @@ class TechnicalMetadata:
     audio_channels: int | None = None
     bit_rate: int | None = None
     technical_streams: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class VideoInterval:
+    start_seconds: float
+    end_seconds: float
+    first_frame: int
+    frame_count: int
+
+
+@dataclass(frozen=True)
+class VideoTimeline:
+    start_seconds: float
+    duration_seconds: float
+    frame_tolerance: float
+    intervals: tuple[VideoInterval, ...]
+
+
+async def probe_video_timeline(
+    path: Path, markers: tuple[float, ...] = (), *, frame_rate: float | None = None,
+) -> VideoTimeline:
+    """Measure the first decoded video stream without buffering its frame list.
+
+    Markers use time relative to the first video frame. Each frame belongs to
+    exactly one half-open interval; cuts snap forward to its timestamp. Memory
+    is O(markers), stdout lines are bounded, and the existing probe timeout
+    applies to the entire scan. Container/audio padding is not video duration.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_frames",
+            "-show_entries", "frame=best_effort_timestamp_time,pkt_duration_time",
+            "-of", "compact=p=0:nk=0", str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        raise MetadataProbeError("tool_unavailable") from exc
+    assert proc.stdout is not None
+    starts: list[float | None] = [None] * (len(markers) + 1)
+    counts = [0] * len(starts)
+    origin: float | None = None
+    previous: float | None = None
+    last_duration: float | None = None
+    max_step = 0.0
+    min_step = math.inf
+    try:
+        async with asyncio.timeout(PROBE_TIMEOUT_SECONDS):
+            while line := await proc.stdout.readline():
+                fields = dict(
+                    part.split("=", 1) for part in line.decode("utf-8").strip().split("|")
+                    if "=" in part
+                )
+                if "best_effort_timestamp_time" not in fields:
+                    continue  # Separate side-data records are not frames.
+                timestamp = float(fields["best_effort_timestamp_time"])
+                if not math.isfinite(timestamp):
+                    raise MetadataProbeError("invalid_video_timing")
+                if origin is None:
+                    origin = timestamp
+                relative = timestamp - origin
+                if previous is not None:
+                    step = relative - previous
+                    if step <= 0:
+                        raise MetadataProbeError("invalid_video_timing")
+                    max_step = max(max_step, step)
+                    min_step = min(min_step, step)
+                bucket = bisect_right(markers, relative + 1e-7)
+                if starts[bucket] is None:
+                    starts[bucket] = relative
+                counts[bucket] += 1
+                previous = relative
+                last_duration = _number(fields.get("pkt_duration_time"))
+            if await proc.wait() != 0:
+                raise MetadataProbeError("tool_failed")
+        if origin is None or previous is None:
+            raise MetadataProbeError("no_video_frames")
+        # A packet duration is preferred; otherwise use the measured cadence
+        # or declared frame rate. A single untimed frame cannot establish D.
+        frame_duration = last_duration
+        if not frame_duration and max_step and max_step - min_step < 0.002:
+            frame_duration = max_step
+        if not frame_duration and not max_step and frame_rate and frame_rate > 0:
+            frame_duration = 1 / frame_rate
+        if not frame_duration:
+            raise MetadataProbeError("unknown_video_duration")
+        duration = previous + frame_duration
+        if any(marker >= duration - 1e-7 for marker in markers):
+            raise MetadataProbeError("marker_outside_video")
+        if not all(counts):
+            raise MetadataProbeError("empty_video_interval")
+        boundaries = [float(start) for start in starts if start is not None] + [duration]
+        first = 0
+        intervals = []
+        for index, count in enumerate(counts):
+            intervals.append(VideoInterval(boundaries[index], boundaries[index + 1], first, count))
+            first += count
+        return VideoTimeline(
+            origin, duration, max(max_step, frame_duration), tuple(intervals)
+        )
+    except TimeoutError as exc:
+        raise MetadataProbeError("timeout") from exc
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise MetadataProbeError("invalid_video_timing") from exc
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
 
 
 def _text(value: Any) -> str | None:
