@@ -7,6 +7,7 @@ container/codec is generally chosen by FFmpeg from the output file extension.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from app.core.errors import ToolError
@@ -577,15 +578,52 @@ async def _normalize_segment(
     height: int,
     policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
 ) -> None:
-    """Re-encode a segment to uniform params (silent audio) for safe concat."""
+    """Normalize first video/soundtrack; synthesize silence only if absent."""
+    duration = await _compose_video_duration(src)
+    has_audio = await _has_audio(src)
+    audio_input = [] if has_audio else _ANULL
+    audio_stream = "0:a:0" if has_audio else "1:a:0"
     await runner.run(
         [
-            *_BASE, "-i", src, *_ANULL,
-            "-map", "0:v", "-map", "1:a",
+            *_BASE, "-i", src, *audio_input,
+            "-map", "0:v:0", "-map", audio_stream,
             "-vf", _scale_pad(width, height),
-            *_compose_encode_args(policy), "-shortest", dst,
+            # Pad short soundtracks and retain timestamp gaps. Bound both real
+            # and synthetic audio to video, not container/audio duration, so
+            # concat cannot insert a trailing audio-only gap between clips.
+            "-af", f"aresample=44100:async=1:first_pts=0,apad,atrim=duration={duration}",
+            "-ar", "44100", "-ac", "2",
+            *_compose_encode_args(policy), "-t", str(duration), dst,
         ]
     )
+
+
+async def _compose_video_duration(src: str) -> float:
+    """Use the first video's duration (Matroska stores it as a stream tag)."""
+    out = await runner.run_stdout(
+        [FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=duration:stream_tags=DURATION:format=duration", "-of", "json", src],
+        timeout=60,
+    )
+    try:
+        payload = json.loads(out)
+        stream = payload["streams"][0]
+        value = stream.get("duration")
+        if value in (None, "N/A"):
+            tag = stream.get("tags", {}).get("DURATION")
+            if tag is not None:
+                hours, minutes, seconds = map(float, tag.split(":"))
+                value = hours * 3600 + minutes * 60 + seconds
+            else:
+                value = payload["format"]["duration"]
+        duration = float(value)
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError
+        return duration
+    except (
+        json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError, AttributeError,
+    ) as exc:
+        raise ToolError("Cannot determine composition source video duration") from exc
 
 
 async def compose(

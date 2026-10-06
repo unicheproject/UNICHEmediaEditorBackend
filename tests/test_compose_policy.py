@@ -136,6 +136,8 @@ async def test_default_policy_preserves_audio_bed_stream_copy_and_mp4_encoders(
         return ""
 
     async def fake_run_stdout(args: list[str], *, timeout: float = 600.0) -> str:
+        if "v:0" in args:
+            return '{"streams":[{"duration":"1"}]}'
         return "0\n"
 
     monkeypatch.setattr(ffmpeg.runner, "run", fake_run)
@@ -173,6 +175,8 @@ async def test_lossless_invocations_never_select_a_lossy_encoder(
         return ""
 
     async def fake_run_stdout(args: list[str], *, timeout: float = 600.0) -> str:
+        if "v:0" in args:
+            return '{"streams":[{"duration":"1"}]}'
         return "0\n"
 
     monkeypatch.setattr(ffmpeg.runner, "run", fake_run)

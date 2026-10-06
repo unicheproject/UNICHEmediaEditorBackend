@@ -333,7 +333,15 @@ Key boundaries:
   trusted encoding policy (`ComposeRenderPolicy`). Direct `video.compose`
   defaults to its existing MP4/H.264/AAC behavior; the internal lossless
   policy carries Matroska/FFV1/FLAC through normalized segments, stream-copy
-  concat, audio-bed processing, and subtitle burn-in. A future Archival
+  concat, audio-bed processing, and subtitle burn-in. Segment normalization
+  preserves the first source soundtrack, normalizing to 44.1 kHz stereo;
+  audio is padded/trimmed to the first video's duration, and clips without
+  audio receive silence. Ordered soundtracks follow the video timeline.
+  The optional bed retains existing `mix`, `duck` (bed volume capped at 0.2),
+  and `replace` semantics; replacement uses the shorter media/bed duration.
+  Lossless policy uses FLAC rather than a lossy audio intermediate; channel/rate
+  normalization is still applied, not bit-identical source stream copying.
+  Archival
   `project.export` selects that policy from the start without changing saved
   compositions. `project.export` is a normal asynchronous Job bound to the
   exact submitted revision; its immutable Job input snapshots the revision hash,
