@@ -6,6 +6,7 @@ import asyncio
 import shutil
 import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -35,8 +36,14 @@ from app.services.assets import ensure_asset_binary_available, get_asset
 from app.services.projects import get_project
 from app.services.storage import get_storage
 from app.services.waveforms import enrich_asset_waveform
+from app.workers.queue import DispatchOutcome
 
 logger = get_logger(__name__)
+DISPATCH_FAILURE_MESSAGE = "Job could not be dispatched for execution."
+
+# None remains an acknowledgement for existing injected/eager enqueuers;
+# the production queue wrapper always returns an explicit DispatchOutcome.
+JobEnqueuer = Callable[[uuid.UUID], Awaitable[DispatchOutcome | None]]
 
 
 async def create_job(session: AsyncSession, data: JobCreate) -> Job:
@@ -94,6 +101,50 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
     )
     session.add(job)
     await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def fail_queued_dispatch(session: AsyncSession, job_id: uuid.UUID) -> bool:
+    """Compensate caught dispatch failure only if no worker/cancellation won."""
+    await session.rollback()
+    try:
+        changed = await session.execute(
+            update(Job).where(Job.id == job_id, Job.status == JobStatus.queued)
+            .values(status=JobStatus.failed, error=DISPATCH_FAILURE_MESSAGE,
+                    finished_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+    except Exception:  # noqa: BLE001 - leave a usable session and sanitize at submission
+        await session.rollback()
+        raise
+    return cast(CursorResult, changed).rowcount == 1
+
+
+async def dispatch_job(
+    session: AsyncSession, job_id: uuid.UUID, enqueuer: JobEnqueuer,
+) -> Job:
+    """Dispatch an already committed Job, or truthfully terminate queued work."""
+    # End the creation refresh's read transaction before network I/O and races.
+    await session.commit()
+    try:
+        outcome = await enqueuer(job_id)
+    except Exception as exc:  # noqa: BLE001 - injected transports may also raise
+        logger.warning("Job dispatch failed %s (%s)", job_id, type(exc).__name__)
+        outcome = DispatchOutcome.UNKNOWN
+    if outcome in {DispatchOutcome.NOT_DISPATCHED, DispatchOutcome.UNKNOWN}:
+        try:
+            compensated = await fail_queued_dispatch(session, job_id)
+            job = await get_job(session, job_id)
+            await session.refresh(job)
+        except Exception as exc:  # noqa: BLE001 - never expose database/transport diagnostics
+            logger.warning("Job dispatch compensation failed %s (%s)", job_id, type(exc).__name__)
+            raise AppError(DISPATCH_FAILURE_MESSAGE) from None
+        if compensated:
+            raise AppError(DISPATCH_FAILURE_MESSAGE)
+        return job
+    job = await get_job(session, job_id)
     await session.refresh(job)
     return job
 

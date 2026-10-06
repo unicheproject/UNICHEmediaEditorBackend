@@ -32,7 +32,7 @@ router = APIRouter(tags=["jobs"])
 # Enqueue/cancel are injected so tests can override them (e.g. run the job
 # eagerly, or no-op the arq call) without standing up Redis/arq. Routes never
 # touch provider logic.
-Enqueuer = Callable[[uuid.UUID], Awaitable[None]]
+Enqueuer = svc.JobEnqueuer
 Canceller = Callable[[uuid.UUID], Awaitable[bool]]
 
 
@@ -54,7 +54,7 @@ async def create_job(
     enqueuer: Enqueuer = Depends(get_enqueuer),
 ) -> JobRead:
     job = await svc.create_job(session, data)
-    await enqueuer(job.id)
+    job = await svc.dispatch_job(session, job.id, enqueuer)
     return JobRead.model_validate(job)
 
 

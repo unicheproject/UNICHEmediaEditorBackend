@@ -279,6 +279,13 @@ Key boundaries:
 
 - **Routes never execute work and never know the provider.** `POST /jobs`
   validates references, persists a `queued` job, and enqueues `run_job(job_id)`.
+  A caught, unconfirmed dispatch failure conditionally changes only `queued`
+  to `failed`, records a fixed dispatch error, and returns the existing HTTP
+  500 error envelope. Confirmed runnable tasks or a worker/terminal state that
+  wins the race retain the normal 201 response. Queue cleanup errors cannot
+  invalidate acknowledged dispatch. Process loss between commit and dispatch,
+  or a failed compensation commit, still requires separate recovery; this is
+  not crash-safe or exactly-once dispatch.
 - **The worker** atomically claims only `queued` Jobs. Delivery of a running or
   terminal Job is a no-op; a Job ID has one execution attempt and is never
   automatically reclaimed. Media/provider execution holds no Job lock.
@@ -291,8 +298,8 @@ Key boundaries:
   runs best-effort after publication. Unpublished objects are removed best-effort;
   abrupt process death or an unverifiable DB failure can leave unreferenced
   storage and a running Job. This is at-most-one authoritative publication, not
-  exactly-once provider invocation. Stale-running recovery and enqueue-failure
-  reconciliation are separate, unsupported mechanisms.
+  exactly-once provider invocation. Stale-running recovery and crash-gap
+  dispatch reconciliation are separate, unsupported mechanisms.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
 - Capability `input_schema` values are the shared execution/discovery
