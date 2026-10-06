@@ -175,45 +175,11 @@ async def create_derived_asset(
     Trusted output: skips the upload-size cap and allowed-extension gate that
     apply to user uploads. Sets source_asset_id for provenance / chaining.
     """
-    stored_name = safe_filename(filename)
-    extension = Path(filename).suffix.lstrip(".").lower()
-    asset_id = uuid.uuid4()
-    storage = get_storage()
-
-    with src_path.open("rb") as src:
-        storage_path, size_bytes = storage.save_upload(
-            project_id, asset_id, stored_name, src
-        )
-    checksum = storage.calculate_checksum(storage_path)
-    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-    # Derived media already runs in the worker, so probing here avoids a
-    # second queue round-trip and never makes a successful output fail.
-    metadata = await probe_media_safely(src_path, media_type)
-
-    persisted_at = datetime.now(UTC)
-    waveform_status, waveform_reason = initial_waveform_state(media_type)
-    asset = Asset(
-        id=asset_id,
-        project_id=project_id,
-        filename=stored_name,
-        original_filename=filename,
-        media_type=media_type,
-        mime_type=mime_type,
-        extension=extension,
-        size_bytes=size_bytes,
-        storage_path=storage_path,
-        checksum_sha256=checksum,
-        source_asset_id=source_asset_id,
+    asset = await prepare_derived_asset(
+        project_id=project_id, source_asset_id=source_asset_id,
+        src_path=src_path, filename=filename, media_type=media_type,
         is_intermediate=is_intermediate,
-        temp_expires_at=(
-            persisted_at + timedelta(hours=72) if is_intermediate else None
-        ),
-        technical_metadata_status=metadata.status.value,
-        waveform_status=waveform_status.value,
-        waveform_reason=waveform_reason.value if waveform_reason else None,
     )
-    apply_metadata(asset, metadata)
     session.add(asset)
     await session.commit()
     await session.refresh(asset)
@@ -221,6 +187,70 @@ async def create_derived_asset(
         await enrich_asset_waveform(session, asset.id)
         await session.refresh(asset)
     return asset
+
+
+def discard_prepared_asset(project_id: uuid.UUID, asset_id: uuid.UUID) -> None:
+    """Best-effort cleanup of an unpublished, freshly allocated object."""
+    try:
+        get_storage().delete_asset(project_id, asset_id)
+    except Exception as exc:  # noqa: BLE001 - cleanup must preserve the original failure
+        logger.warning("Could not remove unpublished asset %s (%s)", asset_id, type(exc).__name__)
+
+
+async def prepare_derived_asset(
+    *,
+    project_id: uuid.UUID,
+    source_asset_id: uuid.UUID | None,
+    src_path: Path,
+    filename: str,
+    media_type: MediaType,
+    is_intermediate: bool = False,
+) -> Asset:
+    """Prepare storage and a transient Asset; the caller owns DB publication.
+
+    No session writes or preview enrichment occur here. A failed preparation
+    removes its own object, including a partially copied file.
+    """
+    stored_name = safe_filename(filename)
+    extension = Path(filename).suffix.lstrip(".").lower()
+    asset_id = uuid.uuid4()
+    storage = get_storage()
+
+    try:
+        with src_path.open("rb") as src:
+            storage_path, size_bytes = storage.save_upload(
+                project_id, asset_id, stored_name, src
+            )
+        checksum = storage.calculate_checksum(storage_path)
+        metadata = await probe_media_safely(src_path, media_type)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        persisted_at = datetime.now(UTC)
+        waveform_status, waveform_reason = initial_waveform_state(media_type)
+        asset = Asset(
+            id=asset_id,
+            project_id=project_id,
+            filename=stored_name,
+            original_filename=filename,
+            media_type=media_type,
+            mime_type=mime_type,
+            extension=extension,
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            checksum_sha256=checksum,
+            source_asset_id=source_asset_id,
+            is_intermediate=is_intermediate,
+            temp_expires_at=(
+                persisted_at + timedelta(hours=72) if is_intermediate else None
+            ),
+            technical_metadata_status=metadata.status.value,
+            waveform_status=waveform_status.value,
+            waveform_reason=waveform_reason.value if waveform_reason else None,
+        )
+        apply_metadata(asset, metadata)
+        return asset
+    except BaseException:
+        discard_prepared_asset(project_id, asset_id)
+        raise
 
 
 def ensure_asset_binary_available(asset: Asset) -> Path:

@@ -8,8 +8,10 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
@@ -24,7 +26,7 @@ from app.capabilities.validation import (
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.asset import Asset
-from app.models.enums import JobStatus
+from app.models.enums import JobStatus, MediaType
 from app.models.job import Job
 from app.schemas.capability import CapabilityMetadata
 from app.schemas.job import JobCreate
@@ -32,6 +34,7 @@ from app.services import assets as assets_svc
 from app.services.assets import ensure_asset_binary_available, get_asset
 from app.services.projects import get_project
 from app.services.storage import get_storage
+from app.services.waveforms import enrich_asset_waveform
 
 logger = get_logger(__name__)
 
@@ -202,17 +205,46 @@ async def cancel_job(session: AsyncSession, job_id: uuid.UUID) -> Job:
     effort) to actually stop a running job's subprocess; this DB write is the
     immediately-consistent state the API/GUI see regardless of that outcome.
     """
+    changed = await session.execute(
+        update(Job).where(Job.id == job_id, Job.status.in_(_CANCELLABLE))
+        .values(status=JobStatus.cancelled, error="Cancelled by user",
+                finished_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
     job = await get_job(session, job_id)
-    if job.status not in _CANCELLABLE:
+    await session.refresh(job)
+    if cast(CursorResult, changed).rowcount != 1:
         raise ValidationError(
             f"Job '{job_id}' is already {job.status.value}; cannot cancel"
         )
-    job.status = JobStatus.cancelled
-    job.error = "Cancelled by user"
-    job.finished_at = datetime.now(UTC)
-    await session.commit()
-    await session.refresh(job)
     return job
+
+
+async def claim_job(session: AsyncSession, job_id: uuid.UUID) -> bool:
+    """One attempt per Job: only the atomic queued -> running winner executes."""
+    changed = await session.execute(
+        update(Job).where(Job.id == job_id, Job.status == JobStatus.queued)
+        .values(status=JobStatus.running, started_at=datetime.now(UTC), progress=10)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    return cast(CursorResult, changed).rowcount == 1
+
+
+async def finish_running_job(
+    session: AsyncSession, job_id: uuid.UUID, status: JobStatus, message: str,
+) -> None:
+    """Failure/abort cannot overwrite a cancellation or successful publication."""
+    if status not in {JobStatus.failed, JobStatus.cancelled}:
+        raise ValueError("Only failure/abort may finish a running Job here")
+    await session.rollback()
+    await session.execute(
+        update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
+        .values(status=status, error=message, finished_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
 
 
 async def list_jobs_for_project(
@@ -342,37 +374,98 @@ async def _persist_outputs(
     result: HandlerResult,
     *,
     is_intermediate: bool = False,
-) -> dict:
-    """Register handler output files as derived Assets; build job.output."""
-    descriptors: list[dict] = []
-    for out in result.outputs:
-        if ctx.project_id is None:
-            raise ValidationError(
-                "Cannot store derived output: job has no project or input asset"
-            )
-        asset: Asset = await assets_svc.create_derived_asset(
-            session,
-            project_id=ctx.project_id,
-            source_asset_id=ctx.source_asset_id,
-            src_path=out.path,
-            filename=out.filename,
-            media_type=out.media_type,
-            is_intermediate=is_intermediate,
-        )
-        descriptors.append(
-            {
-                "asset_id": str(asset.id),
-                "filename": asset.original_filename,
-                "media_type": asset.media_type.value,
-                "size_bytes": asset.size_bytes,
-                "download_path": f"/api/v1/assets/{asset.id}/download",
-            }
-        )
+) -> bool:
+    """Prepare objects, then atomically publish ALL Assets and Job success.
 
-    output = dict(result.data)
-    if descriptors:
-        output["outputs"] = descriptors
-    return output
+    The conditional UPDATE serializes against cancellation on both PostgreSQL
+    and SQLite. Its write lock lasts only through the publication commit, never
+    media processing. No row is visible if cancellation wins or commit fails.
+    """
+    job_id = job.id
+    prepared: list[Asset] = []
+    prepared_keys: list[tuple[uuid.UUID, uuid.UUID]] = []
+    published = False
+    # End any context-resolution read transaction before media probing/copying.
+    await session.commit()
+    try:
+        for out in result.outputs:
+            if ctx.project_id is None:
+                raise ValidationError(
+                    "Cannot store derived output: job has no project or input asset"
+                )
+            asset = await assets_svc.prepare_derived_asset(
+                project_id=ctx.project_id, source_asset_id=ctx.source_asset_id,
+                src_path=out.path, filename=out.filename, media_type=out.media_type,
+                is_intermediate=is_intermediate,
+            )
+            prepared.append(asset)
+            prepared_keys.append((asset.project_id, asset.id))
+        output = dict(result.data)
+        if prepared:
+            output["outputs"] = [{
+                "asset_id": str(asset.id), "filename": asset.original_filename,
+                "media_type": asset.media_type.value, "size_bytes": asset.size_bytes,
+                "download_path": f"/api/v1/assets/{asset.id}/download",
+            } for asset in prepared]
+        changed = await session.execute(
+            update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
+            .values(status=JobStatus.succeeded, output=output, progress=100,
+                    error=None, finished_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        if cast(CursorResult, changed).rowcount != 1:
+            await session.rollback()
+            return False
+        session.add_all(prepared)
+        # Resolve cooperative cancellation during commit before deciding whether
+        # these objects are published; never delete an acknowledged commit.
+        commit = asyncio.create_task(session.commit())
+        try:
+            await asyncio.shield(commit)
+        except asyncio.CancelledError:
+            await commit
+            published = True
+            raise
+        published = True
+    except BaseException:
+        await session.rollback()
+        raise
+    finally:
+        if not published:
+            await _discard_unpublished_outputs(session, prepared_keys)
+
+    # Preview enrichment has independent best-effort transactions only AFTER
+    # authoritative publication. Its failure cannot revoke Job success.
+    enrichment_ids = [
+        asset.id for asset in prepared if asset.media_type in (MediaType.audio, MediaType.video)
+    ]
+    for asset_id in enrichment_ids:
+        await enrich_asset_waveform(session, asset_id)
+    return True
+
+
+async def _discard_unpublished_outputs(
+    session: AsyncSession, keys: list[tuple[uuid.UUID, uuid.UUID]],
+) -> None:
+    """Never remove committed objects if a commit acknowledgement was lost.
+
+    If the DB cannot confirm ownership, retain objects rather than risking
+    published media. Abrupt death/DB outage can leave unreferenced storage;
+    reconciliation is deliberately outside the one-attempt execution contract.
+    """
+    if not keys:
+        return
+    try:
+        async with AsyncSession(bind=session.bind) as checking:
+            committed = set(await checking.scalars(
+                select(Asset.id).where(Asset.id.in_([asset_id for _, asset_id in keys]))
+            ))
+    except Exception as exc:  # noqa: BLE001 - do not delete without authoritative evidence
+        logger.warning("Cannot verify unpublished output cleanup (%s)", type(exc).__name__)
+        return
+    for project_id, asset_id in keys:
+        if asset_id not in committed:
+            assets_svc.discard_prepared_asset(project_id, asset_id)
 
 
 async def execute_job(
@@ -385,23 +478,28 @@ async def execute_job(
 
     Transitions are committed as they happen so polling/SSE see live state.
     """
+    claimed = await claim_job(session, job_id)
     job = await get_job(session, job_id)
-
-    job.status = JobStatus.running
-    job.started_at = datetime.now(UTC)
-    job.progress = 10
-    await session.commit()
+    await session.refresh(job)
+    if not claimed:
+        return job
 
     work_dir = Path(tempfile.mkdtemp(prefix=f"job-{job_id}-"))
     try:
         await require_worker_readiness(registry.get(job.capability_id))
         ctx = await _build_job_context(session, job, work_dir)
         handler = registry.get_handler(job.capability_id)
-        job.progress = 50
+        changed = await session.execute(
+            update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
+            .values(progress=50).execution_options(synchronize_session=False)
+        )
         await session.commit()
+        if cast(CursorResult, changed).rowcount != 1:
+            await session.refresh(job)
+            return job
 
         result = await handler.run(ctx)
-        output = await _persist_outputs(
+        await _persist_outputs(
             session,
             job,
             ctx,
@@ -409,43 +507,21 @@ async def execute_job(
             is_intermediate=is_intermediate_output,
         )
 
-        # A concurrent cancel_job() may have already finalized this job (e.g.
-        # the handler was mid-cleanup when cancelled but still returned
-        # normally) -- don't stomp a cancellation with a late "succeeded".
-        await session.refresh(job)
-        if job.status == JobStatus.cancelled:
-            return job
-
-        job.output = output
-        job.status = JobStatus.succeeded
-        job.progress = 100
-        job.finished_at = datetime.now(UTC)
-        await session.commit()
     except asyncio.CancelledError:
         # Cooperative ARQ aborts must not strand the physical Job as running.
         # The runner handles killing an active subprocess before this point.
-        await session.rollback()
-        current = await session.get(Job, job_id)
-        if current is not None and current.status in {JobStatus.queued, JobStatus.running}:
-            current.status = JobStatus.cancelled
-            current.error = "Worker execution was cooperatively cancelled."
-            current.finished_at = datetime.now(UTC)
-            await session.commit()
+        await finish_running_job(
+            session, job_id, JobStatus.cancelled,
+            "Worker execution was cooperatively cancelled.",
+        )
         raise
     except AppError as exc:
-        await _fail(session, job, exc.message)
+        await finish_running_job(session, job_id, JobStatus.failed, exc.message)
     except Exception as exc:  # noqa: BLE001 - record any failure on the job
         logger.exception("Job %s failed", job_id)
-        await _fail(session, job, str(exc))
+        await finish_running_job(session, job_id, JobStatus.failed, str(exc))
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
     await session.refresh(job)
     return job
-
-
-async def _fail(session: AsyncSession, job: Job, message: str) -> None:
-    job.status = JobStatus.failed
-    job.error = message
-    job.finished_at = datetime.now(UTC)
-    await session.commit()

@@ -94,8 +94,11 @@ Worker entrypoint: `arq app.workers.worker.WorkerSettings`.
 
 Request path never does heavy work. `POST /jobs` validates + persists a `queued`
 Job and enqueues `run_job(job_id)` to arq; the **worker** executes it. State
-transitions (`queued→running→succeeded/failed`) are committed individually so
-polling / the SSE endpoint see live progress.
+transitions use conditional updates: only one worker can claim a queued Job,
+and running/terminal duplicate deliveries are no-ops. All output Asset rows,
+`Job.output`, and success commit together behind a running-state fence;
+cancellation/failure cannot overwrite terminal state. No automatic reclaim or
+generic retries exist. Polling / SSE see committed progress.
 
 ```
 API route → service → enqueue ─▶ Redis ─▶ arq worker → services.jobs.execute_job
@@ -124,9 +127,13 @@ API route → service → enqueue ─▶ Redis ─▶ arq worker → services.jo
   - `NotImplementedHandler` — fallback.
 - **`execute_job` (`app/services/jobs.py`) is the orchestration hub**: builds the
   `JobContext` (resolving the primary `asset_id` plus any `input.asset_ids` to
-  file paths + a temp work dir), runs the handler, and **persists each
-  `OutputFile` as a derived Asset** via `assets.create_derived_asset`, then sets
-  `job.output.outputs[] = {asset_id, filename, media_type, size_bytes, download_path}`.
+  file paths + a temp work dir), runs the handler, and prepares `OutputFile`
+  objects via the non-committing `assets.prepare_derived_asset`. A short
+  conditional publication transaction inserts the complete Asset set with
+  `job.output.outputs[] = {asset_id, filename, media_type, size_bytes, download_path}`
+  and Job success. Preview enrichment runs only after this commit. The same
+  publication helper protects internal Agent render groups. Non-Job
+  `create_derived_asset` callers retain their existing commit behavior.
 
 To **add a capability**: add a `CapabilityDef` to `definitions.py`, write a
 handler (subclass the right base), register it in `registry.py`. For a local

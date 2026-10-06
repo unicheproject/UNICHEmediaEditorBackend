@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.api.v1.jobs import get_enqueuer
 from app.capabilities import registry
@@ -412,6 +413,21 @@ async def test_archival_export_uses_lossless_policy_from_first_compose_invocatio
         assert output_asset.is_intermediate is False
         assert output_asset.temp_expires_at is None
         assert output_asset.technical_metadata_status == "available"
+
+    command_count = len(commands)
+    original_output = executed.output
+    original_snapshot = executed.input
+    async with async_session_factory() as session:
+        duplicate = await execute_job(session, uuid.UUID(job["id"]))
+        assert duplicate.status.value == "succeeded"
+        assert duplicate.output == original_output
+        assert duplicate.input == original_snapshot
+        published = list(await session.scalars(select(Asset).where(
+            Asset.project_id == uuid.UUID(project_id), Asset.source_asset_id.is_not(None),
+        )))
+        assert len(published) == 1
+        assert published[0].id == uuid.UUID(descriptor["asset_id"])
+    assert len(commands) == command_count  # no second compose, probe or waveform decode
 
     encoders: set[str] = set()
     for command in commands:

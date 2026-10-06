@@ -413,20 +413,27 @@ async def _execute_standard_step(
             session, job.id, is_intermediate_output=is_intermediate
         )
     except asyncio.CancelledError:
+        await session.refresh(plan_row)
+        await session.refresh(attempt)
         await session.refresh(job)
         output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
+        output_id = (
+            output_ids[0] if job.status == JobStatus.succeeded and len(output_ids) == 1 else None
+        )
         cancelled_run = {
             "step_id": step.id, "capability_id": step.capability_id,
-            "job_id": str(job.id), "status": JobStatus.cancelled.value,
-            "output_asset_id": None, "output_asset_ids": output_ids,
+            "job_id": str(job.id), "status": job.status.value,
+            "output_asset_id": output_id, "output_asset_ids": output_ids,
         }
         step_runs.append(cancelled_run)
         _update_summary_step(
-            summary, step.id, status=JobStatus.cancelled.value,
-            job_id=str(job.id), output_asset_id=None,
+            summary, step.id, status=job.status.value,
+            job_id=str(job.id), output_asset_id=output_id,
         )
         await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
         raise
+    await session.refresh(plan_row)
+    await session.refresh(attempt)
     output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
     output_id = output_ids[0] if len(output_ids) == 1 else None
     if execution_identity is not None and job.status == JobStatus.succeeded and output_id:
@@ -464,6 +471,8 @@ async def _execute_standard_step(
         reused=False,
     )
     await _save_running_attempt(session, plan_row, attempt, step_runs, summary)
+    if job.status == JobStatus.cancelled:
+        raise asyncio.CancelledError
     if job.status == JobStatus.failed:
         raise RuntimeError(f"Step '{step.id}' failed: {job.error}")
 
@@ -492,14 +501,20 @@ async def _execute_legacy_steps(
                 session, job.id, is_intermediate_output=step.id in consumed,
             )
         except asyncio.CancelledError:
+            await session.refresh(plan_row)
+            await session.refresh(attempt)
             await session.refresh(job)
+            output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
             step_runs.append({
                 "step_id": step.id, "capability_id": step.capability_id,
-                "job_id": str(job.id), "status": JobStatus.cancelled.value,
-                "output_asset_id": None, "output_asset_ids": [],
+                "job_id": str(job.id), "status": job.status.value,
+                "output_asset_id": output_ids[0] if output_ids else None,
+                "output_asset_ids": output_ids,
             })
             await _save_running_attempt(session, plan_row, attempt, step_runs, None)
             raise
+        await session.refresh(plan_row)
+        await session.refresh(attempt)
         output_ids = [item["asset_id"] for item in (job.output or {}).get("outputs", [])]
         output_id = output_ids[0] if output_ids else None
         outputs[step.id] = output_id
@@ -509,6 +524,8 @@ async def _execute_legacy_steps(
             "output_asset_id": output_id, "output_asset_ids": output_ids,
         })
         await _save_running_attempt(session, plan_row, attempt, step_runs, None)
+        if job.status == JobStatus.cancelled:
+            raise asyncio.CancelledError
         if job.status == JobStatus.failed:
             raise RuntimeError(f"Step '{step.id}' failed: {job.error}")
 
@@ -579,8 +596,12 @@ async def _execute_render_group(
     session.add(job)
     await session.commit()
     await session.refresh(job)
-    job.status = JobStatus.running
-    job.started_at = datetime.now(UTC)
+    job_id = job.id
+    if not await jobs_svc.claim_job(session, job_id):
+        await session.refresh(job)
+        return job, None
+    await session.refresh(job)
+    # Source/context reads must not keep a transaction open while rendering.
     await session.commit()
 
     work_dir = Path(tempfile.mkdtemp(prefix=f"uniche-agent-render-{job.id}-"))
@@ -612,14 +633,14 @@ async def _execute_render_group(
             },
             outputs=[OutputFile(output_path, output_name, MediaType.video)],
         )
-        job.output = await jobs_svc._persist_outputs(
+        published = await jobs_svc._persist_outputs(
             session, job, ctx, result, is_intermediate=is_intermediate
         )
-        output_asset_id = job.output["outputs"][0]["asset_id"]
-        job.status = JobStatus.succeeded
-        job.progress = 100
-        job.finished_at = datetime.now(UTC)
-        if execution_identity is not None:
+        await session.refresh(job)
+        if published:
+            assert job.output is not None
+            output_asset_id = job.output["outputs"][0]["asset_id"]
+        if published and execution_identity is not None:
             persisted_asset = await get_asset(session, uuid.UUID(output_asset_id))
             if (
                 persisted_asset.project_id == project_id
@@ -634,42 +655,45 @@ async def _execute_render_group(
                 job.execution_identity = execution_identity
         await session.commit()
     except asyncio.CancelledError:
-        await session.rollback()
-        current_job = await session.get(Job, job.id)
-        if current_job is not None and current_job.status != JobStatus.cancelled:
-            current_job.status = JobStatus.cancelled
-            current_job.error = "Render group was cooperatively cancelled."
-            current_job.finished_at = datetime.now(UTC)
-        group["job_id"] = str(job.id)
-        group["status"] = JobStatus.cancelled.value
-        group["output_asset_id"] = None
+        await jobs_svc.finish_running_job(
+            session, job_id, JobStatus.cancelled, "Render group was cooperatively cancelled.",
+        )
+        await session.refresh(job)
+        await session.refresh(plan_row)
+        await session.refresh(attempt)
+        if job.status == JobStatus.succeeded and job.output:
+            output_asset_id = job.output["outputs"][0]["asset_id"]
+        group["job_id"] = str(job_id)
+        group["status"] = job.status.value
+        group["output_asset_id"] = output_asset_id
+        active = [op for op in group["operations"] if not op["identity"]]
+        terminal_step = active[-1]["step_id"] if active else None
         for op in group["operations"]:
             step_id = op["step_id"]
             step_runs.append({
                 "step_id": step_id,
                 "capability_id": op["capability_id"],
-                "status": "identity" if op["identity"] else JobStatus.cancelled.value,
+                "status": "identity" if op["identity"] else job.status.value,
                 "identity": bool(op["identity"]),
                 "render_group_id": group["id"],
                 "job_id": str(job.id),
-                "output_asset_id": None,
+                "output_asset_id": output_asset_id if step_id == terminal_step else None,
             })
         plan_row.step_runs = list(step_runs)
         plan_row.execution_summary = copy.deepcopy(summary)
         for node in plan_row.execution_summary.get("nodes", []):
             if node.get("id") == group["id"]:
-                node.update(job_id=str(job.id), status=JobStatus.cancelled.value,
-                            output_asset_id=None)
+                node.update(job_id=str(job.id), status=job.status.value,
+                            output_asset_id=output_asset_id)
         flag_modified(plan_row, "execution_summary")
         await session.commit()
         raise
     except Exception as exc:  # noqa: BLE001 - persist physical group failure
         logger.exception("Agent render group %s failed", group["id"])
-        job.status = JobStatus.failed
-        job.error = str(exc)
-        job.finished_at = datetime.now(UTC)
-        await session.commit()
+        await jobs_svc.finish_running_job(session, job_id, JobStatus.failed, str(exc))
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
     await session.refresh(job)
+    await session.refresh(plan_row)
+    await session.refresh(attempt)
     return job, output_asset_id

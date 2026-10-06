@@ -255,9 +255,20 @@ Key boundaries:
 
 - **Routes never execute work and never know the provider.** `POST /jobs`
   validates references, persists a `queued` job, and enqueues `run_job(job_id)`.
-- **The worker** loads the job, drives `queued → running → succeeded/failed`
-  (committing each transition so polling/SSE see live state), resolves the
-  capability handler, and the handler calls the configured provider.
+- **The worker** atomically claims only `queued` Jobs. Delivery of a running or
+  terminal Job is a no-op; a Job ID has one execution attempt and is never
+  automatically reclaimed. Media/provider execution holds no Job lock.
+  Cancellation and failure use conditional transitions, so stale workers cannot
+  overwrite terminal state. Outputs are copied/probed without Asset rows, then
+  one short conditional transaction publishes all output Assets, `Job.output`,
+  and `succeeded` together. Cancellation winning first prevents publication;
+  publication winning first prevents later cancellation. Agent physical Jobs,
+  render groups, and `project.export` use the same fences. Waveform enrichment
+  runs best-effort after publication. Unpublished objects are removed best-effort;
+  abrupt process death or an unverifiable DB failure can leave unreferenced
+  storage and a running Job. This is at-most-one authoritative publication, not
+  exactly-once provider invocation. Stale-running recovery and enqueue-failure
+  reconciliation are separate, unsupported mechanisms.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
 - Capability `input_schema` values are the shared execution/discovery
