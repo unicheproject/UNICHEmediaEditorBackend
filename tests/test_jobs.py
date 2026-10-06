@@ -1,6 +1,7 @@
 import asyncio
 import io
 import uuid
+import wave
 
 import pytest
 from httpx import AsyncClient
@@ -14,7 +15,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory
 from app.main import app
 from app.providers.base import BaseInferenceProvider, InferenceRequest
-from app.providers.openrouter import AUDIO_BYTES_KEY
+from app.providers.openrouter import AUDIO_BYTES_KEY, AUDIO_FILENAME_KEY
 from app.services.jobs import execute_job
 
 API = "/api/v1"
@@ -149,7 +150,13 @@ async def test_audio_tts_job_persists_derived_audio_asset(
 ) -> None:
     monkeypatch.setattr(settings, "inference_provider", "openrouter")
     monkeypatch.setattr(settings, "openrouter_api_key", "test-only-key")
-    fake_audio = b"\xff\xfb\x90\x00fake-mp3-bytes"
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(24000)
+        audio.writeframes(b"\x00\x00" * 2400)
+    fake_audio = buffer.getvalue()
 
     class _FakeOpenRouterProvider(BaseInferenceProvider):
         name = "openrouter"
@@ -157,6 +164,7 @@ async def test_audio_tts_job_persists_derived_audio_asset(
         async def infer(self, request: InferenceRequest) -> dict:
             return {
                 AUDIO_BYTES_KEY: fake_audio,
+                AUDIO_FILENAME_KEY: "speech.wav",
                 "voice": request.payload.get("voice", "alloy"),
                 "provider": self.name,
             }

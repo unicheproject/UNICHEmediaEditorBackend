@@ -15,6 +15,7 @@ import abc
 from app.capabilities.context import HandlerResult, JobContext
 from app.providers.base import InferenceRequest
 from app.providers.factory import get_provider
+from app.providers.validation import require_success_object
 
 
 class CapabilityHandler(abc.ABC):
@@ -36,7 +37,7 @@ class ProviderBackedHandler(CapabilityHandler):
             file_path=ctx.input_path,
             asset_meta=ctx.input_asset_meta,
         )
-        data = await provider.infer(request)
+        data = require_success_object(await provider.infer(request))
         return HandlerResult(data=data, outputs=[])
 
 

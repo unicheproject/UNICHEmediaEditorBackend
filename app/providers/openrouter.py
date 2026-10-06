@@ -24,6 +24,7 @@ alongside the transcript text.
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import wave
 from collections.abc import Awaitable, Callable
@@ -36,6 +37,7 @@ import httpx
 from app.core.config import Settings
 from app.core.errors import ProviderError
 from app.providers.base import BaseInferenceProvider, InferenceRequest
+from app.providers.validation import require_transcript
 
 AUDIO_BYTES_KEY = "_audio_bytes"
 AUDIO_FILENAME_KEY = "_audio_filename"
@@ -108,29 +110,46 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
             ) as client:
                 response = await client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
-            raise ProviderError(f"OpenRouter TTS request timed out: {url}") from exc
+            raise ProviderError("OpenRouter TTS request timed out") from exc
         except httpx.HTTPError as exc:
-            raise ProviderError(f"OpenRouter TTS request failed: {exc}") from exc
+            raise ProviderError("OpenRouter TTS request failed") from exc
 
-        if response.status_code >= 400:
-            raise ProviderError(
-                f"OpenRouter TTS endpoint returned {response.status_code}: "
-                f"{response.text[:500]}"
-            )
+        if not 200 <= response.status_code < 300:
+            raise ProviderError(f"OpenRouter TTS provider returned HTTP {response.status_code}")
 
-        content_type = response.headers.get("content-type", "")
+        content_type = response.headers.get("content-type", "").lower()
         if "audio" not in content_type and "octet-stream" not in content_type:
             raise ProviderError(
-                f"OpenRouter TTS endpoint returned unexpected content-type "
-                f"'{content_type}'"
+                "OpenRouter TTS endpoint returned unexpected content-type"
             )
 
         audio_bytes = response.content
+        if not audio_bytes:
+            raise ProviderError("Speech synthesis returned no audio output")
+        # JSON is not PCM; do not turn an error envelope into a playable WAV.
+        if audio_bytes[:64].lstrip().startswith((b"{", b"[")):
+            try:
+                decoded = json.loads(audio_bytes)
+            except (ValueError, UnicodeDecodeError):
+                pass
+            else:
+                if isinstance(decoded, (dict, list)):
+                    raise ProviderError("Speech synthesis returned JSON instead of audio")
         filename = "speech.mp3"
-        if response_format == "pcm" or "pcm" in content_type:
-            audio_bytes = _wrap_pcm_as_wav(
-                audio_bytes, sample_rate=self._settings.openrouter_tts_pcm_sample_rate
-            )
+        # A declared compressed response is not raw PCM, even if PCM was requested.
+        if "pcm" in content_type or (
+            response_format == "pcm" and "octet-stream" in content_type
+        ):
+            if len(audio_bytes) % 2:
+                raise ProviderError("Speech synthesis returned incomplete PCM samples")
+            try:
+                audio_bytes = _wrap_pcm_as_wav(
+                    audio_bytes, sample_rate=self._settings.openrouter_tts_pcm_sample_rate
+                )
+            except (wave.Error, ValueError, OverflowError) as exc:
+                raise ProviderError("Speech synthesis returned invalid PCM audio") from exc
+            filename = "speech.wav"
+        elif "wav" in content_type or "wave" in content_type:
             filename = "speech.wav"
 
         return {
@@ -178,19 +197,22 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
                     files={"file": (path.name, audio_bytes, content_type)},
                 )
         except httpx.TimeoutException as exc:
-            raise ProviderError(f"OpenRouter transcription request timed out: {url}") from exc
+            raise ProviderError("OpenRouter transcription request timed out") from exc
         except httpx.HTTPError as exc:
-            raise ProviderError(f"OpenRouter transcription request failed: {exc}") from exc
+            raise ProviderError("OpenRouter transcription request failed") from exc
 
-        if response.status_code >= 400:
+        if not 200 <= response.status_code < 300:
             raise ProviderError(
-                f"OpenRouter transcription endpoint returned {response.status_code}: "
-                f"{response.text[:500]}"
+                f"OpenRouter transcription provider returned HTTP {response.status_code}"
             )
 
-        body = response.json()
+        try:
+            body = response.json()
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ProviderError("OpenRouter transcription returned invalid JSON") from exc
+        body = require_transcript(body)
         return {
-            "text": body.get("text", ""),
+            "text": body["text"],
             "language": body.get("language") or language,
             "model": model,
             "provider": self.name,

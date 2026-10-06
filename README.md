@@ -424,6 +424,20 @@ Selected by env var; the same job-creation path works for both:
   `job.output`, and marks the job **failed** on non-2xx, timeout, or invalid
   JSON.
 
+Transport success does not imply inference success. Provider responses reject
+explicit failure markers (`status`: `error`/`failed`/`not_implemented`, boolean
+`success: false`/`ok: false`, or non-empty `error`); status matching ignores case
+and surrounding whitespace. Informational `message`/`detail`, unknown statuses,
+and extra fields remain allowed. Caption results require a non-blank string
+`caption`; transcripts require an explicitly supplied string `text`, including
+`""` for silence. No language or timing fields are required. OpenRouter validates
+transcription before normalizing it. TTS rejects empty PCM before WAV wrapping,
+requires complete 16-bit samples (silence is valid), and probes the generated
+audio with the existing timeout/output-bounded ffprobe before publication.
+Invalid results become controlled failed Jobs, not successful empty outputs.
+Provider error messages do not include raw response bodies or transport
+diagnostics. HTTP response buffering still has no application-level size cap.
+
 Relevant env vars:
 
 ```

@@ -17,6 +17,7 @@ from app.core.config import Settings
 from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.providers.base import BaseInferenceProvider, InferenceRequest
+from app.providers.validation import require_success_object
 
 logger = get_logger(__name__)
 
@@ -76,26 +77,21 @@ class HTTPInferenceProvider(BaseInferenceProvider):
                     files=files or None,
                 )
         except httpx.TimeoutException as exc:
-            raise ProviderError(f"Inference request timed out: {url}") from exc
+            raise ProviderError("Inference request timed out") from exc
         except httpx.HTTPError as exc:
-            raise ProviderError(f"Inference request failed: {exc}") from exc
+            raise ProviderError("Inference request failed") from exc
         finally:
             if open_file is not None:
                 open_file.close()
 
-        if response.status_code >= 400:
-            raise ProviderError(
-                f"Inference endpoint returned {response.status_code}: "
-                f"{response.text[:500]}"
-            )
+        if not 200 <= response.status_code < 300:
+            raise ProviderError(f"Inference provider returned HTTP {response.status_code}")
 
         try:
             payload = response.json()
-        except json.JSONDecodeError as exc:
+        except (ValueError, UnicodeDecodeError) as exc:
             raise ProviderError("Inference endpoint returned invalid JSON") from exc
 
-        if not isinstance(payload, dict):
-            raise ProviderError("Inference endpoint returned non-object JSON")
-
+        payload = require_success_object(payload)
         payload.setdefault("provider", self.name)
         return payload

@@ -867,6 +867,7 @@ CAPABILITIES: list[CapabilityDef] = [
         output_schema={
             "type": "object",
             "properties": {"text": {"type": "string"}, "language": {"type": "string"}},
+            "required": ["text"],
         },
     ),
     _def(
@@ -974,7 +975,11 @@ CAPABILITIES: list[CapabilityDef] = [
         description="Generate a natural-language caption for an image.",
         media=[MediaType.image],
         cost_class=CostClass.hosted_ai,
-        output_schema={"type": "object", "properties": {"caption": {"type": "string"}}},
+        output_schema={
+            "type": "object",
+            "properties": {"caption": {"type": "string", "minLength": 1, "pattern": r"\S"}},
+            "required": ["caption"],
+        },
     ),
     _def(
         id="image.tag",
