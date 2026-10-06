@@ -646,15 +646,20 @@ async def audio_mix(
     music_volume: float = 0.3,
     mode: str = "mix",
     *,
+    apply_replace_gain: bool,
     compose_policy: ComposeRenderPolicy | None = None,
 ) -> None:
-    """Lay `music` under `media`'s audio. mode: mix | duck (≈low mix) | replace."""
+    """Mix/duck/replace audio; callers explicitly choose replacement gain semantics."""
     vol = music_volume if mode != "duck" else min(music_volume, 0.2)
     has_audio = await _has_audio(media)
     if mode == "replace":
+        replacement = (
+            ["-filter_complex", f"[1:a]volume={vol}[a]", "-map", "[a]"]
+            if apply_replace_gain else ["-map", "1:a"]
+        )
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
-             "-map", "0:v?", "-map", "1:a", "-c:v", "copy",
+             "-map", "0:v?", *replacement, "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
@@ -769,6 +774,8 @@ async def compose(
         with_audio = work_dir / f"_audio{policy.suffix}"
         await audio_mix(str(current), audio_path, str(with_audio),
                         music_volume=music_volume, mode=audio_mode,
+                        # Composition replacement beds retain their unscaled contract.
+                        apply_replace_gain=False,
                         compose_policy=policy)
         current = with_audio
 

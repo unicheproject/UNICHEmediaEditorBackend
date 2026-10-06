@@ -167,6 +167,7 @@ class AudioMixHandler(LocalToolHandler):
         await ffmpeg.audio_mix(
             media, music, str(out.path),
             music_volume=ctx.params.get("music_volume", 0.3), mode=mode,
+            apply_replace_gain=True,
         )
         return HandlerResult(data={"operation": "audio.mix", "mode": mode}, outputs=[out])
 

@@ -362,7 +362,9 @@ Key boundaries:
   audio is padded/trimmed to the first video's duration, and clips without
   audio receive silence. Ordered soundtracks follow the video timeline.
   The optional bed retains existing `mix`, `duck` (bed volume capped at 0.2),
-  and `replace` semantics; replacement uses the shorter media/bed duration.
+  and `replace` semantics; replacement beds remain unscaled and use the shorter
+  media/bed duration. Public `audio.mix` instead applies `music_volume` to supplied
+  audio in `mix` and `replace` (including zero/mute); `duck` caps it at 0.2.
   Lossless policy uses FLAC rather than a lossy audio intermediate; channel/rate
   normalization is still applied, not bit-identical source stream copying.
   Archival
