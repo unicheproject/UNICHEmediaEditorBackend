@@ -417,6 +417,14 @@ There are three handler families behind one uniform interface
    `NotImplementedHandler` raises a controlled unavailable error if reached by
    legacy Jobs or a programming error. It never reports success or creates Assets.
 
+**Video concatenation.** `video.concat` normalizes ordered clips to the first
+resolved input's dimensions and output container, with scale/pad, square pixels
+and 30 fps. MP4/MOV/MKV use H.264/AAC; WebM uses VP9/Opus. The first soundtrack
+is retained, with stereo silence supplied only for silent inputs; AAC uses
+44.1 kHz and Opus 48 kHz. Compatible normalized intermediates are concatenated
+without another encode, and the final container/streams are probed before
+output publication.
+
 **Derived assets & chaining.** Local-tool jobs write outputs under
 `job.output.outputs[] = {asset_id, filename, media_type, size_bytes,
 download_path}`. Each is a first-class `Asset` (downloadable via

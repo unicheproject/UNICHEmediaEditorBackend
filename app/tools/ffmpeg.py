@@ -252,7 +252,9 @@ async def video_audio_extract(src: str, dst: str) -> None:
     )
 
 
-async def _concat_normalize(src: str, dst: str, width: int, height: int) -> None:
+async def _concat_normalize(
+    src: str, dst: str, width: int, height: int, *, video_codec: str, audio_codec: str,
+) -> None:
     """Re-encode a clip to uniform video + audio params for safe concatenation.
 
     The clip's own audio is preserved; a silent track is synthesised only when
@@ -267,8 +269,8 @@ async def _concat_normalize(src: str, dst: str, width: int, height: int) -> None
     args += [
         "-vf", _scale_pad(width, height),
         "-map", "0:v:0", "-map", audio_in,
-        "-ar", "44100", "-ac", "2",
-        *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
+        "-ar", "48000" if audio_codec == "libopus" else "44100", "-ac", "2",
+        *_PIX, "-c:v", video_codec, "-c:a", audio_codec, "-shortest", dst,
     ]
     await runner.run(args)
 
@@ -280,21 +282,47 @@ async def video_concat(sources: list[str], dst: str, work_dir: Path) -> None:
     across inputs, so each clip is first scaled/padded to a common size and
     re-encoded to uniform codecs before a stream-copy concat.
     """
-    width, height = await probe_video_size(sources[0])
-    if width <= 0 or height <= 0:
-        width, height = 1920, 1080
-
-    normalized: list[Path] = []
-    for i, src in enumerate(sources):
-        out = work_dir / f"_concat_norm_{i:03d}.mp4"
-        await _concat_normalize(src, str(out), width, height)
-        normalized.append(out)
-
+    container = Path(dst).suffix.lstrip(".").lower()
+    options = VIDEO_TRANSCODE_OPTIONS.get(container)
+    if options is None:
+        raise ValidationError("Video concat does not support this output container")
+    video_codec, audio_codec = options["video_codec"][0], options["audio_codec"][0]
+    normalized = [work_dir / f"_concat_norm_{i:03d}.{container}" for i in range(len(sources))]
     listing = work_dir / "_concat_list.txt"
-    listing.write_text("".join(f"file '{p}'\n" for p in normalized), encoding="utf-8")
-    await runner.run(
-        [*_BASE, "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", dst]
-    )
+    output = Path(dst)
+    validated = False
+    try:
+        width, height = await probe_video_size(sources[0])
+        if width <= 0 or height <= 0:
+            width, height = 1920, 1080
+        for src, out in zip(sources, normalized, strict=True):
+            await _concat_normalize(
+                src, str(out), width, height, video_codec=video_codec, audio_codec=audio_codec,
+            )
+        listing.write_text("".join(f"file '{p}'\n" for p in normalized), encoding="utf-8")
+        await runner.run(
+            [*_BASE, "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", dst]
+        )
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Concat output is missing or empty")
+        metadata = await probe_media(output, MediaType.video)
+        # ffprobe reports codec IDs, not FFmpeg encoder implementation names.
+        expected_video = {"libx264": "h264", "libvpx-vp9": "vp9"}[video_codec]
+        expected_container = "matroska" if container == "mkv" else container
+        if (not metadata.has_video_stream or not metadata.width or not metadata.height
+                or not metadata.has_audio_stream or not metadata.duration_seconds
+                or metadata.duration_seconds <= 0
+                or expected_container not in (metadata.container_format or "").split(",")
+                or metadata.video_codec != expected_video
+                or metadata.audio_codec != audio_codec.removeprefix("lib")):
+            raise ToolError("Concat output does not match the destination media policy")
+        validated = True
+    except MetadataProbeError as exc:
+        raise ToolError("Concat output could not be validated") from exc
+    finally:
+        for path in [*normalized, listing, *([] if validated else [output])]:
+            with suppress(OSError):
+                path.unlink(missing_ok=True)
 
 
 async def video_transcode(
