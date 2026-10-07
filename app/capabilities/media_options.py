@@ -22,4 +22,24 @@ AUDIO_CODEC_DESCRIPTIONS = {
     "libopus": "Opus",
     "libvorbis": "Vorbis",
     "flac": "FLAC",
+    "pcm_s16le": "Uncompressed signed 16-bit PCM",
+}
+
+# Maintained audio-only choices, matching the supported audio Asset families.
+# Codec omission retains FFmpeg's container default; explicit choices are
+# constrained by this same matrix in discovery, admission and the handler.
+AUDIO_TRANSCODE_OPTIONS: dict[str, dict[str, list[str]]] = {
+    "mp3": {"codec": ["libmp3lame"]},
+    "wav": {"codec": ["pcm_s16le"]},
+    "m4a": {"codec": ["aac"]},
+    "flac": {"codec": ["flac"]},
+    "ogg": {"codec": ["libvorbis", "libopus"]},
+}
+
+AUDIO_CONTAINER_DESCRIPTIONS = {
+    "mp3": "MP3 audio",
+    "wav": "WAV / uncompressed PCM audio",
+    "m4a": "MPEG-4 audio / AAC",
+    "flac": "FLAC / lossless audio",
+    "ogg": "Ogg / Vorbis or Opus audio",
 }

@@ -10,6 +10,7 @@ from app.capabilities.handlers._util import (
     require_input,
 )
 from app.capabilities.handlers.base import LocalToolHandler
+from app.capabilities.media_options import AUDIO_TRANSCODE_OPTIONS
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
 from app.tools import ffmpeg
@@ -145,7 +146,14 @@ class AudioTranscodeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        fmt = str(require(ctx.params, "format")).lstrip(".").lower()
+        fmt = require(ctx.params, "format")
+        codec = ctx.params.get("codec")
+        if not isinstance(fmt, str) or fmt not in AUDIO_TRANSCODE_OPTIONS:
+            raise ValidationError("Unsupported audio output format")
+        if "codec" in ctx.params and (
+            not isinstance(codec, str) or codec not in AUDIO_TRANSCODE_OPTIONS[fmt]["codec"]
+        ):
+            raise ValidationError("Unsupported audio codec for the selected output format")
         out = _audio_out(ctx, "transcode", ext=fmt)
-        await ffmpeg.audio_transcode(src, str(out.path), ctx.params.get("codec"))
+        await ffmpeg.audio_transcode(src, str(out.path), codec)
         return HandlerResult(data={"operation": "audio.transcode", "format": fmt}, outputs=[out])

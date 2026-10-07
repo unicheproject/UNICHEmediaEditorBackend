@@ -13,6 +13,8 @@ from app.capabilities.compose_contract import (
 )
 from app.capabilities.media_options import (
     AUDIO_CODEC_DESCRIPTIONS,
+    AUDIO_CONTAINER_DESCRIPTIONS,
+    AUDIO_TRANSCODE_OPTIONS,
     VIDEO_CODEC_DESCRIPTIONS,
     VIDEO_TRANSCODE_OPTIONS,
 )
@@ -142,9 +144,15 @@ _VA = [MediaType.video, MediaType.audio]
 # smaller set verified by project.export's delivery renderer.
 
 
-def _transcode_codec_schema(field: str, title: str, description: str) -> dict:
+def _transcode_codec_schema(
+    field: str,
+    title: str,
+    description: str,
+    *,
+    options: dict[str, dict[str, list[str]]] = VIDEO_TRANSCODE_OPTIONS,
+) -> dict:
     matrix = {
-        container: options[field] for container, options in VIDEO_TRANSCODE_OPTIONS.items()
+        container: choices[field] for container, choices in options.items()
     }
     codec_descriptions = (
         VIDEO_CODEC_DESCRIPTIONS if field == "video_codec" else AUDIO_CODEC_DESCRIPTIONS
@@ -180,6 +188,17 @@ _VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS = [
         },
     }
     for container, options in VIDEO_TRANSCODE_OPTIONS.items()
+]
+
+_AUDIO_TRANSCODE_SCHEMA_CONSTRAINTS = [
+    {
+        "if": {
+            "properties": {"format": {"const": container}},
+            "required": ["format"],
+        },
+        "then": {"properties": {"codec": {"enum": options["codec"]}}},
+    }
+    for container, options in AUDIO_TRANSCODE_OPTIONS.items()
 ]
 
 # Declarative specs for the deterministic local-tool capabilities.
@@ -380,17 +399,29 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "properties": {
             "brightness": _integer(
                 "Brightness",
-                "ImageMagick brightness percentage; 100 leaves it unchanged.",
+                "Brightness percentage; 0 produces black, 100 leaves it unchanged, "
+                "and higher values brighten the image. Product range: 0–200.",
                 default=100,
+                minimum=0,
+                maximum=200,
                 **{"x-unit": "percent"},
             ),
             "contrast": _integer(
-                "Contrast", "ImageMagick contrast adjustment; 0 leaves it unchanged.", default=0
+                "Contrast",
+                "Contrast percentage adjustment; negative values reduce contrast, "
+                "positive values increase it, and 0 leaves it unchanged.",
+                default=0,
+                minimum=-100,
+                maximum=100,
+                **{"x-unit": "percent"},
             ),
             "saturation": _integer(
                 "Saturation",
-                "ImageMagick saturation percentage; 100 leaves it unchanged.",
+                "Saturation percentage; 0 produces grayscale, 100 leaves it unchanged, "
+                "and higher values increase colour intensity. Product range: 0–200.",
                 default=100,
+                minimum=0,
+                maximum=200,
                 **{"x-unit": "percent"},
             ),
         },
@@ -509,14 +540,21 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "properties": {
             "format": _string(
                 "Output format",
-                "FFmpeg output container extension, without a leading dot.",
+                "Supported audio container extension, without a leading dot.",
+                enum=list(AUDIO_TRANSCODE_OPTIONS),
+                **{"x-enum-descriptions": AUDIO_CONTAINER_DESCRIPTIONS},
             ),
-            "codec": _string(
+            "codec": _transcode_codec_schema(
+                "codec",
                 "Audio codec",
-                "Optional FFmpeg audio encoder name; omitted lets FFmpeg choose for the container.",
+                "Optional supported audio encoder. Omit to use the container default: "
+                "MP3 for mp3, 16-bit PCM for wav, AAC for m4a, FLAC for flac, "
+                "or Vorbis for ogg.",
+                options=AUDIO_TRANSCODE_OPTIONS,
             ),
         },
         "required": ["format"],
+        "allOf": _AUDIO_TRANSCODE_SCHEMA_CONSTRAINTS,
     },
     {
         "id": "audio.denoise",
@@ -956,8 +994,13 @@ CAPABILITIES: list[CapabilityDef] = [
                     role="source_image",
                     media_types=["image"],
                 ),
-                "mask_url": {"type": "string"},
-                "prompt": {"type": "string"},
+                "mask_url": _string(
+                    "Mask URL", "URL of a mask identifying the image regions to fill or replace."
+                ),
+                "prompt": _string(
+                    "Replacement description",
+                    "Describe the content you want in the masked image regions.",
+                ),
             },
         },
         output_schema={"type": "object", "properties": {"image_url": {"type": "string"}}},
@@ -1050,7 +1093,9 @@ CAPABILITIES: list[CapabilityDef] = [
             "properties": {
                 "threshold": _number(
                     "Detection threshold",
-                    "PySceneDetect content-change threshold on its 0–255 score.",
+                    "Content-change threshold on a 0–255 score. Lower values are more "
+                    "sensitive and can detect more cuts, including small changes; higher "
+                    "values detect fewer cuts and may miss subtle scene changes.",
                     default=27.0,
                     minimum=0,
                     maximum=255,

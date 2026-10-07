@@ -323,6 +323,17 @@ Key boundaries:
   combinations at runtime. For `video.transcode`, codec fields are optional
   (omission keeps FFmpeg's container default), and the advertised option map
   describes which explicit codecs are supported for each output container.
+- `audio.transcode` offers the maintained audio Asset families: `mp3`
+  (`libmp3lame`), `wav` (`pcm_s16le`), `m4a` (`aac`), `flac` (`flac`), and
+  `ogg` (`libvorbis` or `libopus`). Codec omission keeps FFmpeg's container
+  default (Vorbis for Ogg). Discovery exposes the same `enum`,
+  `x-enum-descriptions`, `x-option-constraints` and JSON Schema conditionals
+  used by admission and Agent grounding; arbitrary FFmpeg encoder names
+  are not supported capability choices.
+- `image.colour.adjust` uses integer percentages: brightness/saturation
+  default to 100 (unchanged), with minimum 0 (black/grayscale); contrast is
+  -100..100 with default 0 (unchanged). Brightness/saturation have a deliberate
+  product maximum of 200, independently of ImageMagick's technical limits.
 - Capability `applicability` is the generic input-scope contract serialized by
   `GET /capabilities`: `primary_asset` is `required`, `optional`, or
   `forbidden`; `project_context` is `required` (the caller must name the
