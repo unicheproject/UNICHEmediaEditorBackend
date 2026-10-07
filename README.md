@@ -58,6 +58,20 @@ The `api` container runs uvicorn with `--reload`; the `worker` container runs
 `arq app.workers.worker.WorkerSettings`. Both share the codebase and the
 `storage` volume. Postgres data persists in the `pgdata` volume.
 
+## Media subprocess execution
+
+CLI tools use argv (no shell), closed stdin, a private temporary working
+directory and an explicit system-path/UTF-8/temp environment without inherited
+application credentials. Captured query stdout is capped at 1 MiB; ordinary
+processing stdout is discarded. Only the last 16 KiB of stderr is retained,
+with diagnostics at server DEBUG level, never in public tool errors. Timeout
+or cancellation terminates the process group (TERM, then KILL after 250 ms)
+and bounds child reaping to one second. Existing operation timeouts remain;
+metadata/frame probes and waveform extraction keep their bounded streaming I/O.
+
+This is not a complete sandbox: native thread cancellation, external media
+references/protocols, resource quotas and deployment isolation remain separate.
+
 ## Authentication & authorization
 
 The API is a Keycloak resource server; every `/api/v1` route requires a valid bearer token

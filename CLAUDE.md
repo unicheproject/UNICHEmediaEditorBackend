@@ -73,7 +73,7 @@ Worker entrypoint: `arq app.workers.worker.WorkerSettings`.
 - **api and worker are separate Docker images** built from the same Dockerfile.
   After changing system deps (ffmpeg/imagemagick) or anything affecting the
   image, rebuild **both** (`docker compose build` with no service arg). A common
-  bug: jobs fail with "Tool not found: ffmpeg" because only `api` was rebuilt —
+  bug: jobs fail with "Media processing tool unavailable." because only `api` was rebuilt —
   **tool jobs run in the worker**.
 - **Dependencies are pinned via `requirements.lock`** (compiled with
   `uv pip compile --extra dev --generate-hashes pyproject.toml -o requirements.lock`)
@@ -99,6 +99,15 @@ and running/terminal duplicate deliveries are no-ops. All output Asset rows,
 `Job.output`, and success commit together behind a running-state fence;
 cancellation/failure cannot overwrite terminal state. No automatic reclaim or
 generic retries exist. Polling / SSE see committed progress.
+
+Media CLI launch/lifecycle policy is shared in `app/tools/process_policy.py`:
+argv only, DEVNULL stdin, private scratch cwd, minimal explicit environment,
+own session, bounded whole-group TERM/KILL/reap on exit/cancellation. Runner
+query stdout is capped at 1 MiB, processing stdout discarded, stderr retains
+16 KiB; public ToolError messages are fixed, with diagnostics server-side only.
+Metadata/frame probes and waveform extraction retain their streaming bounds
+and 60/120-second timeouts. Storage roots are anchored before child cwd changes.
+This does not isolate native threads, media protocols, CPU/RAM/disk or deployment.
 
 ```
 API route → service → enqueue ─▶ Redis ─▶ arq worker → services.jobs.execute_job

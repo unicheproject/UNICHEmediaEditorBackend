@@ -10,6 +10,7 @@ from app.schemas.waveform import (
     WAVEFORM_SAMPLE_RATE,
     WaveformAvailable,
 )
+from app.tools.process_policy import media_process
 
 WAVEFORM_TIMEOUT_SECONDS = 120.0
 PCM_CHUNK_BYTES = 64 * 1024
@@ -67,36 +68,31 @@ async def generate_waveform(path: Path) -> WaveformAvailable:
     """Decode fixed-rate mono signed PCM incrementally, killing the child on all exits."""
     args = [
         "ffmpeg", "-nostdin", "-v", "error", "-threads", "1", "-filter_threads", "1",
-        "-i", str(path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
+        "-i", str(path.absolute()), "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
         str(WAVEFORM_SAMPLE_RATE), "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1",
     ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            limit=PCM_CHUNK_BYTES,
-        )
-    except OSError as exc:
-        raise WaveformGenerationError("Decoder unavailable") from exc
-    assert proc.stdout is not None
     accumulator = EnvelopeAccumulator()
     remainder = b""
     try:
-        async with asyncio.timeout(WAVEFORM_TIMEOUT_SECONDS):
-            while chunk := await proc.stdout.read(PCM_CHUNK_BYTES):
-                chunk = remainder + chunk
-                usable = len(chunk) - len(chunk) % 2
-                remainder = chunk[usable:]
-                samples = array("h")
-                samples.frombytes(chunk[:usable])
-                if sys.byteorder != "little":
-                    samples.byteswap()
-                accumulator.add(samples)
-            if await proc.wait() != 0 or remainder:
-                raise WaveformGenerationError("Audio decoding failed")
-        return accumulator.finish()
+        async with media_process(
+            args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            limit=PCM_CHUNK_BYTES,
+        ) as proc:
+            assert proc.stdout is not None
+            async with asyncio.timeout(WAVEFORM_TIMEOUT_SECONDS):
+                while chunk := await proc.stdout.read(PCM_CHUNK_BYTES):
+                    chunk = remainder + chunk
+                    usable = len(chunk) - len(chunk) % 2
+                    remainder = chunk[usable:]
+                    samples = array("h")
+                    samples.frombytes(chunk[:usable])
+                    if sys.byteorder != "little":
+                        samples.byteswap()
+                    accumulator.add(samples)
+                if await proc.wait() != 0 or remainder:
+                    raise WaveformGenerationError("Audio decoding failed")
+            return accumulator.finish()
     except TimeoutError as exc:
         raise WaveformGenerationError("Decoder timeout") from exc
-    finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+    except OSError as exc:
+        raise WaveformGenerationError("Decoder unavailable") from exc

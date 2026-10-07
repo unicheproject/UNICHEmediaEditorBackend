@@ -486,7 +486,7 @@ async def test_job_history_retains_audit_data_and_filters_by_status(
 
     failed_detail = (await client.get(f"{API}/jobs/{failed['id']}")).json()
     assert failed_detail["error"] == failed["error"]
-    assert "convert" in failed_detail["error"]
+    assert failed_detail["error"] == "Media processing failed."
     assert failed_detail["started_at"] is not None
     assert failed_detail["finished_at"] is not None
 

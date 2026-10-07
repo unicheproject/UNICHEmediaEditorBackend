@@ -1,8 +1,8 @@
 """Canonical asset technical metadata probing, persistence and Agent context."""
 
+import asyncio
 import io
 import json
-import os
 import shutil
 import subprocess
 import uuid
@@ -194,7 +194,11 @@ async def test_probe_timeout_is_controlled_and_unavailable(tmp_path, monkeypatch
     fake_probe = fake_bin / "ffprobe"
     fake_probe.write_text("#!/usr/bin/python3\nimport time\ntime.sleep(10)\n")
     fake_probe.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+    spawn = asyncio.create_subprocess_exec
+    async def fixture_spawn(*args, **kwargs):
+        return await spawn("/usr/bin/python3", str(fake_probe), **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fixture_spawn)
     monkeypatch.setattr(media_metadata, "PROBE_TIMEOUT_SECONDS", 0.05)
 
     result = await media_metadata.probe_media_safely(media, MediaType.audio)

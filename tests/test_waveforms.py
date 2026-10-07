@@ -324,6 +324,8 @@ async def test_corrupt_or_oversized_artifact_is_not_returned(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_decoder_timeout_and_cancellation_kill_child(monkeypatch, tmp_path, cancel) -> None:
+    from app.tools import process_policy
+
     entered = asyncio.Event()
 
     class Process:
@@ -347,6 +349,10 @@ async def test_decoder_timeout_and_cancellation_kill_child(monkeypatch, tmp_path
             return self.returncode
 
     proc = Process()
+    async def terminate(process):
+        process.kill()
+
+    monkeypatch.setattr(process_policy, "terminate_process_group", terminate)
     spawn = AsyncMock(return_value=proc)
     monkeypatch.setattr(tool.asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(tool, "WAVEFORM_TIMEOUT_SECONDS", 0.01)
@@ -361,6 +367,8 @@ async def test_decoder_timeout_and_cancellation_kill_child(monkeypatch, tmp_path
     assert args[args.index("-map") + 1] == "0:a:0"
     assert args[args.index("-ac") + 1] == "1"
     assert spawn.call_args.kwargs["stderr"] == asyncio.subprocess.DEVNULL
+    assert spawn.call_args.kwargs["stdin"] == asyncio.subprocess.DEVNULL
+    assert spawn.call_args.kwargs["start_new_session"] is True
 
 
 def test_waveform_openapi_models_are_typed_and_bounded() -> None:

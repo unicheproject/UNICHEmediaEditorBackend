@@ -47,7 +47,8 @@ class StorageService(Protocol):
 
 class LocalStorageService:
     def __init__(self, root: str | None = None) -> None:
-        self.root = Path(root or settings.storage_dir)
+        # Anchor relative configuration before subprocesses enter private cwd.
+        self.root = Path(root or settings.storage_dir).absolute()
 
     def _asset_dir(self, project_id: uuid.UUID, asset_id: uuid.UUID) -> Path:
         return self.root / "projects" / str(project_id) / "assets" / str(asset_id)
