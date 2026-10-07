@@ -1,7 +1,7 @@
 """add project compositions and immutable revisions
 
 Revision ID: 0012_project_compositions
-Revises: 0011_agent_retry_execution_identity
+Revises: 0011_agent_retry_identity
 Create Date: 2026-10-02
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0012_project_compositions"
-down_revision: str | None = "0011_agent_retry_execution_identity"
+down_revision: str | None = "0011_agent_retry_identity"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

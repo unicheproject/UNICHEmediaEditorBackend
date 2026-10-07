@@ -1,6 +1,6 @@
 """record deterministic physical-node identity for Agent retry reuse
 
-Revision ID: 0011_agent_retry_execution_identity
+Revision ID: 0011_agent_retry_identity
 Revises: 0010_agent_execution_attempts
 Create Date: 2026-10-02
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0011_agent_retry_execution_identity"
+revision: str = "0011_agent_retry_identity"
 down_revision: str | None = "0010_agent_execution_attempts"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
