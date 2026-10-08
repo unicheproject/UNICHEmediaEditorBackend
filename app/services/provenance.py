@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities import registry
 from app.capabilities.validation import iter_media_asset_references
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import NotFoundError, ProviderError, ValidationError
 from app.models.asset import Asset
 from app.models.enums import AiContentEffect, AiProvenance, JobStatus, MediaType
 from app.models.job import Job
+from app.providers.validation import require_success_object
 
 
 def contributing_asset_ids(job: Job) -> list[uuid.UUID]:
@@ -76,4 +77,8 @@ async def materialization_job(
         capability.output_schema,
     ).is_valid(job.output):
         raise ValidationError("Originating Job has no valid materializable result")
+    try:
+        require_success_object(job.output)
+    except ProviderError:
+        raise ValidationError("Originating Job has no valid materializable result") from None
     return job

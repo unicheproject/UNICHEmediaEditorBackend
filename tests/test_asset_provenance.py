@@ -257,7 +257,15 @@ async def test_denied_project_materialization_is_concealed(client, make_project,
     assert (await client.get(f"{API}/projects/{project_id}/assets")).json() == []
 
 
-@pytest.mark.parametrize("output", [None, {}, {"text": None}, {"text": 5}])
+@pytest.mark.parametrize("output", [
+    None, {}, {"text": None}, {"text": 5},
+    {"text": "Transcript", "success": False},
+    {"text": "Transcript", "ok": False},
+    {"text": "Transcript", "status": "error"},
+    {"text": "Transcript", "status": " FAILED "},
+    {"text": "Transcript", "status": "not_implemented"},
+    {"text": "Transcript", "error": "Private diagnostic"},
+])
 async def test_legacy_success_without_valid_transcription_result_is_rejected(
     client, make_project, output,
 ):
@@ -269,6 +277,7 @@ async def test_legacy_success_without_valid_transcription_result_is_rejected(
         await session.commit()
     response = await upload(client, project_id, "result.srt", derived_from_job_id=job_id)
     assert response.status_code == 422, response.text
+    assert "Private diagnostic" not in response.text
     assert (await client.get(f"{API}/projects/{project_id}/assets")).json() == []
 
 
