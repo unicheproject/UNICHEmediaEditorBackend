@@ -617,6 +617,7 @@ async def _execute_render_group(
             capability_id="agent.render_group", input_path=str(source_path),
             input_asset_meta={"media_type": source_asset.media_type.value},
             work_dir=work_dir, project_id=project_id, source_asset_id=source_asset.id,
+            contributing_asset_ids=[source_asset.id],
         )
         result = HandlerResult(
             data={
@@ -634,7 +635,8 @@ async def _execute_render_group(
             outputs=[OutputFile(output_path, output_name, MediaType.video)],
         )
         published = await jobs_svc._persist_outputs(
-            session, job, ctx, result, is_intermediate=is_intermediate
+            session, job, ctx, result, is_intermediate=is_intermediate,
+            producing_capability_ids=[op["capability_id"] for op in group["operations"]],
         )
         await session.refresh(job)
         if published:

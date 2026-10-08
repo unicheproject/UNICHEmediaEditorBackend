@@ -27,7 +27,7 @@ from app.capabilities.validation import (
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.asset import Asset
-from app.models.enums import JobStatus, MediaType
+from app.models.enums import AiProvenance, JobStatus, MediaType
 from app.models.job import Job
 from app.schemas.capability import CapabilityMetadata
 from app.schemas.job import JobCreate
@@ -352,6 +352,9 @@ async def _build_job_context(
         video_paths = list(execution.sources.video_paths)
         first_path = video_paths[0] if video_paths else None
         audio_path = execution.sources.audio_path
+        contributing_ids = [item.asset_id for item in execution.snapshot.ordered_video_sources]
+        if execution.snapshot.audio_source is not None:
+            contributing_ids.append(execution.snapshot.audio_source.asset_id)
         return JobContext(
             capability_id=job.capability_id,
             params=request_input,
@@ -365,6 +368,7 @@ async def _build_job_context(
             project_id=project_id,
             source_asset_id=video_ids[0] if video_ids else None,
             project_export=execution,
+            contributing_asset_ids=list(dict.fromkeys(contributing_ids)),
         )
     storage = get_storage()
     input_path: str | None = None
@@ -403,6 +407,7 @@ async def _build_job_context(
 
     # Provenance anchor: the primary asset, else the first input segment.
     source_asset_id = asset_ids[0] if asset_ids else None
+    from app.services.provenance import contributing_asset_ids
 
     return JobContext(
         capability_id=job.capability_id,
@@ -415,6 +420,7 @@ async def _build_job_context(
         work_dir=work_dir,
         project_id=project_id,
         source_asset_id=source_asset_id,
+        contributing_asset_ids=contributing_asset_ids(job),
     )
 
 
@@ -425,6 +431,7 @@ async def _persist_outputs(
     result: HandlerResult,
     *,
     is_intermediate: bool = False,
+    producing_capability_ids: list[str] | None = None,
 ) -> bool:
     """Prepare objects, then atomically publish ALL Assets and Job success.
 
@@ -436,6 +443,15 @@ async def _persist_outputs(
     prepared: list[Asset] = []
     prepared_keys: list[tuple[uuid.UUID, uuid.UUID]] = []
     published = False
+    from app.services.provenance import output_ai_provenance
+
+    ai_provenance = AiProvenance.unknown
+    if result.outputs and ctx.project_id is not None:
+        ai_provenance = await output_ai_provenance(
+            session, project_id=ctx.project_id,
+            capability_ids=(producing_capability_ids or [job.capability_id]),
+            asset_ids=ctx.contributing_asset_ids,
+        )
     # End any context-resolution read transaction before media probing/copying.
     await session.commit()
     try:
@@ -448,6 +464,8 @@ async def _persist_outputs(
                 project_id=ctx.project_id, source_asset_id=ctx.source_asset_id,
                 src_path=out.path, filename=out.filename, media_type=out.media_type,
                 is_intermediate=is_intermediate,
+                ai_provenance=ai_provenance,
+                source_job_id=job_id,
             )
             prepared.append(asset)
             prepared_keys.append((asset.project_id, asset.id))

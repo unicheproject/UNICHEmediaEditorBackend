@@ -193,6 +193,11 @@ async def test_audio_tts_job_persists_derived_audio_asset(
         await client.get(f"{API}/assets/{outputs[0]['asset_id']}")
     ).json()
     assert output_asset["is_intermediate"] is False
+    assert (output_asset["provenance_kind"], output_asset["ai_provenance"]) == (
+        "derived", "generated",
+    )
+    assert output_asset["source_job_id"] == job["id"]
+    assert output_asset["source_asset_id"] is None
     assert output_asset["temp_expires_at"] is None
     normal_assets = (await client.get(f"{API}/projects/{pid}/assets")).json()
     assert outputs[0]["asset_id"] in {asset["id"] for asset in normal_assets}

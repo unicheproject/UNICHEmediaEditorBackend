@@ -89,6 +89,9 @@ async def test_sequential_delivery_publishes_once(make_project, monkeypatch) -> 
     assert second.output == output
     assert len(set(stored_files()) - before) == 1
     assert output["outputs"][0]["asset_id"] == str(assets[0].id)
+    assert (assets[0].provenance_kind, assets[0].ai_provenance, assets[0].source_job_id) == (
+        "derived", "none", job_id,
+    )
 
 
 @pytest.mark.parametrize("status", [

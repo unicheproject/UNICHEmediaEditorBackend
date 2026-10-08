@@ -13,6 +13,26 @@ class MediaType(enum.StrEnum):
     unknown = "unknown"
 
 
+class ProvenanceKind(enum.StrEnum):
+    original = "original"
+    derived = "derived"
+    unknown = "unknown"
+
+
+class AiProvenance(enum.StrEnum):
+    none = "none"
+    generated = "generated"
+    modified = "modified"
+    inherited = "inherited"
+    unknown = "unknown"
+
+
+class AiContentEffect(enum.StrEnum):
+    none = "none"
+    generated = "generated"
+    modified = "modified"
+
+
 class TechnicalMetadataStatus(enum.StrEnum):
     pending = "pending"
     available = "available"

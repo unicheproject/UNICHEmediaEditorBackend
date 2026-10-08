@@ -130,6 +130,10 @@ async def test_failed_plan_retry_reuses_successful_physical_job_node(
         assert source_job.project_id == uuid.UUID(project_id)
         original_expiry = temp_asset.temp_expires_at
         original_path = temp_asset.storage_path
+        original_provenance = (
+            temp_asset.provenance_kind, temp_asset.ai_provenance, temp_asset.source_job_id,
+        )
+        assert original_provenance == ("derived", "none", source_job.id)
 
     second_approval = await client.post(f"{API}/agent/plans/{plan_id}/approve")
     assert second_approval.status_code == 200, second_approval.text
@@ -152,6 +156,9 @@ async def test_failed_plan_retry_reuses_successful_physical_job_node(
         asset = await session.get(Asset, uuid.UUID(output_id))
         assert asset is not None and asset.storage_path == original_path
         assert asset.temp_expires_at == original_expiry
+        assert (
+            asset.provenance_kind, asset.ai_provenance, asset.source_job_id,
+        ) == original_provenance
         total_assets = len(list(await session.scalars(
             select(Asset).where(Asset.project_id == uuid.UUID(project_id))
         )))

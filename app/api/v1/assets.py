@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,19 +41,32 @@ async def get_asset_probe_enqueuer() -> Callable[[uuid.UUID], Awaitable[None]]:
 )
 async def upload_asset(
     project_id: uuid.UUID,
+    request: Request,
     file: UploadFile = File(...),
+    derived_from_job_id: uuid.UUID | None = Form(
+        default=None,
+        description=(
+            "Successful same-project Job allowing this media type; "
+            "client-materialized/possibly edited, not content attestation."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
     _project: Project = Depends(require_project),
     enqueue_probe: Callable[[uuid.UUID], Awaitable[None]] = Depends(get_asset_probe_enqueuer),
 ) -> AssetRead:
     if not file.filename:
         raise ValidationError("An uploaded file with a filename is required")
+    if set(await request.form()) & {
+        "provenance_kind", "ai_generated", "ai_provenance", "source_job_id", "source_asset_id",
+    }:
+        raise ValidationError("Asset provenance is determined by the server")
     asset = await svc.create_asset(
         session,
         project_id,
         original_filename=file.filename,
         src=file.file,
         content_type=file.content_type,
+        derived_from_job_id=derived_from_job_id,
     )
     try:
         await enqueue_probe(asset.id)

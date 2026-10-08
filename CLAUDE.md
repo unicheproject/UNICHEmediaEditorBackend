@@ -184,8 +184,11 @@ from `registry.list_enabled()`, so new capabilities extend the agent for free.
 
 ### Assets, storage, derived outputs
 
-- `Asset.source_asset_id` (self-FK) records provenance: `null` = uploaded
-  original, set = derived from a job. This makes operations **composable** — one
+- `Asset.provenance_kind` is the authoritative Original/Derived/unknown field;
+  `ai_provenance` records direct or inherited editor AI involvement, not external
+  authorship certification. `source_job_id` links the producing/materialized Job
+  (SET NULL on deletion), while `source_asset_id` remains a best-effort input
+  anchor: null does not imply Original. This makes operations **composable** — one
   job's output `asset_id` feeds the next job as input (e.g. `*.concat` via
   `input.asset_ids`). This composability is what the agent (below) relies on to
   chain capabilities via `@stepN` references.

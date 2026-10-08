@@ -462,10 +462,33 @@ output publication.
 **Derived assets & chaining.** Local-tool jobs write outputs under
 `job.output.outputs[] = {asset_id, filename, media_type, size_bytes,
 download_path}`. Each is a first-class `Asset` (downloadable via
-`GET /assets/{id}/download`) with `source_asset_id` set to its input — so one
+`GET /assets/{id}/download`) with `source_asset_id` retaining a best-effort input anchor — so one
 operation's output `asset_id` can feed straight into the next operation as input
 (`input.asset_ids` for multi-input ops like `*.concat`). This composability is
 what a future agentic planner will use to chain capabilities as tools.
+
+**Recorded Asset provenance.** Asset list/detail responses expose
+`provenance_kind` (`original`, `derived`, `unknown`), `ai_provenance` (`none`,
+`generated`, `modified`, `inherited`, `unknown`) and nullable `source_job_id`.
+Original means introduced as source material; Derived means produced/materialized
+through a recorded editor operation. Unknown preserves insufficient historical
+evidence. A null `source_asset_id` does not imply Original.
+
+AI provenance records this editor's processing lineage only: `none` does not
+certify human/external authorship. Direct AI generation/modification is declared
+once in the capability registry (`ai_content_effect`). Deterministic descendants
+of any AI-involved input inherit that lineage, even if a later transform removes
+the perceptual AI content. Otherwise uncertainty propagates before `none`.
+Agent initiation alone is not AI involvement; Temp lifecycle is independent.
+
+Uploads may optionally send multipart `derived_from_job_id` for a successful,
+same-authorized-project Job whose canonical `client_materialization_media_types`
+permits that upload type. Initially only `audio.transcribe` permits subtitle
+materialization (existing SRT/VTT uploads). These are possibly edited client
+derivatives, not byte-level attestations. Manual uploads remain Original/none;
+client classification fields are rejected. Deleting a Job clears its reference
+but retains classification. Migration backfills only non-null source anchors
+as Derived; other historical kinds and all historical AI states remain Unknown.
 
 **Same-plan Agent retry reuse.** On re-approval of a failed/cancelled
 `AgentPlan`, a conservative, explicitly versioned allowlist may reuse a

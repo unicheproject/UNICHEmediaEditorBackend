@@ -39,6 +39,8 @@ class JobContext:
     work_dir: Path | None = None
     project_id: uuid.UUID | None = None
     source_asset_id: uuid.UUID | None = None
+    # Canonical validated contributing inputs, independent of the single anchor.
+    contributing_asset_ids: list[uuid.UUID] = field(default_factory=list)
     # Present only for the source-less project.export capability; the worker
     # resolves it from the exact revision before invoking the handler.
     project_export: ProjectExportExecution | None = None

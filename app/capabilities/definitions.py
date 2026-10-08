@@ -19,7 +19,7 @@ from app.capabilities.media_options import (
     VIDEO_TRANSCODE_OPTIONS,
 )
 from app.composition.export_presets import project_export_input_schema
-from app.models.enums import CostClass, MediaType
+from app.models.enums import AiContentEffect, CostClass, MediaType
 from app.schemas.capability import (
     CapabilityDefinition,
     DeploymentRequirement,
@@ -96,6 +96,8 @@ def _def(
     deployment_requirement: DeploymentRequirement = DeploymentRequirement.LOCAL,
     primary_asset: PrimaryAssetApplicability = PrimaryAssetApplicability.REQUIRED,
     project_context: ProjectContextApplicability = ProjectContextApplicability.DERIVED,
+    ai_content_effect: AiContentEffect = AiContentEffect.none,
+    client_materialization_media_types: list[MediaType] | None = None,
 ) -> CapabilityDef:
     return CapabilityDef(
         id=id,
@@ -107,6 +109,8 @@ def _def(
         cost_class=cost_class,
         enabled=enabled,
         implementation=implementation,
+        ai_content_effect=ai_content_effect,
+        client_materialization_media_types=client_materialization_media_types or [],
         deployment_requirement=deployment_requirement,
         applicability={
             "primary_asset": primary_asset,
@@ -428,6 +432,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.upscale",
+        "ai_content_effect": AiContentEffect.modified,
         "deployment_requirement": DeploymentRequirement.CUDA_WORKER,
         "title": "Image Upscale",
         "description": "Increase image resolution while preserving detail (Real-ESRGAN).",
@@ -558,6 +563,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.denoise",
+        "ai_content_effect": AiContentEffect.modified,
         "title": "Audio Denoise",
         "description": (
             "Reduce soundtrack background noise with RNNoise. Audio input produces audio; "
@@ -900,6 +906,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
 CAPABILITIES: list[CapabilityDef] = [
     _def(
         id="audio.transcribe",
+        ai_content_effect=AiContentEffect.generated,
+        client_materialization_media_types=[MediaType.subtitle],
         implementation=ImplementationReadiness.AVAILABLE,
         deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Audio Transcription",
@@ -914,6 +922,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="subtitle.autogenerate",
+        ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Subtitle Auto-generation",
         description="Generate time-coded subtitles from audio/video.",
@@ -923,6 +932,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.tts",
+        ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.AVAILABLE,
         deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Text to Speech",
@@ -943,6 +953,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.music.generate",
+        ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Music Generation",
         description="Generate music audio from a text prompt.",
@@ -959,6 +970,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.separate.stems",
+        ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Stem Separation",
         description="Separate an audio track into instrument/vocal stems.",
@@ -971,6 +983,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.background.remove",
+        ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Background Removal",
         description="Remove the background from an image.",
@@ -980,6 +993,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.inpaint",
+        ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Inpainting",
         description="Fill or replace masked regions of an image.",
@@ -1007,6 +1021,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.restore.face",
+        ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Face Restoration",
         description="Restore and enhance faces in an image.",
@@ -1016,6 +1031,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.caption",
+        ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.AVAILABLE,
         deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Image Captioning",
@@ -1030,6 +1046,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.tag",
+        ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Tagging",
         description="Generate descriptive tags/keywords for an image.",
@@ -1042,6 +1059,7 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="video.upscale",
+        ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Video Upscale",
         description="Increase video resolution.",
@@ -1055,6 +1073,7 @@ CAPABILITIES: list[CapabilityDef] = [
     *(
         _def(
             id=spec["id"],
+            ai_content_effect=spec.get("ai_content_effect", AiContentEffect.none),
             implementation=ImplementationReadiness.AVAILABLE,
             deployment_requirement=spec.get(
                 "deployment_requirement", DeploymentRequirement.LOCAL

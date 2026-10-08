@@ -336,6 +336,10 @@ async def test_export_binds_queued_job_to_exact_immutable_revision(
     _make_video(video_path)
     asset_id = await _upload_video(client, project_id, video_path)
     revision_n = await _save(client, project_id, _document([asset_id], width=96, height=64))
+    async with async_session_factory() as session:
+        source_asset = await session.get(Asset, uuid.UUID(asset_id))
+        source_asset.ai_provenance = "generated"
+        await session.commit()
     job = await _queue_export(
         client, project_id, revision_n["revision_id"], preset="web"
     )
@@ -357,6 +361,9 @@ async def test_export_binds_queued_job_to_exact_immutable_revision(
         assert asset is not None
         assert (asset.width, asset.height) == (96, 64)
         assert asset.source_asset_id == uuid.UUID(asset_id)
+        assert (asset.provenance_kind, asset.ai_provenance, asset.source_job_id) == (
+            "derived", "inherited", executed.id,
+        )
         assert asset.is_intermediate is False
         assert asset.temp_expires_at is None
         assert asset.technical_metadata_status == "available"

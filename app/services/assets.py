@@ -20,7 +20,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.models.asset import Asset
-from app.models.enums import MediaType, TechnicalMetadataStatus
+from app.models.enums import AiProvenance, MediaType, ProvenanceKind, TechnicalMetadataStatus
 from app.schemas.asset import AssetUpdate
 from app.services.media_metadata import apply_metadata, probe_media_safely
 from app.services.projects import get_project
@@ -59,6 +59,7 @@ async def create_asset(
     original_filename: str,
     src: BinaryIO,
     content_type: str | None,
+    derived_from_job_id: uuid.UUID | None = None,
 ) -> Asset:
     # Project must exist (and not be soft-deleted).
     await get_project(session, project_id)
@@ -71,6 +72,24 @@ async def create_asset(
         )
 
     media_type = _resolve_media_type(extension)
+    source_asset_id = None
+    ai_provenance = AiProvenance.none
+    if derived_from_job_id is not None:
+        from app.services.provenance import (
+            contributing_asset_ids,
+            materialization_job,
+            output_ai_provenance,
+        )
+
+        job = await materialization_job(
+            session, authorized_project_id=project_id, job_id=derived_from_job_id,
+            media_type=media_type,
+        )
+        source_asset_id = job.asset_id
+        ai_provenance = await output_ai_provenance(
+            session, project_id=project_id, capability_ids=[job.capability_id],
+            asset_ids=contributing_asset_ids(job),
+        )
     stored_name = safe_filename(original_filename)
     asset_id = uuid.uuid4()
     storage = get_storage()
@@ -108,6 +127,12 @@ async def create_asset(
         size_bytes=size_bytes,
         storage_path=storage_path,
         checksum_sha256=checksum,
+        source_asset_id=source_asset_id,
+        provenance_kind=(
+            ProvenanceKind.derived.value if derived_from_job_id else ProvenanceKind.original.value
+        ),
+        ai_provenance=ai_provenance.value,
+        source_job_id=derived_from_job_id,
         technical_metadata_status=TechnicalMetadataStatus.pending.value,
         waveform_status=waveform_status.value,
         waveform_reason=waveform_reason.value if waveform_reason else None,
@@ -169,16 +194,20 @@ async def create_derived_asset(
     filename: str,
     media_type: MediaType,
     is_intermediate: bool = False,
+    ai_provenance: AiProvenance = AiProvenance.unknown,
+    source_job_id: uuid.UUID | None = None,
 ) -> Asset:
     """Register a tool-produced file as a new (derived) Asset.
 
     Trusted output: skips the upload-size cap and allowed-extension gate that
-    apply to user uploads. Sets source_asset_id for provenance / chaining.
+    apply to user uploads. Sets the input anchor for chaining. Callers without
+    recorded execution evidence retain unknown AI provenance.
     """
     asset = await prepare_derived_asset(
         project_id=project_id, source_asset_id=source_asset_id,
         src_path=src_path, filename=filename, media_type=media_type,
         is_intermediate=is_intermediate,
+        ai_provenance=ai_provenance, source_job_id=source_job_id,
     )
     session.add(asset)
     await session.commit()
@@ -205,6 +234,8 @@ async def prepare_derived_asset(
     filename: str,
     media_type: MediaType,
     is_intermediate: bool = False,
+    ai_provenance: AiProvenance = AiProvenance.unknown,
+    source_job_id: uuid.UUID | None = None,
 ) -> Asset:
     """Prepare storage and a transient Asset; the caller owns DB publication.
 
@@ -238,6 +269,9 @@ async def prepare_derived_asset(
             storage_path=storage_path,
             checksum_sha256=checksum,
             source_asset_id=source_asset_id,
+            provenance_kind=ProvenanceKind.derived.value,
+            ai_provenance=ai_provenance.value,
+            source_job_id=source_job_id,
             is_intermediate=is_intermediate,
             temp_expires_at=(
                 persisted_at + timedelta(hours=72) if is_intermediate else None

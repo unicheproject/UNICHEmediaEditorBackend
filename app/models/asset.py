@@ -6,12 +6,28 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import false as sa_false
 
 from app.models.base import Base, JSONType, SoftDeleteMixin, TimestampMixin
-from app.models.enums import MediaType, TechnicalMetadataStatus, WaveformStatus
+from app.models.enums import (
+    AiProvenance,
+    MediaType,
+    ProvenanceKind,
+    TechnicalMetadataStatus,
+    WaveformStatus,
+)
 
 if TYPE_CHECKING:
     from app.models.project import Project
@@ -19,6 +35,16 @@ if TYPE_CHECKING:
 
 class Asset(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "assets"
+    __table_args__ = (
+        CheckConstraint(
+            "provenance_kind IN ('original', 'derived', 'unknown')",
+            name="ck_assets_provenance_kind",
+        ),
+        CheckConstraint(
+            "ai_provenance IN ('none', 'generated', 'modified', 'inherited', 'unknown')",
+            name="ck_assets_ai_provenance",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -36,9 +62,21 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    # Provenance: null = uploaded original; set = derived from a capability job.
+    # Immediate/best-effort input anchor, NOT an Original/Derived classifier.
     source_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assets.id"), nullable=True, index=True
+    )
+    provenance_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=ProvenanceKind.unknown.value,
+        server_default=ProvenanceKind.unknown.value,
+    )
+    ai_provenance: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=AiProvenance.unknown.value,
+        server_default=AiProvenance.unknown.value,
+    )
+    source_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", name="fk_assets_source_job", ondelete="SET NULL", use_alter=True),
+        nullable=True, index=True,
     )
     # True when produced as an intermediate step of an agent plan (consumed by a
     # later step). Finals/originals are False. Lets the UI hide scaffolding.

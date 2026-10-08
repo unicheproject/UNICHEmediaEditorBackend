@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import CostClass, MediaType
+from app.models.enums import AiContentEffect, CostClass, MediaType
 
 
 class PrimaryAssetApplicability(StrEnum):
@@ -79,6 +79,19 @@ class CapabilityMetadata(BaseModel):
     supported_media_types: list[MediaType]
     cost_class: CostClass
     enabled: bool
+    ai_content_effect: AiContentEffect = Field(
+        default=AiContentEffect.none,
+        description=(
+            "Direct AI generation/modification by this operation, independent of cost "
+            "or Agent initiation."
+        ),
+    )
+    client_materialization_media_types: list[MediaType] = Field(
+        default_factory=list,
+        description=(
+            "Upload media types eligible as possibly edited derivatives of a successful Job result."
+        ),
+    )
     applicability: CapabilityApplicability = Field(default_factory=CapabilityApplicability)
 
     @model_validator(mode="after")
