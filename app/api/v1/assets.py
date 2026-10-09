@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +24,10 @@ from app.schemas.asset import (
     AssetBulkDeleteRequest,
     AssetBulkDeleteResponse,
     AssetRead,
+    AssetSearchQuery,
     AssetUpdate,
 )
+from app.schemas.common import Page
 from app.schemas.waveform import WaveformResponse
 from app.services import assets as svc
 from app.services.thumbnails import get_or_create_thumbnail
@@ -97,6 +100,29 @@ async def list_assets(
         session, project_id, include_intermediate=include_intermediate
     )
     return [AssetRead.model_validate(a) for a in assets]
+
+
+@router.get(
+    "/projects/{project_id}/assets/search", response_model=Page[AssetRead],
+    summary="Search and paginate project Assets",
+    description=(
+        "Filters active project Assets by display name and media type, with deterministic "
+        "sorting and bounded pagination. total counts filtered matches before pagination. "
+        "Deleted Assets are always excluded; intermediates are hidden by default. "
+        "The existing unpaginated Asset-list endpoint remains unchanged."
+    ),
+)
+async def search_assets(
+    project_id: uuid.UUID,
+    query: Annotated[AssetSearchQuery, Query()],
+    session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
+) -> Page[AssetRead]:
+    assets, total = await svc.search_assets(session, project_id, query)
+    return Page[AssetRead](
+        items=[AssetRead.model_validate(a) for a in assets],
+        total=total, limit=query.limit, offset=query.offset,
+    )
 
 
 @router.post(

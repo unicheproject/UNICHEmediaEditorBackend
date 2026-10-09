@@ -245,7 +245,7 @@ curl -s -X POST $BASE/jobs \
 |------|---------------|
 | System | `GET /health` |
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
-| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `POST /api/v1/projects/{id}/assets/bulk-delete` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
+| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets/search` (filtered page) · `POST /api/v1/projects/{id}/assets/bulk-delete` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
@@ -254,6 +254,25 @@ curl -s -X POST $BASE/jobs \
 and `?offset=`, newest first. An optional `?status=queued|running|succeeded|failed|cancelled`
 filter applies before pagination and total calculation. It returns a page envelope:
 `{ "items": [...], "total": N, "limit": 50, "offset": 0 }`.
+
+`GET /api/v1/projects/{id}/assets/search` requires the same project authorization
+and returns `{ "items": [AssetRead, ...], "total": N, "limit": 50, "offset": 0 }`.
+Optional `q` matches a literal, case-insensitive substring of the display name
+(`original_filename`, including renames); `%`/`_` are not wildcards. Outer
+whitespace is ignored; empty text means no name filter. `q` is at most 512
+characters and cannot contain NUL. Optional `media_type` is
+`image|audio|video|subtitle|unknown`; omit it for all types.
+`sort_by=created_at|name|size|type` defaults to `created_at`, and
+`sort_order=asc|desc` defaults to `desc`. Name sorting is case-insensitive,
+size is in bytes, and type is alphabetical; Asset ID breaks ties in the same
+direction. Pagination uses `limit` (default 50, range 1–200) and `offset`
+(default 0, range 0–2147483647); `total` counts filtered matches before pagination.
+Deleted Assets are always excluded; `include_intermediate=true` includes active
+intermediates (default false). Invalid/unknown query parameters return 422.
+This is a read-only query: it does not probe media or enqueue work. A small
+`q`/`limit` query can also supply autocomplete candidates. Ordering is stable
+for unchanged rows, not a snapshot across concurrent uploads/deletes.
+The existing `/projects/{id}/assets` endpoint still returns its unpaginated array.
 
 `GET /api/v1/projects/{id}/assets` excludes Temp Processed Assets
 (`is_intermediate=true`) by default. Pass `?include_intermediate=true` to

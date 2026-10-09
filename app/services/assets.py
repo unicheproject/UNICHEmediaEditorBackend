@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
-from sqlalchemy import select, update
+from sqlalchemy import String, cast, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.schemas.asset import (
     AssetBulkDeleteItem,
     AssetBulkDeleteRequest,
     AssetBulkDeleteResponse,
+    AssetSearchQuery,
     AssetUpdate,
 )
 from app.services.media_metadata import apply_metadata, probe_media_safely
@@ -164,6 +165,39 @@ async def list_assets(
         stmt = stmt.where(Asset.is_intermediate.is_(False))
     result = await session.execute(stmt.order_by(Asset.created_at.desc()))
     return list(result.scalars().all())
+
+
+async def search_assets(
+    session: AsyncSession, project_id: uuid.UUID, query: AssetSearchQuery,
+) -> tuple[list[Asset], int]:
+    """Read a filtered page of active Assets within an already authorized project."""
+    await get_project(session, project_id)
+    stmt = select(Asset).where(
+        Asset.project_id == project_id, Asset.deleted_at.is_(None)
+    )
+    if not query.include_intermediate:
+        stmt = stmt.where(Asset.is_intermediate.is_(False))
+    if query.media_type is not None:
+        stmt = stmt.where(Asset.media_type == query.media_type)
+    if query.q:
+        stmt = stmt.where(Asset.original_filename.icontains(query.q, autoescape=True))
+
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+    # Cast native PostgreSQL enums so type ordering matches the public alphabetical contract.
+    column = {
+        "created_at": Asset.created_at,
+        "name": func.lower(Asset.original_filename),
+        "size": Asset.size_bytes,
+        "type": cast(Asset.media_type, String),
+    }[query.sort_by]
+    ordering = (
+        (column.asc(), Asset.id.asc()) if query.sort_order == "asc"
+        else (column.desc(), Asset.id.desc())
+    )
+    result = await session.execute(
+        stmt.order_by(*ordering).limit(query.limit).offset(query.offset)
+    )
+    return list(result.scalars().all()), int(total or 0)
 
 
 async def get_asset(session: AsyncSession, asset_id: uuid.UUID) -> Asset:

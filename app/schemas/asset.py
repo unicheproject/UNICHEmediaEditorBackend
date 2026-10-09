@@ -16,11 +16,46 @@ from app.models.enums import (
     WaveformReason,
     WaveformStatus,
 )
-from app.schemas.common import ORMModel
+from app.schemas.common import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, ORMModel
 
 
 class AssetUpdate(BaseModel):
     original_filename: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class AssetSearchQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = Field(
+        default=None, max_length=512,
+        description=(
+            "Literal case-insensitive substring of the display name (original_filename). "
+            "Outer whitespace is ignored; empty means no name filter."
+        ),
+    )
+    media_type: MediaType | None = Field(default=None, description="Omit to include all types.")
+    sort_by: Literal["created_at", "name", "size", "type"] = Field(
+        default="created_at",
+        description=(
+            "name: case-insensitive display name; size: bytes; type: alphabetical media type. "
+            "Asset ID breaks ties in the selected direction."
+        ),
+    )
+    sort_order: Literal["asc", "desc"] = "desc"
+    limit: int = Field(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT)
+    offset: int = Field(default=0, ge=0, le=2_147_483_647)
+    include_intermediate: bool = Field(
+        default=False, description="Include active intermediate/checkpoint Assets."
+    )
+
+    @field_validator("q")
+    @classmethod
+    def normalize_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if "\x00" in value:
+            raise ValueError("Search text cannot contain null characters")
+        return value.strip() or None
 
 
 class AssetBulkDeleteRequest(BaseModel):
