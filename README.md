@@ -245,7 +245,7 @@ curl -s -X POST $BASE/jobs \
 |------|---------------|
 | System | `GET /health` |
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
-| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
+| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `POST /api/v1/projects/{id}/assets/bulk-delete` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
@@ -267,6 +267,19 @@ uploaded originals are not part of this retention cleanup.
 Project and asset deletes are **soft** (`deleted_at`). Uploads validate file
 extension (415 if unsupported) and size against `MAX_UPLOAD_SIZE_MB` (413 if
 too large).
+
+`POST /api/v1/projects/{id}/assets/bulk-delete` requires project authorization
+and JSON `{ "asset_ids": ["ASSET_UUID", "OTHER_ASSET_UUID"] }` with 1–100
+unique UUIDs (invalid bodies return 422). HTTP 200 returns
+`{ "results": [{ "asset_id": "ASSET_UUID", "status": "deleted" }, ...] }`
+in request order. `not_found` means no active matching Asset in this project;
+missing, already deleted and other-project IDs are deliberately indistinguishable.
+Matching Assets are soft-deleted together in one transaction, even when other
+IDs do not match. A database failure rolls back the whole batch and returns a
+controlled 500 rather than per-item success. Repeating a completed request
+returns `not_found` without changing deletion timestamps. Binaries, provenance,
+Job/Agent history and saved composition references are retained, as for single
+deletion; this endpoint does not reclaim disk space or cancel Jobs.
 
 Supported uploads: images `jpg jpeg png webp tiff`, audio `mp3 wav m4a flac
 ogg`, video `mp4 mov webm mkv`.

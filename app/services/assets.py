@@ -8,11 +8,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import (
+    AppError,
     GoneError,
     NotFoundError,
     PayloadTooLargeError,
@@ -21,7 +23,12 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import AiProvenance, MediaType, ProvenanceKind, TechnicalMetadataStatus
-from app.schemas.asset import AssetUpdate
+from app.schemas.asset import (
+    AssetBulkDeleteItem,
+    AssetBulkDeleteRequest,
+    AssetBulkDeleteResponse,
+    AssetUpdate,
+)
 from app.services.media_metadata import apply_metadata, probe_media_safely
 from app.services.projects import get_project
 from app.services.storage import get_storage, safe_filename
@@ -170,6 +177,43 @@ async def soft_delete_asset(session: AsyncSession, asset_id: uuid.UUID) -> None:
     asset = await get_asset(session, asset_id)
     asset.deleted_at = datetime.now(UTC)
     await session.commit()
+
+
+async def bulk_soft_delete_assets(
+    session: AsyncSession, project_id: uuid.UUID, data: AssetBulkDeleteRequest,
+) -> AssetBulkDeleteResponse:
+    """Soft-delete only active, project-owned matches in a single transaction.
+
+    The caller must authorize the named project before entering this service.
+    RETURNING reports actual updates, including under concurrent deletion;
+    missing, deleted and foreign-project IDs deliberately remain indistinguishable.
+    """
+    await get_project(session, project_id)
+    try:
+        result = await session.execute(
+            update(Asset)
+            .where(
+                Asset.project_id == project_id,
+                Asset.id.in_(data.asset_ids),
+                Asset.deleted_at.is_(None),
+            )
+            .values(deleted_at=datetime.now(UTC))
+            .returning(Asset.id)
+        )
+        deleted_ids = set(result.scalars().all())
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        logger.error("Asset batch deletion failed (%s)", type(exc).__name__)
+        raise AppError("Assets could not be deleted.") from exc
+
+    return AssetBulkDeleteResponse(results=[
+        AssetBulkDeleteItem(
+            asset_id=asset_id,
+            status="deleted" if asset_id in deleted_ids else "not_found",
+        )
+        for asset_id in data.asset_ids
+    ])
 
 
 async def update_asset(

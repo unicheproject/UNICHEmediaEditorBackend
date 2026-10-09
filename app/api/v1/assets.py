@@ -19,7 +19,12 @@ from app.core.database import get_session
 from app.core.errors import ValidationError
 from app.models.asset import Asset
 from app.models.project import Project
-from app.schemas.asset import AssetRead, AssetUpdate
+from app.schemas.asset import (
+    AssetBulkDeleteRequest,
+    AssetBulkDeleteResponse,
+    AssetRead,
+    AssetUpdate,
+)
 from app.schemas.waveform import WaveformResponse
 from app.services import assets as svc
 from app.services.thumbnails import get_or_create_thumbnail
@@ -92,6 +97,26 @@ async def list_assets(
         session, project_id, include_intermediate=include_intermediate
     )
     return [AssetRead.model_validate(a) for a in assets]
+
+
+@router.post(
+    "/projects/{project_id}/assets/bulk-delete",
+    response_model=AssetBulkDeleteResponse,
+    summary="Soft-delete a batch of project Assets",
+    description=(
+        "Accepts 1–100 unique Asset IDs. Returns ordered deleted/not_found outcomes; "
+        "missing, already deleted and other-project IDs are indistinguishable. "
+        "All matching Assets are soft-deleted in one transaction; no binaries, "
+        "Job history or provenance records are removed."
+    ),
+)
+async def bulk_delete_assets(
+    project_id: uuid.UUID,
+    data: AssetBulkDeleteRequest,
+    session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
+) -> AssetBulkDeleteResponse:
+    return await svc.bulk_soft_delete_assets(session, project_id, data)
 
 
 @router.get("/assets/{asset_id}", response_model=AssetRead)

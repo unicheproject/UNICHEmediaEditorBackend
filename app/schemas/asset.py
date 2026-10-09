@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import (
     AiProvenance,
@@ -20,6 +21,38 @@ from app.schemas.common import ORMModel
 
 class AssetUpdate(BaseModel):
     original_filename: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class AssetBulkDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_ids: list[uuid.UUID] = Field(
+        min_length=1, max_length=100,
+        description="Unique Asset IDs to soft-delete within the authorized project.",
+        json_schema_extra={"uniqueItems": True},
+    )
+
+    @field_validator("asset_ids")
+    @classmethod
+    def unique_asset_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Asset IDs must be unique")
+        return value
+
+
+class AssetBulkDeleteItem(BaseModel):
+    asset_id: uuid.UUID
+    status: Literal["deleted", "not_found"] = Field(description=(
+        "deleted: soft-deleted by this request; not_found: no active Asset with this "
+        "ID in the authorized project, including already deleted or other-project IDs."
+    ))
+
+
+class AssetBulkDeleteResponse(BaseModel):
+    results: list[AssetBulkDeleteItem] = Field(description=(
+        "One outcome per requested ID, in request order. All matched Assets are "
+        "soft-deleted in one transaction; binaries and audit records are retained."
+    ))
 
 
 class AssetRead(ORMModel):
