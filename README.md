@@ -348,6 +348,20 @@ Key boundaries:
   dispatch reconciliation are separate, unsupported mechanisms.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
+- Capability library records include canonical `layer` values
+  (`deterministic_media`, `ai_assisted`, `composition`, or
+  `agent_orchestration`): local predictable media operations, model-assisted
+  operations, media assembly/rendering, and conversational planning/orchestration,
+  respectively. The current operation registry does not contain a separate
+  Agent capability record; Agent is an API surface over these same operations.
+  Each record also has a product-level `tool` label. Operations backed by a
+  swappable provider say `Configured inference backend`; definitions without
+  a working handler say `Not implemented`. `GET /capabilities` remains
+  enabled-only by default; `?include_disabled=true` additionally lists
+  code-defined disabled operations, which remain non-executable. `enabled`,
+  readiness/availability, and input applicability are separate dimensions.
+  Discovery does not enable execution, and this API has no institution-level
+  capability mutation or provider-configuration endpoints.
 - Capability `input_schema` values are the shared execution/discovery
   contract: finite choices use JSON Schema `enum`; dependent finite choices
   may add property-level `x-option-constraints` with `depends_on` and an

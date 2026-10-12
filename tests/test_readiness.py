@@ -147,6 +147,65 @@ async def test_capability_listing_includes_unavailable_with_additive_fields(clie
     assert capability_read(registry.get("video.upscale")).availability.executable is False
 
 
+async def test_disabled_capability_discovery_does_not_enable_job_admission(
+    client: AsyncClient, make_project, monkeypatch
+) -> None:
+    project_id = await make_project("Disabled discovery")
+    disabled = registry.get("video.trim").model_copy(update={"enabled": False})
+    monkeypatch.setattr(
+        registry,
+        "CAPABILITIES",
+        [disabled if cap.id == disabled.id else cap for cap in registry.CAPABILITIES],
+    )
+    monkeypatch.setitem(registry.CAPABILITIES_BY_ID, disabled.id, disabled)
+
+    default_list = await client.get(f"{API}/capabilities")
+    assert default_list.status_code == 200
+    assert disabled.id not in {cap["id"] for cap in default_list.json()}
+
+    explicit_false = await client.get(f"{API}/capabilities?include_disabled=false")
+    assert explicit_false.status_code == 200
+    assert disabled.id not in {cap["id"] for cap in explicit_false.json()}
+
+    include_disabled = await client.get(f"{API}/capabilities?include_disabled=true")
+    assert include_disabled.status_code == 200
+    listed = {cap["id"]: cap for cap in include_disabled.json()}
+    assert listed[disabled.id]["enabled"] is False
+    assert listed[disabled.id]["readiness"]["implementation"] == "available"
+    assert listed[disabled.id]["availability"] == {
+        "executable": False,
+        "reason_code": "capability_disabled",
+    }
+
+    detail = await client.get(f"{API}/capabilities/{disabled.id}")
+    assert detail.status_code == 200
+    assert detail.json() == listed[disabled.id]
+
+    uploaded = await client.post(
+        f"{API}/projects/{project_id}/assets",
+        files={"file": ("source.mp4", b"not executed", "video/mp4")},
+    )
+    assert uploaded.status_code == 201
+    queued: list[str] = []
+
+    async def enqueue(job_id):
+        queued.append(job_id)
+
+    app.dependency_overrides[get_enqueuer] = lambda: enqueue
+    job_response = await client.post(
+        f"{API}/jobs",
+        json={
+            "capability_id": disabled.id,
+            "project_id": project_id,
+            "asset_id": uploaded.json()["id"],
+            "input": {"start": 0, "end": 1},
+        },
+    )
+    assert job_response.status_code == 422
+    assert job_response.json()["error"]["code"] == "capability_unavailable"
+    assert queued == []
+
+
 @pytest.mark.parametrize("capability_id", sorted(UNIMPLEMENTED))
 async def test_unavailable_http_admission_never_persists_or_enqueues(
     client: AsyncClient, make_project, capability_id: str

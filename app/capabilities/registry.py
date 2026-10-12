@@ -62,6 +62,11 @@ def list_enabled() -> list[CapabilityDef]:
     return [c for c in CAPABILITIES if c.enabled]
 
 
+def list_defined() -> list[CapabilityDef]:
+    """Return every code-defined capability, independent of execution policy."""
+    return list(CAPABILITIES)
+
+
 def exists(capability_id: str) -> bool:
     return capability_id in CAPABILITIES_BY_ID
 

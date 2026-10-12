@@ -37,6 +37,15 @@ class ImplementationReadiness(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class CapabilityLayer(StrEnum):
+    """Product-facing functional layer; independent of cost and readiness."""
+
+    DETERMINISTIC_MEDIA = "deterministic_media"
+    AI_ASSISTED = "ai_assisted"
+    COMPOSITION = "composition"
+    AGENT_ORCHESTRATION = "agent_orchestration"
+
+
 class DeploymentReadiness(StrEnum):
     READY = "ready"
     CONFIGURATION_REQUIRED = "configuration_required"
@@ -74,6 +83,16 @@ class CapabilityMetadata(BaseModel):
     id: str
     title: str
     description: str
+    layer: CapabilityLayer = Field(
+        description="Product-facing capability layer; not a readiness or cost classification."
+    )
+    tool: str = Field(
+        min_length=1,
+        description=(
+            "Product-level implementation tool or backend. Provider-swappable operations "
+            "use a generic configured-backend label; unimplemented operations say so."
+        ),
+    )
     input_schema: dict[str, Any]
     output_schema: dict[str, Any]
     supported_media_types: list[MediaType]

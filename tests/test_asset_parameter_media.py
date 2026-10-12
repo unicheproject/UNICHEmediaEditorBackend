@@ -29,6 +29,7 @@ def test_registry_asset_parameter_item_contract_matches_runtime() -> None:
     """Introspect declarations, including unavailable operations, without an ID map."""
     for capability in CAPABILITIES:
         Draft202012Validator.check_schema(capability.input_schema)
+        Draft202012Validator.check_schema(capability.output_schema)
         if capability.applicability.primary_asset.value == "forbidden":
             assert capability.supported_media_types == []
         for name, schema in capability.input_schema.get("properties", {}).items():

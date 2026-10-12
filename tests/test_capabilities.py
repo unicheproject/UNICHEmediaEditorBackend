@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from app.capabilities import registry
 from app.capabilities.validation import validate_capability_input
 from app.schemas.capability import (
+    CapabilityLayer,
     PrimaryAssetApplicability,
     ProjectContextApplicability,
 )
@@ -61,7 +62,35 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     assert "project.export" in ids
     assert "image.kenburns" in ids
     assert len(caps) == 41
+    assert {layer.value for layer in CapabilityLayer} == {
+        "deterministic_media", "ai_assisted", "composition", "agent_orchestration"
+    }
+    expected_metadata = {
+        "video.trim": ("deterministic_media", "FFmpeg"),
+        "image.resize": ("deterministic_media", "ImageMagick"),
+        "image.upscale": ("ai_assisted", "Real-ESRGAN (CUDA)"),
+        "audio.denoise": ("ai_assisted", "FFmpeg with RNNoise"),
+        "image.slideshow": ("composition", "FFmpeg and ImageMagick"),
+        "project.export": ("composition", "Internal composition renderer (FFmpeg)"),
+    }
+    for capability_id, expected in expected_metadata.items():
+        assert (by_id[capability_id]["layer"], by_id[capability_id]["tool"]) == expected
+    allowed_tools = {
+        "FFmpeg",
+        "ImageMagick",
+        "Real-ESRGAN (CUDA)",
+        "FFmpeg with RNNoise",
+        "FFmpeg and ImageMagick",
+        "OpenCV and FFmpeg",
+        "ImageMagick and FFmpeg",
+        "Internal composition renderer (FFmpeg)",
+        "PySceneDetect",
+        "Configured inference backend",
+        "Not implemented",
+    }
     for capability in caps:
+        assert capability["layer"] in {layer.value for layer in CapabilityLayer}
+        assert capability["tool"] in allowed_tools
         applicability = capability["applicability"]
         assert applicability["primary_asset"] in {"required", "optional", "forbidden"}
         assert applicability["project_context"] in {"required", "derived"}
@@ -135,7 +164,28 @@ async def test_get_capability_detail(client: AsyncClient) -> None:
     cap = resp.json()
     assert cap["id"] == "image.caption"
     assert cap["cost_class"] == "hosted_ai"
+    assert cap["layer"] == "ai_assisted"
+    assert cap["tool"] == "Configured inference backend"
     assert "image" in cap["supported_media_types"]
+
+
+def test_capability_library_openapi_is_additive() -> None:
+    from app.main import app
+
+    document = app.openapi()
+    properties = document["components"]["schemas"]["CapabilityRead"]["properties"]
+    layer_schema = properties["layer"]
+    if "$ref" in layer_schema:
+        layer_name = layer_schema["$ref"].rsplit("/", maxsplit=1)[-1]
+        layer_schema = document["components"]["schemas"][layer_name]
+    assert layer_schema["enum"] == [
+        "deterministic_media", "ai_assisted", "composition", "agent_orchestration"
+    ]
+    assert properties["tool"]["type"] == "string"
+    parameters = document["paths"]["/api/v1/capabilities"]["get"]["parameters"]
+    include_disabled = next(item for item in parameters if item["name"] == "include_disabled")
+    assert include_disabled["required"] is False
+    assert include_disabled["schema"]["default"] is False
 
 
 async def test_video_transcode_schema_exposes_supported_dependent_choices(

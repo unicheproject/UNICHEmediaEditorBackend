@@ -42,6 +42,10 @@ def test_catalog_reflects_registry() -> None:
     assert {"video.trim", "image.slideshow", "video.compose"} <= ids
     for c in build_catalog():
         assert "input_schema" in c and "supported_media_types" in c
+        canonical = registry.get(c["capability_id"])
+        assert c["description"] == canonical.description
+        # Library metadata is canonical but adds no execution-grounding value.
+        assert "layer" not in c and "tool" not in c
         assert c["applicability"] == registry.get(c["capability_id"]).applicability.model_dump(
             mode="json"
         )

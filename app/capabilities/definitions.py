@@ -24,6 +24,7 @@ from app.composition.export_presets import project_export_input_schema
 from app.models.enums import AiContentEffect, CostClass, MediaType
 from app.schemas.capability import (
     CapabilityDefinition,
+    CapabilityLayer,
     DeploymentRequirement,
     ImplementationReadiness,
     PrimaryAssetApplicability,
@@ -92,6 +93,8 @@ def _def(
     media: list[MediaType],
     cost_class: CostClass,
     implementation: ImplementationReadiness,
+    layer: CapabilityLayer,
+    tool: str,
     output_schema: dict,
     input_schema: dict | None = None,
     enabled: bool = True,
@@ -105,6 +108,8 @@ def _def(
         id=id,
         title=title,
         description=description,
+        layer=layer,
+        tool=tool,
         input_schema=input_schema or _ASSET_INPUT,
         output_schema=output_schema,
         supported_media_types=media,
@@ -211,6 +216,8 @@ _AUDIO_TRANSCODE_SCHEMA_CONSTRAINTS = [
 _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "video.trim",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Trim",
         "description": (
             "Keep one specified interval from a video and return one video. "
@@ -230,6 +237,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.split",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Split",
         "description": (
             "Divide the complete input video at the given time markers and return "
@@ -257,6 +266,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.concat",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "FFmpeg",
         "title": "Video Concatenate",
         "description": (
             "Concatenate selected video clips into one video, "
@@ -277,6 +288,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.transcode",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Transcode",
         "description": (
             "Transcode a video to a supported container and optional codec combination. "
@@ -334,6 +347,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.mute",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Mute",
         "description": "Remove the audio track from a video.",
         "media": _V,
@@ -341,6 +356,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.crop",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Crop",
         "description": "Crop a video to a rectangle (x, y, width, height).",
         "media": _V,
@@ -354,6 +371,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.resize",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Resize",
         "description": "Resize a video to the given dimensions.",
         "media": _V,
@@ -373,6 +392,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.thumbnail",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Video Thumbnail",
         "description": "Extract a single frame at a timestamp as an image.",
         "media": _V,
@@ -385,6 +406,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.resize",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "ImageMagick",
         "title": "Image Resize",
         "description": "Resize an image to the given dimensions.",
         "media": _I,
@@ -396,6 +419,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.crop",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "ImageMagick",
         "title": "Image Crop",
         "description": "Crop an image to a rectangle (x, y, width, height).",
         "media": _I,
@@ -409,6 +434,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.format",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "ImageMagick",
         "title": "Image Format Convert",
         "description": "Convert an image between formats (jpeg/png/webp/tiff).",
         "media": _I,
@@ -423,6 +450,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.colour.adjust",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "ImageMagick",
         "title": "Image Colour Adjust",
         "description": "Adjust brightness, contrast and saturation of an image.",
         "media": _I,
@@ -458,6 +487,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.upscale",
+        "layer": CapabilityLayer.AI_ASSISTED,
+        "tool": "Real-ESRGAN (CUDA)",
         "ai_content_effect": AiContentEffect.modified,
         "deployment_requirement": DeploymentRequirement.CUDA_WORKER,
         "title": "Image Upscale",
@@ -475,6 +506,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.trim",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Audio Trim",
         "description": "Trim an audio clip to a start/end time range (seconds).",
         "media": _A,
@@ -488,6 +521,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.concat",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "FFmpeg",
         "title": "Audio Concatenate",
         "description": (
             "Concatenate selected audio clips into one audio track, "
@@ -508,6 +543,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.gain",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Audio Gain",
         "description": (
             "Adjust the soundtrack gain (gain_db). Audio input produces audio; "
@@ -523,6 +560,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.normalize",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Audio Normalize",
         "description": (
             "Normalize soundtrack loudness to a target integrated level (LUFS). Audio input "
@@ -543,6 +582,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.fade",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Audio Fade",
         "description": (
             "Apply fade-in and/or fade-out (seconds) to a soundtrack. Audio input produces "
@@ -568,6 +609,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.transcode",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Audio Transcode",
         "description": "Transcode audio to a target container/codec.",
         "media": _A,
@@ -592,6 +635,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.denoise",
+        "layer": CapabilityLayer.AI_ASSISTED,
+        "tool": "FFmpeg with RNNoise",
         "ai_content_effect": AiContentEffect.modified,
         "title": "Audio Denoise",
         "description": (
@@ -612,6 +657,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.audio.extract",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
         "title": "Extract Video Audio",
         "description": (
             "Extract the first audio track from a video as a separate AAC/M4A audio asset. "
@@ -623,6 +670,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     # --- Composition capabilities ---
     {
         "id": "image.slideshow",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "FFmpeg and ImageMagick",
         "title": "Image Slideshow",
         "description": (
             "Build a video slideshow from the selected images in order, showing each "
@@ -664,6 +713,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "image.kenburns",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "OpenCV and FFmpeg",
         "title": "Ken Burns Pan & Zoom",
         "description": (
             "Apply a saliency-aware pan-and-zoom animation to a still image, "
@@ -711,6 +762,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "media.titlecard",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "ImageMagick and FFmpeg",
         "title": "Title Card",
         "description": (
             "Generate a title-card video clip from text (no input asset needed). "
@@ -755,6 +808,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.lowerthird",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "ImageMagick and FFmpeg",
         "title": "Lower Third",
         "description": (
             "Overlay a lower-third text graphic (name/caption) onto a video "
@@ -798,6 +853,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.subtitle.embed",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "FFmpeg",
         "title": "Embed Subtitles",
         "description": (
             "Add a subtitle file to a video. Use soft mode for a selectable subtitle "
@@ -829,6 +886,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "audio.mix",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "FFmpeg",
         "title": "Mix Background Audio",
         "description": (
             "Mix the selected background music or narration track with the primary "
@@ -865,6 +924,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
     },
     {
         "id": "video.compose",
+        "layer": CapabilityLayer.COMPOSITION,
+        "tool": "Internal composition renderer (FFmpeg)",
         "title": "Compose / Export Timeline",
         "description": (
             "Render a final video from ordered video segments normalized to the chosen "
@@ -933,6 +994,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
 CAPABILITIES: list[CapabilityDef] = [
     _def(
         id="audio.transcribe",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Configured inference backend",
         ai_content_effect=AiContentEffect.generated,
         client_materialization_media_types=[MediaType.subtitle],
         implementation=ImplementationReadiness.AVAILABLE,
@@ -949,6 +1012,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="subtitle.autogenerate",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Subtitle Auto-generation",
@@ -959,6 +1024,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.tts",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Configured inference backend",
         ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.AVAILABLE,
         deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
@@ -980,6 +1047,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.music.generate",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Music Generation",
@@ -997,6 +1066,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="audio.separate.stems",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Stem Separation",
@@ -1010,6 +1081,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.background.remove",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Background Removal",
@@ -1020,6 +1093,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.inpaint",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Inpainting",
@@ -1048,6 +1123,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.restore.face",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Face Restoration",
@@ -1058,6 +1135,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.caption",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Configured inference backend",
         ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.AVAILABLE,
         deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
@@ -1073,6 +1152,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="image.tag",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.generated,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Image Tagging",
@@ -1086,6 +1167,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="video.upscale",
+        layer=CapabilityLayer.AI_ASSISTED,
+        tool="Not implemented",
         ai_content_effect=AiContentEffect.modified,
         implementation=ImplementationReadiness.UNAVAILABLE,
         title="Video Upscale",
@@ -1100,6 +1183,8 @@ CAPABILITIES: list[CapabilityDef] = [
     *(
         _def(
             id=spec["id"],
+            layer=spec["layer"],
+            tool=spec["tool"],
             ai_content_effect=spec.get("ai_content_effect", AiContentEffect.none),
             implementation=ImplementationReadiness.AVAILABLE,
             deployment_requirement=spec.get(
@@ -1129,6 +1214,8 @@ CAPABILITIES: list[CapabilityDef] = [
     # _FILE_OUTPUT_SCHEMA / _DETERMINISTIC_SPECS above.
     _def(
         id="video.shot.detect",
+        layer=CapabilityLayer.DETERMINISTIC_MEDIA,
+        tool="PySceneDetect",
         implementation=ImplementationReadiness.AVAILABLE,
         title="Shot Detection",
         description="Detect shot/scene boundaries in a video (PySceneDetect content-aware cuts).",
@@ -1169,6 +1256,8 @@ CAPABILITIES: list[CapabilityDef] = [
     ),
     _def(
         id="project.export",
+        layer=CapabilityLayer.COMPOSITION,
+        tool="Internal composition renderer (FFmpeg)",
         implementation=ImplementationReadiness.AVAILABLE,
         title="Export Project Composition",
         description=(
