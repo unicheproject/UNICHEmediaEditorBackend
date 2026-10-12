@@ -11,7 +11,7 @@ import math
 from contextlib import suppress
 from pathlib import Path
 
-from app.capabilities.media_options import VIDEO_TRANSCODE_OPTIONS
+from app.capabilities.media_options import VIDEO_QUALITY_CRF, VIDEO_TRANSCODE_OPTIONS
 from app.core.errors import ToolError, ValidationError
 from app.models.enums import MediaType
 from app.services.media_metadata import MetadataProbeError, probe_media, probe_video_timeline
@@ -326,13 +326,22 @@ async def video_concat(sources: list[str], dst: str, work_dir: Path) -> None:
 
 
 async def video_transcode(
-    src: str, dst: str, video_codec: str | None, audio_codec: str | None
+    src: str, dst: str, video_codec: str | None, audio_codec: str | None,
+    *, quality: str | None = None,
 ) -> None:
     args = [*_BASE, "-i", src]
     if video_codec:
         args += ["-c:v", video_codec]
     if audio_codec:
         args += ["-c:a", audio_codec]
+    if quality is not None:
+        levels = VIDEO_QUALITY_CRF.get(video_codec or "", {})
+        if quality not in levels:
+            raise ToolError("Unsupported video quality/codec combination.")
+        args += ["-crf", str(levels[quality])]
+        if video_codec == "libvpx-vp9":
+            # Unconstrained constant quality, rather than a bitrate target/cap.
+            args += ["-b:v", "0"]
     args.append(dst)
     await runner.run(args)
 

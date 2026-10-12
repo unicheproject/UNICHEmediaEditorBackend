@@ -16,6 +16,22 @@ VIDEO_CODEC_DESCRIPTIONS = {
     "libvpx-vp9": "VP9",
 }
 
+VIDEO_QUALITY_DESCRIPTIONS = {
+    "high": "Prioritize visual quality; usually produces larger files.",
+    "balanced": "Balance visual quality and compression.",
+    "compressed": "Prioritize smaller files at lower visual quality.",
+}
+
+# These are codec-specific product choices, not equivalent numeric quality scales.
+# H.264 follows the existing export CRF range/web/preview policy. HEVC and VP9
+# are centered on their encoder defaults (28 and 32), verified in the runtime.
+# Only explicit quality selections use these values; omission emits no new options.
+VIDEO_QUALITY_CRF: dict[str, dict[str, int]] = {
+    "libx264": {"high": 18, "balanced": 22, "compressed": 28},
+    "libx265": {"high": 22, "balanced": 28, "compressed": 34},
+    "libvpx-vp9": {"high": 24, "balanced": 32, "compressed": 40},
+}
+
 AUDIO_CODEC_DESCRIPTIONS = {
     "aac": "AAC",
     "libmp3lame": "MP3",

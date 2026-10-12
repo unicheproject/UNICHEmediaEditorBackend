@@ -355,6 +355,16 @@ Key boundaries:
   combinations at runtime. For `video.transcode`, codec fields are optional
   (omission keeps FFmpeg's container default), and the advertised option map
   describes which explicit codecs are supported for each output container.
+- `video.transcode.quality` optionally selects `high`, `balanced`, or
+  `compressed`, prioritizing visual quality, a balance, or smaller files.
+  Selecting it requires an explicit supported `video_codec`. Omitting it keeps
+  the previous FFmpeg command and encoder defaults. The codec-specific CRFs
+  are respectively H.264 18/22/28, HEVC 22/28/34, and VP9 24/32/40; VP9 also
+  uses `-b:v 0` for unconstrained constant quality. These scales do not imply
+  equivalent quality across codecs. Audio settings, dimensions and frame rate
+  are unchanged. File size depends on the content; there is no target-filesize
+  guarantee. Discovery and Agent grounding expose the same optional enum,
+  explanations and conditional codec requirement used by Job admission.
 - `audio.transcode` offers the maintained audio Asset families: `mp3`
   (`libmp3lame`), `wav` (`pcm_s16le`), `m4a` (`aac`), `flac` (`flac`), and
   `ogg` (`libvorbis` or `libopus`). Codec omission keeps FFmpeg's container

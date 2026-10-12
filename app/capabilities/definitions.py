@@ -16,6 +16,8 @@ from app.capabilities.media_options import (
     AUDIO_CONTAINER_DESCRIPTIONS,
     AUDIO_TRANSCODE_OPTIONS,
     VIDEO_CODEC_DESCRIPTIONS,
+    VIDEO_QUALITY_CRF,
+    VIDEO_QUALITY_DESCRIPTIONS,
     VIDEO_TRANSCODE_OPTIONS,
 )
 from app.composition.export_presets import project_export_input_schema
@@ -275,7 +277,9 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Transcode",
         "description": (
             "Transcode a video to a supported container and optional codec combination. "
-            "Omitting a codec lets FFmpeg choose its default for the selected container."
+            "Omitting a codec lets FFmpeg choose its default for the selected container. "
+            "Optional quality controls compression with an explicit video codec; "
+            "it does not guarantee an output file size."
         ),
         "media": _V,
         "properties": {
@@ -302,9 +306,28 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "Audio codec",
                 "Optional supported audio encoder. Omit to let FFmpeg choose for the container.",
             ),
+            "quality": _string(
+                "Video quality",
+                "Optional codec-specific quality/compression level; requires video_codec. "
+                "Omit to preserve existing encoder defaults. No exact output file size "
+                "is guaranteed; dimensions, frame rate and audio settings are unchanged.",
+                enum=list(VIDEO_QUALITY_DESCRIPTIONS),
+                **{
+                    "x-enum-descriptions": VIDEO_QUALITY_DESCRIPTIONS,
+                    "x-option-constraints": {
+                        "depends_on": "video_codec",
+                        "allowed_values": {
+                            codec: list(levels) for codec, levels in VIDEO_QUALITY_CRF.items()
+                        },
+                    },
+                },
+            ),
         },
         "required": ["format"],
-        "allOf": _VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS,
+        "allOf": [
+            *_VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS,
+            {"if": {"required": ["quality"]}, "then": {"required": ["video_codec"]}},
+        ],
     },
     {
         "id": "video.mute",

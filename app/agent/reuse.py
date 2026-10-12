@@ -34,7 +34,9 @@ from app.services.assets import ensure_asset_binary_available, get_asset
 REUSE_VERSIONS: dict[str, str] = {
     "video.trim": "1",
     "video.concat": "1",
-    "video.transcode": "1",
+    # Quality was historically accepted as an unknown extra parameter and
+    # ignored. A retry with that same input now has different output semantics.
+    "video.transcode": "2",
     "video.mute": "1",
     "video.crop": "1",
     "video.resize": "1",
