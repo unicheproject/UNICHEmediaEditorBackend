@@ -258,7 +258,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "video.concat",
         "title": "Video Concatenate",
-        "description": "Concatenate multiple video clips into one (input.asset_ids).",
+        "description": (
+            "Concatenate selected video clips into one video, "
+            "preserving their selected order."
+        ),
         "media": _V,
         "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
@@ -486,7 +489,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
     {
         "id": "audio.concat",
         "title": "Audio Concatenate",
-        "description": "Concatenate multiple audio clips into one (input.asset_ids).",
+        "description": (
+            "Concatenate selected audio clips into one audio track, "
+            "preserving their selected order."
+        ),
         "media": _A,
         "primary_asset": PrimaryAssetApplicability.OPTIONAL,
         "properties": {
@@ -619,8 +625,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "id": "image.slideshow",
         "title": "Image Slideshow",
         "description": (
-            "Build a video slideshow from images (input.asset_ids, in order), "
-            "showing each for seconds_per_image."
+            "Build a video slideshow from the selected images in order, showing each "
+            "for the specified duration."
         ),
         "media": _I,
         "primary_asset": PrimaryAssetApplicability.OPTIONAL,
@@ -794,8 +800,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "id": "video.subtitle.embed",
         "title": "Embed Subtitles",
         "description": (
-            "Embed a subtitle asset (input.subtitle_asset_id) into a video. "
-            "mode 'soft' muxes a selectable track; 'burn' renders into the picture."
+            "Add a subtitle file to a video. Use soft mode for a selectable subtitle "
+            "track or burn mode to render subtitles into the picture."
         ),
         "media": _V,
         "properties": {
@@ -825,8 +831,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "id": "audio.mix",
         "title": "Mix Background Audio",
         "description": (
-            "Mix a background music/narration asset (input.music_asset_id) under a "
-            "video or audio asset. mode: mix | duck | replace."
+            "Mix the selected background music or narration track with the primary "
+            "video or audio. Choose mix, duck, or replace mode."
         ),
         "media": _VA,
         "properties": {
@@ -861,10 +867,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "id": "video.compose",
         "title": "Compose / Export Timeline",
         "description": (
-            "Render a final video from ordered video segments (input.asset_ids) "
-            "normalized to width/height, with an optional audio bed "
-            "(input.audio_asset_id, audio_mode) and optional burned subtitles "
-            "(input.subtitle_asset_id)."
+            "Render a final video from ordered video segments normalized to the chosen "
+            "dimensions, with an optional audio bed and burned subtitles."
         ),
         "media": _V,
         "primary_asset": PrimaryAssetApplicability.OPTIONAL,

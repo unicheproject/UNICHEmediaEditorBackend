@@ -1,3 +1,5 @@
+import re
+
 from httpx import AsyncClient
 
 from app.capabilities import registry
@@ -8,6 +10,36 @@ from app.schemas.capability import (
 )
 
 API = "/api/v1"
+
+_INTERNAL_PRESENTATION_REFERENCE = re.compile(
+    r"\b(?:input|params|ctx)\.[A-Za-z_][A-Za-z0-9_.]*"
+    r"|\b[A-Za-z][A-Za-z0-9]*_asset_ids?\b"
+)
+
+
+def _presentation_text(value: object, path: str = "") -> list[tuple[str, str]]:
+    """Collect only human-facing titles, descriptions and enum explanations."""
+    found: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for key in ("title", "description"):
+            text = value.get(key)
+            if isinstance(text, str):
+                found.append((f"{path}.{key}", text))
+        enum_descriptions = value.get("x-enum-descriptions")
+        if isinstance(enum_descriptions, dict):
+            found.extend(
+                (f"{path}.x-enum-descriptions.{enum_value}", text)
+                for enum_value, text in enum_descriptions.items()
+                if isinstance(text, str)
+            )
+        for key, child in value.items():
+            if isinstance(child, (dict, list)):
+                found.extend(_presentation_text(child, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            if isinstance(child, (dict, list)):
+                found.extend(_presentation_text(child, f"{path}[{index}]"))
+    return found
 
 
 async def test_list_capabilities(client: AsyncClient) -> None:
@@ -64,6 +96,37 @@ async def test_list_capabilities(client: AsyncClient) -> None:
             "project_context": "required",
         }
         assert by_id[capability_id]["supported_media_types"] == []
+
+
+async def test_public_capability_presentation_omits_internal_parameter_paths(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(f"{API}/capabilities")
+    assert response.status_code == 200
+    capabilities = response.json()
+    assert len(capabilities) == 41
+
+    for capability in capabilities:
+        texts = [("description", capability.get("description", ""))]
+        texts.extend(_presentation_text(capability.get("input_schema", {}), "input_schema"))
+        texts.extend(_presentation_text(capability.get("output_schema", {}), "output_schema"))
+        for field, text in texts:
+            assert _INTERNAL_PRESENTATION_REFERENCE.search(text) is None, (
+                capability["id"], field, text
+            )
+
+        detail = await client.get(f"{API}/capabilities/{capability['id']}")
+        assert detail.status_code == 200
+        assert detail.json()["description"] == capability["description"]
+        assert detail.json()["input_schema"] == capability["input_schema"]
+
+    by_id = {capability["id"]: capability for capability in capabilities}
+    assert "asset_ids" in by_id["video.concat"]["input_schema"]["properties"]
+    assert "asset_ids" in by_id["audio.concat"]["input_schema"]["properties"]
+    assert "asset_ids" in by_id["image.slideshow"]["input_schema"]["properties"]
+    assert "subtitle_asset_id" in by_id["video.subtitle.embed"]["input_schema"]["properties"]
+    assert "music_asset_id" in by_id["audio.mix"]["input_schema"]["properties"]
+    assert "audio_asset_id" in by_id["video.compose"]["input_schema"]["properties"]
 
 
 async def test_get_capability_detail(client: AsyncClient) -> None:
