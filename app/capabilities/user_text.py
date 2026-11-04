@@ -180,6 +180,93 @@ USER_TEXT: dict[str, UserText] = {
                      "the width and four times the height.",
         },
     },
+    # --- audio -----------------------------------------------------------
+    "audio.trim": {
+        "summary": "Keep one part of an audio recording and discard the rest.",
+        "params": {
+            "start": "Where the part you want to keep begins, in seconds from the "
+                     "start of the recording.",
+            "end": "Where the part you want to keep ends, in seconds from the start "
+                   "of the recording.",
+        },
+    },
+    "audio.concat": {
+        "summary": "Join several audio recordings into one, in the order you arrange them.",
+        "params": {
+            "asset_ids": "The recordings to join, in the order they should play.",
+        },
+    },
+    "audio.gain": {
+        "summary": (
+            "Make the sound louder or quieter. Works on audio files and on the "
+            "sound of a video; a video keeps its picture unchanged."
+        ),
+        "params": {
+            "gain_db": "How much louder or quieter, in decibels. 0 keeps it as it "
+                       "is, +6 is clearly louder, -6 is clearly quieter. Too much "
+                       "increase can make loud passages sound distorted.",
+        },
+    },
+    "audio.normalize": {
+        "summary": (
+            "Bring the sound to a standard overall loudness, so recordings play at "
+            "a similar volume. Works on audio files and on the sound of a video."
+        ),
+        "params": {
+            "target_i": "How loud the result should be overall. -16 suits websites "
+                        "and podcasts; -23 is the European broadcast standard. Keep "
+                        "the default if unsure.",
+        },
+    },
+    "audio.fade": {
+        "summary": (
+            "Let the sound rise gently at the start and/or fade out at the end. "
+            "Works on audio files and on the sound of a video."
+        ),
+        "params": {
+            "fade_in": "How long the sound takes to rise at the start, in seconds. "
+                       "0 means no fade-in.",
+            "fade_out": "How long the sound takes to fade out at the end, in "
+                        "seconds. 0 means no fade-out.",
+        },
+    },
+    "audio.transcode": {
+        "summary": (
+            "Save a copy of an audio recording as a different file type. MP3 and "
+            "M4A make small files for the web; WAV and FLAC keep the full quality "
+            "and suit archiving."
+        ),
+        "params": {
+            "format": "The file type of the new copy.",
+            "codec": "How the sound is stored inside the file. Leave empty and a "
+                     "suitable choice is made for the file type.",
+        },
+    },
+    "audio.denoise": {
+        "summary": (
+            "Reduce steady background noise, such as hum or hiss, behind speech. "
+            "Works on audio files and on the sound of a video."
+        ),
+        "params": {
+            "strength": "1 removes as much noise as possible, 0.5 about half, 0 "
+                        "leaves the sound unchanged. Negative values do the "
+                        "opposite and keep mostly the noise.",
+        },
+    },
+    "audio.mix": {
+        "summary": (
+            "Add background music or narration to a video or audio recording. You "
+            "can play both together, keep the added track quietly in the "
+            "background, or replace the original sound."
+        ),
+        "params": {
+            "music_asset_id": "The music or narration recording to add.",
+            "music_volume": "How loud the added recording is. 1 is its own volume, "
+                            "0.3 is a quiet background, 0 is silent.",
+            "mode": "Mix plays both together; Duck keeps the added recording quiet "
+                    "underneath; Replace removes the original sound.",
+        },
+    },
 }
 
 

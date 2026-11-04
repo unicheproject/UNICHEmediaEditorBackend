@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from httpx import AsyncClient
 
@@ -23,12 +25,18 @@ COVERED_GROUPS = {
         "image.resize", "image.crop", "image.format", "image.colour.adjust",
         "image.upscale",
     },
+    "audio": {
+        "audio.trim", "audio.concat", "audio.gain", "audio.normalize", "audio.fade",
+        "audio.transcode", "audio.denoise", "audio.mix",
+    },
 }
 # Implementation vocabulary the target user does not have.
 JARGON = (
     "ffmpeg", "imagemagick", "rnnoise", "pyscenedetect", "real-esrgan", "libx264",
-    "libx265", "libvpx", "codec", "encoder", "container", "-1", "crf", "lufs",
+    "libx265", "libvpx", "codec", "encoder", "container", "crf", "lufs",
 )
+# FFmpeg's "-1 means automatic" sentinel, but not ordinary values such as -16.
+SENTINEL = re.compile(r"(?<![\d.])-1(?![\d.])")
 
 
 def _texts(capability_id: str) -> list[str]:
@@ -51,6 +59,7 @@ def test_user_text_avoids_implementation_vocabulary(capability_id: str) -> None:
     for text in _texts(capability_id):
         lowered = text.lower()
         assert not [word for word in JARGON if word in lowered], (capability_id, text)
+        assert not SENTINEL.search(text), (capability_id, text)
         assert not [cid for cid in CAPABILITIES_BY_ID if cid in text], (capability_id, text)
 
 
