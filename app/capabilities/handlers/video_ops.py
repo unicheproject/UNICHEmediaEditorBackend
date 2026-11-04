@@ -28,7 +28,7 @@ class VideoTrimHandler(LocalToolHandler):
         src = require_input(ctx)
         out = _video_out(ctx, "trim")
         await ffmpeg.video_trim(
-            src, str(out.path), require(ctx.params, "start"), require(ctx.params, "end")
+            src, str(out.path), require(ctx.params, "start"), ctx.params.get("end")
         )
         return HandlerResult(data={"operation": "video.trim"}, outputs=[out])
 

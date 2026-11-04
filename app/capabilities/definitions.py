@@ -221,19 +221,26 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Trim",
         "description": (
             "Keep one specified interval from a video and return one video. "
-            "Use this to keep from a time onward or keep a time range; use video.split "
-            "to divide the complete input into multiple segments."
+            "Use this to keep from a time onward (omit the end) or keep a time range; "
+            "use video.split to divide the complete input into multiple segments."
         ),
         "media": _V,
         "properties": {
             "start": _number(
-                "Start time", "Start of the interval to keep, in seconds.", **{"x-unit": "seconds"}
+                "Start time",
+                "Start of the interval to keep, in seconds. Must be before the video ends.",
+                minimum=0,
+                **{"x-unit": "seconds"},
             ),
             "end": _number(
-                "End time", "End of the interval to keep, in seconds.", **{"x-unit": "seconds"}
+                "End time",
+                "Optional end of the interval to keep, in seconds; must be after the start. "
+                "Omit it, or give a time past the end of the video, to keep until the end.",
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
             ),
         },
-        "required": ["start", "end"],
+        "required": ["start"],
     },
     {
         "id": "video.split",

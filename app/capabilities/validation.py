@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -57,13 +57,30 @@ def validate_capability_input(
         format_checker=_format_checker(allow_step_refs=allow_step_refs),
     )
     errors = sorted(validator.iter_errors(dict(value)), key=lambda error: list(error.path))
-    if not errors:
-        return
+    if errors:
+        error: JsonSchemaValidationError = errors[0]
+        path = ".".join(str(part) for part in error.absolute_path)
+        location = f"input.{path}" if path else "input"
+        raise CapabilityInputValidationError(f"{location}: {error.message}")
 
-    error: JsonSchemaValidationError = errors[0]
-    path = ".".join(str(part) for part in error.absolute_path)
-    location = f"input.{path}" if path else "input"
-    raise CapabilityInputValidationError(f"{location}: {error.message}")
+    semantic_check = _SEMANTIC_CHECKS.get(capability.id)
+    if semantic_check is not None:
+        semantic_check(value)
+
+
+def _check_time_interval(value: Mapping[str, Any]) -> None:
+    """Cross-field rule JSON Schema cannot express: an explicit end follows start."""
+    start, end = value.get("start"), value.get("end")
+    if end is not None and start is not None and end <= start:
+        raise CapabilityInputValidationError("input.end: must be greater than input.start")
+
+
+# Asset-independent cross-field rules, applied wherever the schema is enforced
+# (Job admission and Agent plan validation). Source-dependent bounds such as
+# the video duration are checked at admission and again at execution.
+_SEMANTIC_CHECKS: dict[str, Callable[[Mapping[str, Any]], None]] = {
+    "video.trim": _check_time_interval,
+}
 
 
 def media_asset_semantics(schema: Mapping[str, Any]) -> Mapping[str, Any] | None:

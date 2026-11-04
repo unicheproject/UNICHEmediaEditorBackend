@@ -31,7 +31,7 @@ _ADAPTER_PARAMS = {
 @dataclass(frozen=True)
 class TemporalTrim:
     start: float
-    end: float
+    end: float | None = None  # None keeps until the end of the source
 
 
 @dataclass(frozen=True)
@@ -109,7 +109,7 @@ def _operation(step: PlanStep) -> dict[str, Any]:
     """Translate only declared adapter parameters into a typed operation."""
     params = dict(step.params)
     if step.capability_id == "video.trim":
-        value: RenderOperation = TemporalTrim(params["start"], params["end"])
+        value: RenderOperation = TemporalTrim(params["start"], params.get("end"))
     elif step.capability_id == "video.resize":
         value = Resize(params["width"], params["height"])
     elif step.capability_id == "video.crop":
@@ -377,15 +377,16 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
             temporal = True
             video_index += 1
             next_video = f"v{video_index}"
-            graph.append(
-                f"[{current}]trim=start={operation.start}:end={operation.end},setpts=PTS-STARTPTS[{next_video}]"
-            )
+            bounds = f"start={operation.start}"
+            if operation.end is not None:
+                bounds += f":end={operation.end}"
+            graph.append(f"[{current}]trim={bounds},setpts=PTS-STARTPTS[{next_video}]")
             current = next_video
             if audio_present:
                 audio_index += 1
                 next_audio = f"a{audio_index}"
                 graph.append(
-                    f"[{audio_current}]atrim=start={operation.start}:end={operation.end},asetpts=PTS-STARTPTS[{next_audio}]"
+                    f"[{audio_current}]atrim={bounds},asetpts=PTS-STARTPTS[{next_audio}]"
                 )
                 audio_current = next_audio
         elif isinstance(operation, Resize):

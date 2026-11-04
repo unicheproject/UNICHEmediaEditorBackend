@@ -64,10 +64,72 @@ async def probe_duration(path: str) -> float:
 # --- video ---------------------------------------------------------------
 
 
-async def video_trim(src: str, dst: str, start: float, end: float) -> None:
-    await runner.run(
-        [*_BASE, "-i", src, "-ss", _num(start, "start"), "-to", _num(end, "end"), dst]
+def resolve_trim_window(
+    start: float,
+    end: float | None,
+    *,
+    duration: float | None,
+    frame_rate: float | None,
+) -> float | None:
+    """Validate a trim interval against known source timing; return the effective end.
+
+    ``None`` means "until the end of the video": an omitted end, or one at/after
+    the known duration. Unknown duration/frame rate skip only the checks that
+    need them; execution validates the rendered output independently.
+    """
+    if start < 0:
+        raise ValidationError("Trim start must not be negative")
+    if end is not None and end <= start:
+        raise ValidationError("Trim end must be after the start")
+    if duration is not None and duration > 0:
+        if start >= duration:
+            raise ValidationError(
+                f"Trim start must be before the end of the video ({duration:.3f} s)"
+            )
+        if end is not None and end >= duration:
+            end = None
+    if frame_rate is not None and frame_rate > 0:
+        stop = end if end is not None else duration
+        if stop is not None and stop - start < 1 / frame_rate - 1e-6:
+            raise ValidationError("Trim interval must be at least one video frame long")
+    return end
+
+
+async def video_trim(src: str, dst: str, start: float, end: float | None = None) -> None:
+    """Keep [start, end) (or start onward) and publish only a frame-bearing output."""
+    _num(start, "start")
+    if end is not None:
+        _num(end, "end")
+    try:
+        metadata = await probe_media(Path(src), MediaType.video)
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot read source video timing for trim") from exc
+    if not metadata.has_video_stream:
+        raise ValidationError("Trim source does not contain a video stream")
+    effective_end = resolve_trim_window(
+        start, end, duration=metadata.duration_seconds, frame_rate=metadata.frame_rate
     )
+    args = [*_BASE, "-i", src, "-ss", str(start)]
+    if effective_end is not None:
+        args += ["-to", str(effective_end)]
+    output = Path(dst)
+    validated = False
+    try:
+        await runner.run([*args, dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Trim output is missing or empty")
+        try:
+            result = await probe_media(output, MediaType.video)
+            if not result.has_video_stream:
+                raise ToolError("Trim output does not contain valid video")
+            await probe_video_timeline(output, frame_rate=result.frame_rate)
+        except MetadataProbeError as exc:
+            raise ToolError("Trim output does not contain video frames") from exc
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 async def video_split(src: str, dst_pattern: str, markers: list[float]) -> list[Path]:

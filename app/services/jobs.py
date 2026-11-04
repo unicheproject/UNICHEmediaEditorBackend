@@ -27,7 +27,7 @@ from app.capabilities.validation import (
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.asset import Asset
-from app.models.enums import AiProvenance, JobStatus, MediaType
+from app.models.enums import AiProvenance, JobStatus, MediaType, TechnicalMetadataStatus
 from app.models.job import Job
 from app.schemas.capability import CapabilityMetadata
 from app.schemas.job import JobCreate
@@ -89,6 +89,8 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
                 f"Capability '{data.capability_id}' does not support "
                 f"{asset.media_type.value} assets"
             )
+        if data.capability_id == "video.trim":
+            _validate_trim_against_asset(asset, data.input)
     await _validate_referenced_asset_media_types(session, cap, data.input)
 
     job = Job(
@@ -155,6 +157,24 @@ def validate_job_input(capability: CapabilityMetadata, job_input: dict) -> None:
         validate_capability_input(capability, job_input)
     except CapabilityInputValidationError as exc:
         raise ValidationError(f"Invalid capability input: {exc}") from exc
+
+
+def _validate_trim_against_asset(asset: Asset, job_input: dict) -> None:
+    """Reject trims outside the source using already-probed metadata, if available.
+
+    Pending/unavailable metadata defers these bounds to execution, which probes
+    the source itself; admission never blocks on a probe.
+    """
+    if asset.technical_metadata_status != TechnicalMetadataStatus.available.value:
+        return
+    from app.tools.ffmpeg import resolve_trim_window
+
+    resolve_trim_window(
+        job_input["start"],
+        job_input.get("end"),
+        duration=asset.duration_seconds,
+        frame_rate=asset.frame_rate,
+    )
 
 
 async def _validate_referenced_asset_media_types(
