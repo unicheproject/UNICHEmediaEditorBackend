@@ -120,6 +120,66 @@ USER_TEXT: dict[str, UserText] = {
             "is not changed."
         ),
     },
+    # --- image editing ---------------------------------------------------
+    "image.resize": {
+        "summary": (
+            "Make an image larger or smaller. The image gets exactly the width and "
+            "height you enter, so if they do not match its proportions the picture "
+            "will look stretched or squashed."
+        ),
+        "params": {
+            "width": "New width in pixels.",
+            "height": "New height in pixels.",
+        },
+    },
+    "image.crop": {
+        "summary": (
+            "Cut away the edges of an image and keep only the area you select. The "
+            "image's size is shown in its details."
+        ),
+        "params": {
+            "x": "How far from the left edge the kept area begins, in pixels.",
+            "y": "How far from the top edge the kept area begins, in pixels.",
+            "width": "How wide the kept area is, in pixels.",
+            "height": "How tall the kept area is, in pixels.",
+        },
+    },
+    "image.format": {
+        "summary": (
+            "Save a copy of an image as a different file type. JPEG and WebP make "
+            "small files for the web; PNG and TIFF keep every detail and suit "
+            "archiving."
+        ),
+        "params": {
+            "format": "The file type of the new copy.",
+        },
+    },
+    "image.colour.adjust": {
+        "summary": (
+            "Make an image brighter or darker, change its contrast, or make its "
+            "colours stronger or weaker. Values you leave unchanged have no effect."
+        ),
+        "params": {
+            "brightness": "100 keeps the image as it is. Lower values make it "
+                          "darker, higher values make it brighter.",
+            "contrast": "0 keeps the image as it is. Negative values make it flatter, "
+                        "positive values make light and dark areas stand out more.",
+            "saturation": "100 keeps the colours as they are. 0 makes the image "
+                          "black and white; higher values make colours stronger.",
+        },
+    },
+    "image.upscale": {
+        "summary": (
+            "Make an image larger while recreating fine detail, so it stays sharp "
+            "instead of looking blurry. Works best on photographs; very small, grainy "
+            "or black-and-white images can come out with invented details, so check "
+            "the result."
+        ),
+        "params": {
+            "scale": "How many times larger the image becomes. 4 means four times "
+                     "the width and four times the height.",
+        },
+    },
 }
 
 

@@ -19,6 +19,10 @@ COVERED_GROUPS = {
         "video.trim", "video.split", "video.concat", "video.transcode", "video.mute",
         "video.crop", "video.resize", "video.thumbnail", "video.audio.extract",
     },
+    "image editing": {
+        "image.resize", "image.crop", "image.format", "image.colour.adjust",
+        "image.upscale",
+    },
 }
 # Implementation vocabulary the target user does not have.
 JARGON = (
