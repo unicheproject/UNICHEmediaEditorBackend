@@ -68,7 +68,7 @@ def test_readiness_enums_and_all_registry_declarations() -> None:
         "not_implemented", "provider_not_configured", "gpu_unavailable",
         "configuration_required", "capability_disabled",
     }
-    assert len(registry.CAPABILITIES) == 41
+    assert len(registry.CAPABILITIES) == 42
     registry.validate_implementation_registry()
     unavailable = {
         c.id for c in registry.CAPABILITIES
@@ -127,7 +127,7 @@ async def test_capability_listing_includes_unavailable_with_additive_fields(clie
     response = await client.get(f"{API}/capabilities")
     assert response.status_code == 200
     caps = {c["id"]: c for c in response.json()}
-    assert len(caps) == 41
+    assert len(caps) == 42
     for capability_id in UNIMPLEMENTED:
         cap = caps[capability_id]
         assert cap["enabled"] is True

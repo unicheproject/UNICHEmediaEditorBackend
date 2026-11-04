@@ -19,6 +19,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
     video_ops.VideoSplitHandler(),
     video_ops.VideoConcatHandler(),
     video_ops.VideoTranscodeHandler(),
+    video_ops.VideoExportHandler(),
     video_ops.VideoMuteHandler(),
     video_ops.VideoCropHandler(),
     video_ops.VideoResizeHandler(),

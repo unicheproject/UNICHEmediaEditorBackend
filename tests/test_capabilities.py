@@ -61,7 +61,7 @@ async def test_list_capabilities(client: AsyncClient) -> None:
     assert {"image.slideshow", "media.titlecard", "video.compose", "video.lowerthird"} <= ids
     assert "project.export" in ids
     assert "image.kenburns" in ids
-    assert len(caps) == 41
+    assert len(caps) == 42
     assert {layer.value for layer in CapabilityLayer} == {
         "deterministic_media", "ai_assisted", "composition", "agent_orchestration"
     }
@@ -133,7 +133,7 @@ async def test_public_capability_presentation_omits_internal_parameter_paths(
     response = await client.get(f"{API}/capabilities")
     assert response.status_code == 200
     capabilities = response.json()
-    assert len(capabilities) == 41
+    assert len(capabilities) == 42
 
     for capability in capabilities:
         texts = [("description", capability.get("description", ""))]

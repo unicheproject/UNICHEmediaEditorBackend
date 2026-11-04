@@ -78,6 +78,22 @@ USER_TEXT: dict[str, UserText] = {
                        "storage choice above.",
         },
     },
+    "video.export": {
+        "summary": (
+            "Make a copy of a video ready for where it will be used: the web, social "
+            "media, a quick preview, or long-term archiving. Web and Preview copies "
+            "are usually lighter, but a video that is already well compressed can "
+            "come out larger; the result shows how its size compares. The Archival "
+            "copy keeps every detail and is much larger."
+        ),
+        "params": {
+            "preset": "Web plays on any website; Social makes a square or upright "
+                      "video for social media; Preview is a small file for checking; "
+                      "Archival keeps full quality for preservation.",
+            "social_format": "Square for most feeds, or upright (portrait) for "
+                             "phone-first platforms. Required for Social.",
+        },
+    },
     "video.mute": {
         "summary": "Remove the sound from a video. The picture stays exactly the same.",
     },

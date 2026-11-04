@@ -10,6 +10,7 @@ from app.capabilities.handlers._util import (
     require_input,
 )
 from app.capabilities.handlers.base import LocalToolHandler
+from app.composition.export_presets import resolve_effective_settings
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
 from app.tools import ffmpeg, pyscenedetect
@@ -88,6 +89,28 @@ class VideoTranscodeHandler(LocalToolHandler):
             quality=ctx.params.get("quality"),
         )
         return HandlerResult(data={"operation": "video.transcode", "format": fmt}, outputs=[out])
+
+
+class VideoExportHandler(LocalToolHandler):
+    capability_id = "video.export"
+
+    async def process(self, ctx: JobContext) -> HandlerResult:
+        src = require_input(ctx)
+        preset = str(require(ctx.params, "preset"))
+        request = {"preset": preset}
+        if ctx.params.get("social_format") is not None:
+            request["social_format"] = str(ctx.params["social_format"])
+        try:
+            # Canvas sizes only matter for Advanced, which video.export does not offer.
+            settings = resolve_effective_settings(request, canvas_width=0, canvas_height=0)
+        except (KeyError, ValueError) as exc:
+            raise ValidationError("Unsupported video export preset") from exc
+        suffix = preset if preset != "social" else f"social-{request['social_format']}"
+        out = _video_out(ctx, suffix, ext=settings.container.value)
+        await ffmpeg.video_export(src, str(out.path), settings)
+        return HandlerResult(
+            data={"operation": "video.export", "preset": preset}, outputs=[out]
+        )
 
 
 class VideoMuteHandler(LocalToolHandler):

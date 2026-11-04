@@ -228,6 +228,16 @@ _AUDIO_TRANSCODE_SCHEMA_CONSTRAINTS = [
     for container, options in AUDIO_TRANSCODE_OPTIONS.items()
 ]
 
+# Single-asset delivery presets (D-08). Same named destinations and encoding
+# settings as project.export, without its Advanced escape hatch.
+VIDEO_EXPORT_PRESETS: dict[str, str] = {
+    "web": "MP4/H.264 for web playback; fits within 1920x1080 without upscaling.",
+    "social": "MP4/H.264 padded to the selected square or portrait canvas.",
+    "preview": "Lightweight MP4/H.264 fitting within 1280x720 without upscaling.",
+    "archival": "Lossless MKV using FFV1 video and FLAC audio; usually much larger "
+                "than the source.",
+}
+
 # Declarative specs for the deterministic local-tool capabilities.
 _DETERMINISTIC_SPECS: list[dict] = [
     {
@@ -366,6 +376,52 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "allOf": [
             *_VIDEO_TRANSCODE_SCHEMA_CONSTRAINTS,
             {"if": {"required": ["quality"]}, "then": {"required": ["video_codec"]}},
+        ],
+    },
+    {
+        "id": "video.export",
+        "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
+        "tool": "FFmpeg",
+        "title": "Video Export",
+        "description": (
+            "Produce a delivery copy of one video for a named destination. Web, Social "
+            "and Preview are quality-targeted H.264/AAC MP4 that never upscale; output "
+            "size is not capped, so an already efficiently encoded source can come out "
+            "larger (reported in size_comparison). Archival is lossless FFV1/FLAC MKV "
+            "and is usually much larger. Use video.transcode for explicit "
+            "container/codec control and project.export for saved project compositions."
+        ),
+        "media": _V,
+        "properties": {
+            "preset": _string(
+                "Export preset",
+                "Named delivery destination.",
+                enum=list(VIDEO_EXPORT_PRESETS),
+                **{"x-enum-descriptions": VIDEO_EXPORT_PRESETS},
+            ),
+            "social_format": _string(
+                "Social canvas",
+                "Required for the social preset; orientation is never inferred.",
+                enum=["square", "portrait"],
+                **{
+                    "x-enum-descriptions": {
+                        "square": "1080 × 1080 square",
+                        "portrait": "1080 × 1920 portrait",
+                    },
+                    "x-option-constraints": {
+                        "depends_on": "preset",
+                        "allowed_values": {"social": ["square", "portrait"]},
+                    },
+                },
+            ),
+        },
+        "required": ["preset"],
+        "allOf": [
+            {
+                "if": {"properties": {"preset": {"const": "social"}}, "required": ["preset"]},
+                "then": {"required": ["social_format"]},
+                "else": {"not": {"required": ["social_format"]}},
+            }
         ],
     },
     {

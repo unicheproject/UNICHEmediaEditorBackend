@@ -18,6 +18,7 @@ from app.services.media_metadata import MetadataProbeError, probe_media, probe_v
 from app.tools import progress, runner
 from app.tools.compose_policy import (
     DEFAULT_COMPOSE_RENDER_POLICY,
+    LOSSLESS_COMPOSE_RENDER_POLICY,
     ComposeRenderPolicy,
 )
 from app.tools.export_policy import (
@@ -1028,3 +1029,33 @@ async def export_delivery_transform(
         args.extend(["-movflags", "+faststart"])
     args.extend(["-f", "mp4" if settings.container == ExportContainer.MP4 else "matroska", dst])
     await runner.run(args)
+
+
+async def video_export(src: str, dst: str, settings: EffectiveExportSettings) -> None:
+    """Render one video to a named delivery preset; publish only valid video."""
+    output = Path(dst)
+    validated = False
+    try:
+        if settings.composition_policy == CompositionPolicyId.LOSSLESS:
+            # The same locked FFV1/FLAC policy project.export's Archival uses.
+            await runner.run([
+                *_BASE, "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
+                *_compose_encode_args(LOSSLESS_COMPOSE_RENDER_POLICY), "-f", "matroska", dst,
+            ])
+        else:
+            # Quality-targeted like project.export, with no size cap: an already
+            # efficient source can come out larger, which size_comparison reports.
+            await export_delivery_transform(src, dst, settings)
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Export output is missing or empty")
+        try:
+            result = await probe_media(output, MediaType.video)
+        except MetadataProbeError as exc:
+            raise ToolError("Export output could not be read") from exc
+        if not result.has_video_stream:
+            raise ToolError("Export output does not contain valid video")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()

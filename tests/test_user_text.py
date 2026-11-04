@@ -20,6 +20,7 @@ COVERED_GROUPS = {
     "video editing": {
         "video.trim", "video.split", "video.concat", "video.transcode", "video.mute",
         "video.crop", "video.resize", "video.thumbnail", "video.audio.extract",
+        "video.export",
     },
     "image editing": {
         "image.resize", "image.crop", "image.format", "image.colour.adjust",

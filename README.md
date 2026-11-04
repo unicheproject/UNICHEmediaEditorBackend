@@ -492,7 +492,7 @@ There are three handler families behind one uniform interface
 
    | family | capabilities | tool |
    |--------|--------------|------|
-   | video | `video.trim` `video.split` `video.concat` `video.transcode` `video.mute` `video.crop` `video.resize` `video.thumbnail` | FFmpeg |
+   | video | `video.trim` `video.split` `video.concat` `video.transcode` `video.export` `video.mute` `video.crop` `video.resize` `video.thumbnail` | FFmpeg |
    | image | `image.resize` `image.crop` `image.format` `image.colour.adjust` | ImageMagick |
    | audio | `audio.trim` `audio.concat` `audio.gain` `audio.normalize` `audio.fade` `audio.denoise` `audio.transcode` | FFmpeg |
    | video audio | `video.audio.extract` | FFmpeg |
