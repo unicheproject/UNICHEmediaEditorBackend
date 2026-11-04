@@ -267,6 +267,131 @@ USER_TEXT: dict[str, UserText] = {
                     "underneath; Replace removes the original sound.",
         },
     },
+    # --- composition and export -----------------------------------------
+    "image.slideshow": {
+        "summary": (
+            "Turn a set of images into a video slideshow, showing each image for "
+            "the same length of time, in the order you arrange them."
+        ),
+        "params": {
+            "asset_ids": "The images to show, in the order they should appear.",
+            "seconds_per_image": "How long each image stays on screen, in seconds.",
+            "width": "Width of the video in pixels. 1920 with a height of 1080 is "
+                     "Full HD.",
+            "height": "Height of the video in pixels. 1080 with a width of 1920 is "
+                      "Full HD.",
+        },
+    },
+    "image.kenburns": {
+        "summary": (
+            "Turn a still image into a short video with a slow zoom and pan, "
+            "a classic documentary effect. The movement is aimed automatically at "
+            "the most important part of the picture, such as a face."
+        ),
+        "params": {
+            "duration": "Length of the video, in seconds.",
+            "zoom": "How far the camera moves in. 1.15 is a gentle zoom; 1.5 is "
+                    "strong. Must be more than 1.",
+            "direction": "In moves closer to the picture over time; Out starts close "
+                         "and moves away.",
+            "width": "Width of the video in pixels.",
+            "height": "Height of the video in pixels.",
+        },
+    },
+    "media.titlecard": {
+        "summary": (
+            "Create a short video showing a line of text, for use as an opening "
+            "title or a chapter heading in a longer video."
+        ),
+        "params": {
+            "text": "The text shown on the title card.",
+            "duration": "How long the title card lasts, in seconds.",
+            "width": "Width of the video in pixels; match the video it will join.",
+            "height": "Height of the video in pixels; match the video it will join.",
+            "background": "Background colour, as a name such as black or a code "
+                          "such as #101418.",
+            "foreground": "Text colour, as a name such as white or a code such as "
+                          "#ffffff.",
+        },
+    },
+    "video.lowerthird": {
+        "summary": (
+            "Show a name and an optional caption in a banner near the bottom of a "
+            "video, for example to introduce a speaker, for the time you choose."
+        ),
+        "params": {
+            "text": "The main line, usually a name.",
+            "caption": "An optional second line, such as a role or place.",
+            "start": "When the banner appears, in seconds from the start of the video.",
+            "duration": "How long the banner stays visible, in seconds.",
+            "position": "Where along the bottom of the picture the banner appears.",
+            "background": "Banner colour, as a name such as black or a code such as "
+                          "#101418.",
+            "foreground": "Text colour, as a name such as white or a code such as "
+                          "#ffffff.",
+        },
+    },
+    "video.subtitle.embed": {
+        "summary": (
+            "Add subtitles from a subtitle file (SRT or VTT) to a video. They can "
+            "be a track viewers switch on and off, or be printed permanently into "
+            "the picture."
+        ),
+        "params": {
+            "subtitle_asset_id": "The subtitle file to add.",
+            "mode": "Soft adds subtitles viewers can switch on and off in their "
+                    "player; Burn prints them into the picture so they always show, "
+                    "on any player or website.",
+        },
+    },
+    "video.compose": {
+        "summary": (
+            "Put several video clips together into one finished video at a single "
+            "picture size, with optional background music or narration and "
+            "optional subtitles printed into the picture."
+        ),
+        "params": {
+            "asset_ids": "The clips, in the order they should play.",
+            "width": "Width of the finished video in pixels. Clips of other sizes "
+                     "are fitted to it.",
+            "height": "Height of the finished video in pixels. Clips of other sizes "
+                      "are fitted to it.",
+            "audio_asset_id": "Optional music or narration to add to the whole video.",
+            "audio_mode": "Mix plays it together with the clips' own sound; Duck "
+                          "keeps it quiet underneath; Replace removes the clips' "
+                          "own sound.",
+            "music_volume": "How loud the added music or narration is. 1 is its own "
+                            "volume, 0.3 is a quiet background.",
+            "subtitle_asset_id": "Optional subtitle file to print into the picture.",
+        },
+    },
+    "project.export": {
+        "summary": (
+            "Produce the final file of a saved project, prepared for where it will "
+            "be used: the web, social media, a quick preview, or long-term "
+            "archiving."
+        ),
+        "params": {
+            "composition_revision_id": "The saved version of the project to export.",
+            "preset": "Web plays on any website; Social makes a square or upright "
+                      "video for social media; Preview is a small file for checking; "
+                      "Archival keeps full quality for preservation (very large "
+                      "files); Advanced lets you set the details yourself.",
+            "social_format": "Square for most feeds, or upright (portrait) for "
+                             "phone-first platforms. Required for Social.",
+            "format": "File type for Advanced exports. MP4 plays almost everywhere.",
+            "video_codec": "How the picture is stored, for Advanced exports.",
+            "audio_codec": "How the sound is stored, for Advanced exports.",
+            "max_width": "Optional largest width in pixels. Smaller videos are never "
+                         "enlarged.",
+            "max_height": "Optional largest height in pixels. Smaller videos are "
+                          "never enlarged.",
+            "crf": "Picture quality for Advanced exports: lower numbers mean better "
+                   "quality and larger files. 22 is a good balance.",
+            "audio_bitrate_kbps": "Sound quality for Advanced exports: higher means "
+                                  "better sound and larger files. 128 suits most uses.",
+        },
+    },
 }
 
 

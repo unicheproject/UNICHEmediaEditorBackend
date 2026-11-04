@@ -29,6 +29,10 @@ COVERED_GROUPS = {
         "audio.trim", "audio.concat", "audio.gain", "audio.normalize", "audio.fade",
         "audio.transcode", "audio.denoise", "audio.mix",
     },
+    "composition and export": {
+        "image.slideshow", "image.kenburns", "media.titlecard", "video.lowerthird",
+        "video.subtitle.embed", "video.compose", "project.export",
+    },
 }
 # Implementation vocabulary the target user does not have.
 JARGON = (
