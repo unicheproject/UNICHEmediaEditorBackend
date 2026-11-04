@@ -158,6 +158,29 @@ def validate_job_input(capability: CapabilityMetadata, job_input: dict) -> None:
         raise ValidationError(f"Invalid capability input: {exc}") from exc
 
 
+def _size_comparison(job: Job, ctx: JobContext, outputs: list[Asset]) -> dict | None:
+    """Compare output bytes to the primary input when the comparison is meaningful.
+
+    Only for Jobs with a primary Asset whose outputs all share its media type
+    (e.g. transcode/resize/trim/split, not a video thumbnail or audio extract).
+    Multiple outputs (split segments) are summed. Purely informational: a larger
+    output is reported, never treated as a failure.
+    """
+    input_size = ctx.input_asset_meta.get("size_bytes")
+    input_type = ctx.input_asset_meta.get("media_type")
+    if job.asset_id is None or not isinstance(input_size, int) or input_size <= 0:
+        return None
+    if not outputs or any(asset.media_type.value != input_type for asset in outputs):
+        return None
+    output_size = sum(asset.size_bytes for asset in outputs)
+    return {
+        "input_size_bytes": input_size,
+        "output_size_bytes": output_size,
+        "delta_bytes": output_size - input_size,
+        "ratio": round(output_size / input_size, 4),
+    }
+
+
 def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: dict) -> None:
     """Reject requests outside the source using already-probed metadata, if available.
 
@@ -430,6 +453,7 @@ async def _build_job_context(
                 "media_type": asset.media_type.value,
                 "mime_type": asset.mime_type,
                 "checksum_sha256": asset.checksum_sha256,
+                "size_bytes": asset.size_bytes,
             }
             project_id = project_id or asset.project_id
 
@@ -513,6 +537,9 @@ async def _persist_outputs(
                 "media_type": asset.media_type.value, "size_bytes": asset.size_bytes,
                 "download_path": f"/api/v1/assets/{asset.id}/download",
             } for asset in prepared]
+            comparison = _size_comparison(job, ctx, prepared)
+            if comparison is not None:
+                output["size_comparison"] = comparison
         changed = await session.execute(
             update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
             .values(status=JobStatus.succeeded, output=output, progress=100,

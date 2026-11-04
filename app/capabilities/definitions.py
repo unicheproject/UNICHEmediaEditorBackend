@@ -142,7 +142,22 @@ _FILE_OUTPUT_SCHEMA = {
                     "download_path": {"type": "string"},
                 },
             },
-        }
+        },
+        "size_comparison": {
+            "type": "object",
+            "description": (
+                "Present when the Job has a primary input Asset and every output has "
+                "its media type. Sizes in bytes; outputs are summed; ratio is "
+                "output/input, so a value above 1 means the result is larger."
+            ),
+            "properties": {
+                "input_size_bytes": {"type": "integer"},
+                "output_size_bytes": {"type": "integer"},
+                "delta_bytes": {"type": "integer"},
+                "ratio": {"type": "number"},
+            },
+            "required": ["input_size_bytes", "output_size_bytes", "delta_bytes", "ratio"],
+        },
     },
 }
 

@@ -615,7 +615,10 @@ async def _execute_render_group(
         )
         ctx = JobContext(
             capability_id="agent.render_group", input_path=str(source_path),
-            input_asset_meta={"media_type": source_asset.media_type.value},
+            input_asset_meta={
+                "media_type": source_asset.media_type.value,
+                "size_bytes": source_asset.size_bytes,
+            },
             work_dir=work_dir, project_id=project_id, source_asset_id=source_asset.id,
             contributing_asset_ids=[source_asset.id],
         )
