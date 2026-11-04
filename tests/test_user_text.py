@@ -33,6 +33,12 @@ COVERED_GROUPS = {
         "image.slideshow", "image.kenburns", "media.titlecard", "video.lowerthird",
         "video.subtitle.embed", "video.compose", "project.export",
     },
+    "AI-assisted": {
+        "audio.transcribe", "subtitle.autogenerate", "audio.tts", "audio.music.generate",
+        "audio.separate.stems", "image.background.remove", "image.inpaint",
+        "image.restore.face", "image.caption", "image.tag", "video.upscale",
+        "video.shot.detect",
+    },
 }
 # Implementation vocabulary the target user does not have.
 JARGON = (
@@ -87,10 +93,18 @@ def test_user_text_drift_fails_loudly() -> None:
         apply_user_text(caps, {"video.mute": {"params": {"missing": "x"}}})
 
 
-def test_capabilities_without_text_report_null_summary() -> None:
-    uncovered = [cid for cid in CAPABILITIES_BY_ID if cid not in USER_TEXT]
-    assert uncovered
-    assert all(CAPABILITIES_BY_ID[cid].summary is None for cid in uncovered)
+def test_every_capability_has_user_text_in_exactly_one_group() -> None:
+    grouped = [cid for group in COVERED_GROUPS.values() for cid in group]
+    assert len(grouped) == len(set(grouped))
+    assert set(grouped) == set(CAPABILITIES_BY_ID) == set(USER_TEXT)
+
+
+@pytest.mark.parametrize("capability_id", sorted(USER_TEXT))
+def test_user_text_leaves_availability_to_readiness(capability_id: str) -> None:
+    # Availability is reported by readiness; text saying otherwise would go stale.
+    for text in _texts(capability_id):
+        assert "not available" not in text.lower(), (capability_id, text)
+        assert "not implemented" not in text.lower(), (capability_id, text)
 
 
 async def test_api_exposes_summary_and_x_help(client: AsyncClient) -> None:

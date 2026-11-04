@@ -392,6 +392,126 @@ USER_TEXT: dict[str, UserText] = {
                                   "better sound and larger files. 128 suits most uses.",
         },
     },
+    # --- AI-assisted -----------------------------------------------------
+    # Summaries describe what the operation does. Whether it can run on this
+    # installation is reported separately by readiness/availability, so these
+    # texts must not say "not available".
+    "audio.transcribe": {
+        "summary": (
+            "Write out the words spoken in an audio recording or video as text. "
+            "The result is produced by AI, so check names and specialist terms."
+        ),
+        "params": {
+            "asset_id": "The recording or video whose speech should be written out.",
+        },
+    },
+    "subtitle.autogenerate": {
+        "summary": (
+            "Create subtitles with timings automatically from the speech in a "
+            "recording or video, ready to add to the video. Produced by AI; check "
+            "them before publishing."
+        ),
+        "params": {
+            "asset_id": "The recording or video to create subtitles for.",
+        },
+    },
+    "audio.tts": {
+        "summary": (
+            "Turn written text into spoken narration with an AI voice, added to "
+            "your library as an audio recording."
+        ),
+        "params": {
+            "text": "The text to be read aloud.",
+            "voice": "Optional voice to use. Leave empty for the default voice.",
+        },
+    },
+    "audio.music.generate": {
+        "summary": (
+            "Create original background music with AI from a short description of "
+            "the mood or style you want."
+        ),
+        "params": {
+            "prompt": "Describe the music, for example 'calm piano, slow, reflective'.",
+        },
+    },
+    "audio.separate.stems": {
+        "summary": (
+            "Split a recording into separate parts, such as voice and music, so "
+            "each can be used or adjusted on its own. Done with AI."
+        ),
+        "params": {
+            "asset_id": "The recording to split into parts.",
+        },
+    },
+    "image.background.remove": {
+        "summary": (
+            "Remove the background of an image and keep only the main subject. "
+            "Done with AI."
+        ),
+        "params": {
+            "asset_id": "The image whose background should be removed.",
+        },
+    },
+    "image.inpaint": {
+        "summary": (
+            "Fill in or replace a marked area of an image, for example to remove "
+            "a scratch or an unwanted object. Done with AI, which invents the new "
+            "content; label results accordingly."
+        ),
+        "params": {
+            "asset_id": "The image to change.",
+            "mask_url": "The marked area to fill in or replace.",
+            "prompt": "Describe what should appear in the marked area.",
+        },
+    },
+    "image.restore.face": {
+        "summary": (
+            "Make faces in an old or blurry image clearer. Done with AI, which can "
+            "change how a face looks; compare with the original."
+        ),
+        "params": {
+            "asset_id": "The image with faces to restore.",
+        },
+    },
+    "image.caption": {
+        "summary": (
+            "Write a short description of what an image shows, useful as alt text "
+            "or a starting point for a caption. Produced by AI; check it before use."
+        ),
+        "params": {
+            "asset_id": "The image to describe.",
+        },
+    },
+    "image.tag": {
+        "summary": (
+            "Suggest keywords describing what an image shows, to help organise and "
+            "find it later. Produced by AI; review them before use."
+        ),
+        "params": {
+            "asset_id": "The image to suggest keywords for.",
+        },
+    },
+    "video.upscale": {
+        "summary": (
+            "Make the picture of a video larger while recreating fine detail, so "
+            "it stays sharp instead of looking blurry. Done with AI."
+        ),
+        "params": {
+            "asset_id": "The video to enlarge.",
+        },
+    },
+    "video.shot.detect": {
+        "summary": (
+            "Find the points in a video where one shot or scene changes to the next, "
+            "and list their times. Nothing is cut; use the times to split or trim "
+            "the video afterwards."
+        ),
+        "params": {
+            "threshold": "How big a change counts as a new shot. Lower finds more "
+                         "changes, including small ones; higher finds only clear cuts. "
+                         "Keep the default if unsure.",
+        },
+    },
 }
 
 
