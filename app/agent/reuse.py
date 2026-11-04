@@ -32,7 +32,8 @@ from app.services.assets import ensure_asset_binary_available, get_asset
 # deliberate version bump. Providers, generators, multi-output, JSON-only,
 # external-state and composition capabilities are deliberately absent.
 REUSE_VERSIONS: dict[str, str] = {
-    "video.trim": "1",
+    # 2: empty/out-of-range windows are rejected; end is optional.
+    "video.trim": "2",
     "video.concat": "1",
     # Quality was historically accepted as an unknown extra parameter and
     # ignored. A retry with that same input now has different output semantics.
@@ -47,7 +48,8 @@ REUSE_VERSIONS: dict[str, str] = {
     "image.crop": "1",
     "image.format": "1",
     "image.colour.adjust": "1",
-    "audio.trim": "1",
+    # 2: empty/out-of-range windows are rejected; end is optional.
+    "audio.trim": "2",
     "audio.concat": "1",
     "audio.gain": "1",
     "audio.normalize": "1",

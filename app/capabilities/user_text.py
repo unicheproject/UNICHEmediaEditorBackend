@@ -198,12 +198,15 @@ USER_TEXT: dict[str, UserText] = {
     },
     # --- audio -----------------------------------------------------------
     "audio.trim": {
-        "summary": "Keep one part of an audio recording and discard the rest.",
+        "summary": (
+            "Keep one part of an audio recording and discard the rest. Leave the end "
+            "empty to keep everything until the end of the recording."
+        ),
         "params": {
             "start": "Where the part you want to keep begins, in seconds from the "
                      "start of the recording.",
-            "end": "Where the part you want to keep ends, in seconds from the start "
-                   "of the recording.",
+            "end": "Where the part you want to keep ends, in seconds. Leave empty to "
+                   "keep everything until the end of the recording.",
         },
     },
     "audio.concat": {

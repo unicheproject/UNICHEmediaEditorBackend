@@ -71,6 +71,7 @@ def resolve_trim_window(
     *,
     duration: float | None,
     frame_rate: float | None,
+    media: str = "video",
 ) -> float | None:
     """Validate a trim interval against known source timing; return the effective end.
 
@@ -85,7 +86,7 @@ def resolve_trim_window(
     if duration is not None and duration > 0:
         if start >= duration:
             raise ValidationError(
-                f"Trim start must be before the end of the video ({duration:.3f} s)"
+                f"Trim start must be before the end of the {media} ({duration:.3f} s)"
             )
         if end is not None and end >= duration:
             end = None
@@ -546,12 +547,43 @@ async def video_thumbnail(src: str, dst: str, timestamp: float) -> None:
 # --- audio ---------------------------------------------------------------
 
 
-async def audio_trim(src: str, dst: str, start: float, end: float) -> None:
-    if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
-        progress.expect_output_seconds(end - start)
-    await runner.run(
-        [*_BASE, "-i", src, "-ss", _num(start, "start"), "-to", _num(end, "end"), dst]
+async def audio_trim(src: str, dst: str, start: float, end: float | None = None) -> None:
+    """Keep [start, end) (or start onward) and publish only output with audio."""
+    _num(start, "start")
+    if end is not None:
+        _num(end, "end")
+    try:
+        metadata = await probe_media(Path(src), MediaType.audio)
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot read source audio timing for trim") from exc
+    if not metadata.has_audio_stream:
+        raise ValidationError("Trim source does not contain an audio stream")
+    effective_end = resolve_trim_window(
+        start, end, duration=metadata.duration_seconds, frame_rate=None, media="audio",
     )
+    args = [*_BASE, "-i", src, "-ss", str(start)]
+    if effective_end is not None:
+        args += ["-to", str(effective_end)]
+    stop = effective_end if effective_end is not None else metadata.duration_seconds
+    if stop is not None:
+        progress.expect_output_seconds(stop - start)
+    output = Path(dst)
+    validated = False
+    try:
+        await runner.run([*args, dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Trim output is missing or empty")
+        try:
+            result = await probe_media(output, MediaType.audio)
+        except MetadataProbeError as exc:
+            raise ToolError("Trim output could not be read") from exc
+        if not result.has_audio_stream or not result.duration_seconds:
+            raise ToolError("Trim output does not contain audio")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 async def audio_concat(sources: list[str], dst: str) -> None:

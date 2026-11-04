@@ -39,7 +39,7 @@ class AudioTrimHandler(LocalToolHandler):
         src = require_input(ctx)
         out = _audio_out(ctx, "trim")
         await ffmpeg.audio_trim(
-            src, str(out.path), require(ctx.params, "start"), require(ctx.params, "end")
+            src, str(out.path), require(ctx.params, "start"), ctx.params.get("end")
         )
         return HandlerResult(data={"operation": "audio.trim"}, outputs=[out])
 

@@ -80,6 +80,7 @@ def _check_time_interval(value: Mapping[str, Any]) -> None:
 # the video duration are checked at admission and again at execution.
 _SEMANTIC_CHECKS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     "video.trim": _check_time_interval,
+    "audio.trim": _check_time_interval,
 }
 
 

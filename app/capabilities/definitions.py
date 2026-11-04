@@ -611,15 +611,27 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "FFmpeg",
         "title": "Audio Trim",
-        "description": "Trim an audio clip to a start/end time range (seconds).",
+        "description": (
+            "Keep one interval of an audio clip and return one audio clip. Omit the "
+            "end to keep from the start time onward."
+        ),
         "media": _A,
         "properties": {
             "start": _number(
-                "Start time", "Start time in seconds.", **{"x-unit": "seconds"}
+                "Start time",
+                "Start of the interval to keep, in seconds. Must be before the audio ends.",
+                minimum=0,
+                **{"x-unit": "seconds"},
             ),
-            "end": _number("End time", "End time in seconds.", **{"x-unit": "seconds"}),
+            "end": _number(
+                "End time",
+                "Optional end of the interval to keep, in seconds; must be after the start. "
+                "Omit it, or give a time past the end of the audio, to keep until the end.",
+                exclusiveMinimum=0,
+                **{"x-unit": "seconds"},
+            ),
         },
-        "required": ["start", "end"],
+        "required": ["start"],
     },
     {
         "id": "audio.concat",

@@ -200,6 +200,14 @@ def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: d
             duration=asset.duration_seconds,
             frame_rate=asset.frame_rate,
         )
+    elif capability_id == "audio.trim":
+        ffmpeg.resolve_trim_window(
+            job_input["start"],
+            job_input.get("end"),
+            duration=asset.duration_seconds,
+            frame_rate=None,
+            media="audio",
+        )
     elif capability_id == "video.thumbnail":
         ffmpeg.check_thumbnail_time(job_input["timestamp"], duration=asset.duration_seconds)
     elif capability_id == "video.crop" and asset.width and asset.height:
