@@ -15,7 +15,7 @@ from app.capabilities.media_options import VIDEO_QUALITY_CRF, VIDEO_TRANSCODE_OP
 from app.core.errors import ToolError, ValidationError
 from app.models.enums import MediaType
 from app.services.media_metadata import MetadataProbeError, probe_media, probe_video_timeline
-from app.tools import runner
+from app.tools import progress, runner
 from app.tools.compose_policy import (
     DEFAULT_COMPOSE_RENDER_POLICY,
     ComposeRenderPolicy,
@@ -112,6 +112,9 @@ async def video_trim(src: str, dst: str, start: float, end: float | None = None)
     args = [*_BASE, "-i", src, "-ss", str(start)]
     if effective_end is not None:
         args += ["-to", str(effective_end)]
+    stop = effective_end if effective_end is not None else metadata.duration_seconds
+    if stop is not None:
+        progress.expect_output_seconds(stop - start)
     output = Path(dst)
     validated = False
     try:
@@ -543,6 +546,8 @@ async def video_thumbnail(src: str, dst: str, timestamp: float) -> None:
 
 
 async def audio_trim(src: str, dst: str, start: float, end: float) -> None:
+    if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
+        progress.expect_output_seconds(end - start)
     await runner.run(
         [*_BASE, "-i", src, "-ss", _num(start, "start"), "-to", _num(end, "end"), dst]
     )

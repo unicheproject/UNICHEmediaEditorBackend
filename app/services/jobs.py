@@ -24,6 +24,7 @@ from app.capabilities.validation import (
     iter_media_asset_references,
     validate_capability_input,
 )
+from app.core.database import async_session_factory
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.asset import Asset
@@ -36,6 +37,7 @@ from app.services.assets import ensure_asset_binary_available, get_asset
 from app.services.projects import get_project
 from app.services.storage import get_storage
 from app.services.waveforms import enrich_asset_waveform
+from app.tools import progress
 from app.workers.queue import DispatchOutcome
 
 logger = get_logger(__name__)
@@ -442,10 +444,12 @@ async def _build_job_context(
     for raw in (job.input or {}).get("asset_ids", []) or []:
         asset_ids.append(raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw)))
 
+    durations: list[float | None] = []
     for idx, aid in enumerate(asset_ids):
         asset = await get_asset(session, aid)
         path = str(storage.get_path(asset.storage_path))
         input_paths.append(path)
+        durations.append(asset.duration_seconds)
         if idx == 0:
             input_path = path
             input_asset_meta = {
@@ -478,6 +482,10 @@ async def _build_job_context(
         input_paths=input_paths,
         input_asset_ids=asset_ids,
         named_input_paths=named_input_paths,
+        expected_media_seconds=(
+            sum(d for d in durations if d is not None)
+            if durations and all(d is not None and d > 0 for d in durations) else None
+        ),
         work_dir=work_dir,
         project_id=project_id,
         source_asset_id=source_asset_id,
@@ -601,6 +609,39 @@ async def _discard_unpublished_outputs(
             assets_svc.discard_prepared_asset(project_id, asset_id)
 
 
+# Tracked processing maps onto PROGRESS_START..PROGRESS_END; publication sets 100.
+PROGRESS_START = 15
+PROGRESS_END = 95
+PROGRESS_MIN_INTERVAL_SECONDS = 1.0
+
+
+def _progress_sink(job_id: uuid.UUID) -> progress.ProgressSink:
+    """Throttled, fenced progress writes in their own short sessions.
+
+    Only a still-running Job is updated, so cancellation/terminal states win.
+    Errors are swallowed by the tracker; progress never fails processing.
+    """
+    last_written = PROGRESS_START
+    last_at = 0.0
+
+    async def write(fraction: float) -> None:
+        nonlocal last_written, last_at
+        value = PROGRESS_START + int(fraction * (PROGRESS_END - PROGRESS_START))
+        now = asyncio.get_running_loop().time()
+        if value <= last_written or now - last_at < PROGRESS_MIN_INTERVAL_SECONDS:
+            return
+        async with async_session_factory() as progress_session:
+            await progress_session.execute(
+                update(Job).where(
+                    Job.id == job_id, Job.status == JobStatus.running, Job.progress < value,
+                ).values(progress=value).execution_options(synchronize_session=False)
+            )
+            await progress_session.commit()
+        last_written, last_at = value, now
+
+    return write
+
+
 async def execute_job(
     session: AsyncSession,
     job_id: uuid.UUID,
@@ -622,16 +663,20 @@ async def execute_job(
         await require_worker_readiness(registry.get(job.capability_id))
         ctx = await _build_job_context(session, job, work_dir)
         handler = registry.get_handler(job.capability_id)
-        changed = await session.execute(
-            update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
-            .values(progress=50).execution_options(synchronize_session=False)
-        )
-        await session.commit()
-        if cast(CursorResult, changed).rowcount != 1:
-            await session.refresh(job)
-            return job
+        sink = _progress_sink(job_id)
+        with progress.tracking(ctx.expected_media_seconds, sink) as tracked:
+            # Without a measurable duration, keep the historical midpoint marker.
+            changed = await session.execute(
+                update(Job).where(Job.id == job_id, Job.status == JobStatus.running)
+                .values(progress=PROGRESS_START if tracked else 50)
+                .execution_options(synchronize_session=False)
+            )
+            await session.commit()
+            if cast(CursorResult, changed).rowcount != 1:
+                await session.refresh(job)
+                return job
 
-        result = await handler.run(ctx)
+            result = await handler.run(ctx)
         await _persist_outputs(
             session,
             job,

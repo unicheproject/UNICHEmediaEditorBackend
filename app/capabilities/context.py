@@ -44,6 +44,9 @@ class JobContext:
     # Present only for the source-less project.export capability; the worker
     # resolves it from the exact revision before invoking the handler.
     project_export: ProjectExportExecution | None = None
+    # Summed probed duration of the ordered inputs, when every input's duration
+    # is known. Drives duration-based FFmpeg progress; None disables it.
+    expected_media_seconds: float | None = None
 
     def out_path(self, filename: str) -> Path:
         """Absolute path inside the scratch dir for a named output file."""

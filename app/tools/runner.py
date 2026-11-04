@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app.core.errors import ToolError
 from app.core.logging import get_logger
+from app.tools import progress
 from app.tools.process_policy import IO_CHUNK_BYTES, media_process
 
 logger = get_logger(__name__)
@@ -21,6 +22,8 @@ DEFAULT_TIMEOUT = 600.0
 # match the existing metadata-probe cap rather than allowing arbitrary output.
 MAX_STDOUT_BYTES = 1024 * 1024
 MAX_STDERR_BYTES = 16 * 1024
+# FFmpeg -progress lines are short key=value pairs; anything longer is dropped.
+MAX_PROGRESS_LINE_BYTES = 4096
 
 
 async def _stdout(stream: asyncio.StreamReader) -> bytes:
@@ -32,13 +35,38 @@ async def _stdout(stream: asyncio.StreamReader) -> bytes:
     return bytes(output)
 
 
+async def _progress_stdout(
+    stream: asyncio.StreamReader, tracker: progress.ProgressTracker
+) -> bytes:
+    """Parse FFmpeg -progress output incrementally; nothing is retained."""
+    pending = b""
+    last_seconds = 0.0
+    while chunk := await stream.read(IO_CHUNK_BYTES):
+        *lines, pending = (pending + chunk).split(b"\n")
+        if len(pending) > MAX_PROGRESS_LINE_BYTES:
+            pending = b""
+        for raw in lines:
+            seconds = progress.parse_out_time_seconds(raw.decode("utf-8", errors="replace"))
+            if seconds is not None:
+                last_seconds = max(last_seconds, seconds)
+                await tracker.update(last_seconds)
+    tracker.finish_run(last_seconds)
+    return b""
+
+
 async def _stderr(stream: asyncio.StreamReader, tail: bytearray) -> None:
     while chunk := await stream.read(IO_CHUNK_BYTES):
         tail.extend(chunk)
         del tail[:-MAX_STDERR_BYTES]
 
 
-async def _exec(args: list[str], timeout: float, *, capture_stdout: bool) -> tuple[str, str]:
+async def _exec(
+    args: list[str],
+    timeout: float,
+    *,
+    capture_stdout: bool,
+    tracker: progress.ProgressTracker | None = None,
+) -> tuple[str, str]:
     """Drain bounded I/O; diagnostics stay server-side, never in ToolError."""
     executable = Path(args[0]).name
     tool = (executable if executable in {"ffmpeg", "ffprobe", "convert", "identify"}
@@ -46,7 +74,9 @@ async def _exec(args: list[str], timeout: float, *, capture_stdout: bool) -> tup
     tail = bytearray()
     try:
         async with media_process(
-            args, stdout=asyncio.subprocess.PIPE if capture_stdout else asyncio.subprocess.DEVNULL,
+            args,
+            stdout=(asyncio.subprocess.PIPE if capture_stdout or tracker
+                    else asyncio.subprocess.DEVNULL),
             stderr=asyncio.subprocess.PIPE,
         ) as proc:
             assert proc.stderr is not None
@@ -56,6 +86,9 @@ async def _exec(args: list[str], timeout: float, *, capture_stdout: bool) -> tup
                 assert proc.stdout is not None
                 output_task = asyncio.create_task(_stdout(proc.stdout))
                 tasks.append(output_task)
+            elif tracker is not None:
+                assert proc.stdout is not None
+                tasks.append(asyncio.create_task(_progress_stdout(proc.stdout, tracker)))
             tasks.append(asyncio.create_task(proc.wait()))
             try:
                 async with asyncio.timeout(timeout):
@@ -86,8 +119,17 @@ async def _exec(args: list[str], timeout: float, *, capture_stdout: bool) -> tup
 
 
 async def run(args: list[str], *, timeout: float = DEFAULT_TIMEOUT) -> str:
-    """Discard stdout; return only a bounded stderr tail for internal callers."""
-    _stdout, stderr = await _exec(args, timeout, capture_stdout=False)
+    """Discard stdout; return only a bounded stderr tail for internal callers.
+
+    Inside a Job with active progress tracking, FFmpeg runs additionally report
+    machine-readable progress on stdout, which is parsed and discarded.
+    """
+    tracker = progress.current()
+    if tracker is not None and Path(args[0]).name == "ffmpeg":
+        args = [args[0], "-progress", "pipe:1", "-nostats", *args[1:]]
+    else:
+        tracker = None
+    _stdout, stderr = await _exec(args, timeout, capture_stdout=False, tracker=tracker)
     return stderr
 
 
