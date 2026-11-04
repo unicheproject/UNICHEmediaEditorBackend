@@ -82,7 +82,14 @@ class CapabilityAvailability(BaseModel):
 class CapabilityMetadata(BaseModel):
     id: str
     title: str
-    description: str
+    description: str = Field(description=(
+        "Precise operational contract, also used verbatim by the Agent planner."
+    ))
+    summary: str | None = Field(default=None, description=(
+        "Plain-language explanation for end users without editing background. "
+        "Parameters carry the matching x-help. Not used by the Agent planner; "
+        "null where no user-facing text has been written yet."
+    ))
     layer: CapabilityLayer = Field(
         description="Product-facing capability layer; not a readiness or cost classification."
     )

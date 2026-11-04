@@ -20,6 +20,7 @@ from app.capabilities.media_options import (
     VIDEO_QUALITY_DESCRIPTIONS,
     VIDEO_TRANSCODE_OPTIONS,
 )
+from app.capabilities.user_text import apply_user_text
 from app.composition.export_presets import project_export_input_schema
 from app.models.enums import AiContentEffect, CostClass, MediaType
 from app.schemas.capability import (
@@ -1318,5 +1319,7 @@ CAPABILITIES: list[CapabilityDef] = [
         output_schema=_FILE_OUTPUT_SCHEMA,
     ),
 ]
+
+CAPABILITIES = apply_user_text(CAPABILITIES)
 
 CAPABILITIES_BY_ID: dict[str, CapabilityDef] = {c.id: c for c in CAPABILITIES}
