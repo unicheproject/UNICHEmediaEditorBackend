@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import false as sa_false
+from sqlalchemy.sql import func
 
 from app.models.base import Base, JSONType, SoftDeleteMixin, TimestampMixin
 from app.models.enums import (
@@ -65,6 +66,11 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     # Immediate/best-effort input anchor, NOT an Original/Derived classifier.
     source_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assets.id"), nullable=True, index=True
+    )
+    # User-visible modification time (rename today). Unlike updated_at it is not
+    # touched by background analysis (metadata probe, waveform, Temp expiry).
+    modified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     provenance_kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ProvenanceKind.unknown.value,

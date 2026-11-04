@@ -186,6 +186,7 @@ async def search_assets(
     # Cast native PostgreSQL enums so type ordering matches the public alphabetical contract.
     column = {
         "created_at": Asset.created_at,
+        "modified_at": Asset.modified_at,
         "name": func.lower(Asset.original_filename),
         "size": Asset.size_bytes,
         "type": cast(Asset.media_type, String),
@@ -256,8 +257,9 @@ async def update_asset(
     """Rename an asset: local metadata only, no physical file/storage_path change."""
     asset = await get_asset(session, asset_id)
     fields = data.model_dump(exclude_unset=True)
-    if "original_filename" in fields:
+    if "original_filename" in fields and fields["original_filename"] != asset.original_filename:
         asset.original_filename = fields["original_filename"]
+        asset.modified_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(asset)
     return asset

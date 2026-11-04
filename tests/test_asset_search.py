@@ -292,7 +292,7 @@ def test_asset_search_openapi_contract() -> None:
     assert parameters["limit"]["minimum"] == 1 and parameters["limit"]["maximum"] == 200
     assert parameters["offset"]["minimum"] == 0
     assert parameters["offset"]["maximum"] == 2147483647
-    assert parameters["sort_by"]["enum"] == ["created_at", "name", "size", "type"]
+    assert parameters["sort_by"]["enum"] == ["created_at", "modified_at", "name", "size", "type"]
     assert parameters["sort_order"]["enum"] == ["asc", "desc"]
     assert parameters["include_intermediate"]["default"] is False
     assert "200" in operation["responses"]

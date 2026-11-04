@@ -106,10 +106,10 @@ def test_postgres_asset_search(monkeypatch: pytest.MonkeyPatch) -> None:
                 assert not rows and total == 5
 
                 await session.execute(update(Asset).values(
-                    created_at=epoch, original_filename="same", size_bytes=1,
-                    media_type=MediaType.image,
+                    created_at=epoch, modified_at=epoch, original_filename="same",
+                    size_bytes=1, media_type=MediaType.image,
                 ))
-                for sort_by in ["created_at", "name", "size", "type"]:
+                for sort_by in ["created_at", "modified_at", "name", "size", "type"]:
                     for order in ["asc", "desc"]:
                         actual = []
                         for offset in [0, 2, 4]:

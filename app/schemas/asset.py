@@ -34,9 +34,10 @@ class AssetSearchQuery(BaseModel):
         ),
     )
     media_type: MediaType | None = Field(default=None, description="Omit to include all types.")
-    sort_by: Literal["created_at", "name", "size", "type"] = Field(
+    sort_by: Literal["created_at", "modified_at", "name", "size", "type"] = Field(
         default="created_at",
         description=(
+            "created_at: date added; modified_at: date of the last user change (rename); "
             "name: case-insensitive display name; size: bytes; type: alphabetical media type. "
             "Asset ID breaks ties in the selected direction."
         ),
@@ -139,6 +140,10 @@ class AssetRead(ORMModel):
     technical_streams: dict | None
     waveform_status: WaveformStatus
     waveform_reason: WaveformReason | None
-    created_at: datetime
+    created_at: datetime = Field(description="When the Asset was added to the project.")
+    modified_at: datetime = Field(description=(
+        "When a user last changed the Asset (currently: rename). Equals created_at "
+        "until then; background analysis does not change it, unlike updated_at."
+    ))
     updated_at: datetime
     deleted_at: datetime | None

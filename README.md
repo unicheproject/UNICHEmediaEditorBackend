@@ -262,8 +262,11 @@ Optional `q` matches a literal, case-insensitive substring of the display name
 whitespace is ignored; empty text means no name filter. `q` is at most 512
 characters and cannot contain NUL. Optional `media_type` is
 `image|audio|video|subtitle|unknown`; omit it for all types.
-`sort_by=created_at|name|size|type` defaults to `created_at`, and
-`sort_order=asc|desc` defaults to `desc`. Name sorting is case-insensitive,
+`sort_by=created_at|modified_at|name|size|type` defaults to `created_at`, and
+`sort_order=asc|desc` defaults to `desc`. `created_at` is the date added;
+`modified_at` is the last user change (currently rename) and equals `created_at`
+until then; unlike `updated_at` it ignores background analysis such as metadata
+probing and waveforms. Name sorting is case-insensitive,
 size is in bytes, and type is alphabetical; Asset ID breaks ties in the same
 direction. Pagination uses `limit` (default 50, range 1–200) and `offset`
 (default 0, range 0–2147483647); `total` counts filtered matches before pagination.
