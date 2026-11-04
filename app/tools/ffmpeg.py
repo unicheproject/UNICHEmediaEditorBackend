@@ -412,9 +412,66 @@ async def video_mute(src: str, dst: str) -> None:
     await runner.run([*_BASE, "-i", src, "-an", "-c:v", "copy", dst])
 
 
+def check_crop_rectangle(
+    x: int, y: int, width: int, height: int, *, frame_width: int, frame_height: int
+) -> None:
+    """Reject a crop rectangle that does not lie fully inside the displayed frame.
+
+    FFmpeg's crop filter would otherwise silently move the rectangle inward and
+    produce a different region than requested.
+    """
+    if x < 0 or y < 0:
+        raise ValidationError("Crop offsets must not be negative")
+    if x + width > frame_width or y + height > frame_height:
+        raise ValidationError(
+            f"Crop rectangle must fit inside the video ({frame_width}×{frame_height}): "
+            f"x + width ≤ {frame_width} and y + height ≤ {frame_height}"
+        )
+
+
+async def probe_display_size(path: str) -> tuple[int, int]:
+    """Return the first video stream's size as displayed, i.e. after rotation.
+
+    FFmpeg auto-rotates before filters, so crop coordinates refer to this size,
+    not the coded width/height stored in Asset technical metadata.
+    """
+    out = await runner.run_stdout([
+        FFPROBE, "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height:stream_side_data=rotation:stream_tags=rotate",
+        "-of", "json", path,
+    ])
+    try:
+        stream = json.loads(out)["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ToolError("Cannot read source video dimensions") from exc
+    rotation: object = next(
+        (entry["rotation"] for entry in stream.get("side_data_list", [])
+         if isinstance(entry, dict) and "rotation" in entry),
+        stream.get("tags", {}).get("rotate", 0),
+    )
+    try:
+        quarter_turn = round(float(str(rotation))) % 180 == 90
+    except ValueError:
+        quarter_turn = False
+    return (height, width) if quarter_turn else (width, height)
+
+
 async def video_crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> None:
     crop = f"crop={_num(width, 'width')}:{_num(height, 'height')}:{_num(x, 'x')}:{_num(y, 'y')}"
-    await runner.run([*_BASE, "-i", src, "-vf", crop, dst])
+    frame_width, frame_height = await probe_display_size(src)
+    check_crop_rectangle(x, y, width, height, frame_width=frame_width, frame_height=frame_height)
+    output = Path(dst)
+    validated = False
+    try:
+        await runner.run([*_BASE, "-i", src, "-vf", crop, dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Crop output is missing or empty")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 async def video_resize(src: str, dst: str, width: int, height: int) -> None:
@@ -422,10 +479,41 @@ async def video_resize(src: str, dst: str, width: int, height: int) -> None:
     await runner.run([*_BASE, "-i", src, "-vf", scale, dst])
 
 
+def check_thumbnail_time(timestamp: float, *, duration: float | None) -> None:
+    """Reject a frame time outside the video; unknown duration defers to execution."""
+    if timestamp < 0:
+        raise ValidationError("Thumbnail time must not be negative")
+    if duration is not None and duration > 0 and timestamp >= duration:
+        raise ValidationError(
+            f"Thumbnail time must be before the end of the video ({duration:.3f} s)"
+        )
+
+
 async def video_thumbnail(src: str, dst: str, timestamp: float) -> None:
-    await runner.run(
-        [*_BASE, "-ss", _num(timestamp, "timestamp"), "-i", src, "-frames:v", "1", dst]
-    )
+    """Extract the frame displayed at ``timestamp`` and publish only a real image."""
+    _num(timestamp, "timestamp")
+    try:
+        metadata = await probe_media(Path(src), MediaType.video)
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot read source video timing for thumbnail") from exc
+    if not metadata.has_video_stream:
+        raise ValidationError("Thumbnail source does not contain a video stream")
+    check_thumbnail_time(timestamp, duration=metadata.duration_seconds)
+    output = Path(dst)
+    validated = False
+    try:
+        await runner.run([*_BASE, "-ss", str(timestamp), "-i", src, "-frames:v", "1", dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            # A time inside the duration but after the last frame's timestamp
+            # still shows that last frame; FFmpeg's input seek writes nothing.
+            await runner.run([*_BASE, "-sseof", "-1", "-i", src, "-update", "1", dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Thumbnail extraction produced no image")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 # --- audio ---------------------------------------------------------------

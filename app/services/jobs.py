@@ -89,8 +89,7 @@ async def create_job(session: AsyncSession, data: JobCreate) -> Job:
                 f"Capability '{data.capability_id}' does not support "
                 f"{asset.media_type.value} assets"
             )
-        if data.capability_id == "video.trim":
-            _validate_trim_against_asset(asset, data.input)
+        _validate_input_against_asset(data.capability_id, asset, data.input)
     await _validate_referenced_asset_media_types(session, cap, data.input)
 
     job = Job(
@@ -159,22 +158,40 @@ def validate_job_input(capability: CapabilityMetadata, job_input: dict) -> None:
         raise ValidationError(f"Invalid capability input: {exc}") from exc
 
 
-def _validate_trim_against_asset(asset: Asset, job_input: dict) -> None:
-    """Reject trims outside the source using already-probed metadata, if available.
+def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: dict) -> None:
+    """Reject requests outside the source using already-probed metadata, if available.
 
     Pending/unavailable metadata defers these bounds to execution, which probes
     the source itself; admission never blocks on a probe.
     """
     if asset.technical_metadata_status != TechnicalMetadataStatus.available.value:
         return
-    from app.tools.ffmpeg import resolve_trim_window
+    from app.tools import ffmpeg
 
-    resolve_trim_window(
-        job_input["start"],
-        job_input.get("end"),
-        duration=asset.duration_seconds,
-        frame_rate=asset.frame_rate,
-    )
+    if capability_id == "video.trim":
+        ffmpeg.resolve_trim_window(
+            job_input["start"],
+            job_input.get("end"),
+            duration=asset.duration_seconds,
+            frame_rate=asset.frame_rate,
+        )
+    elif capability_id == "video.thumbnail":
+        ffmpeg.check_thumbnail_time(job_input["timestamp"], duration=asset.duration_seconds)
+    elif capability_id == "video.crop" and asset.width and asset.height:
+        # Stored dimensions are coded, not rotation-aware: reject only rectangles
+        # that fit neither orientation. Execution checks the displayed size exactly.
+        rect = (job_input["x"], job_input["y"], job_input["width"], job_input["height"])
+        try:
+            ffmpeg.check_crop_rectangle(
+                *rect, frame_width=asset.width, frame_height=asset.height
+            )
+        except ValidationError as stored_orientation_error:
+            try:
+                ffmpeg.check_crop_rectangle(
+                    *rect, frame_width=asset.height, frame_height=asset.width
+                )
+            except ValidationError:
+                raise stored_orientation_error from None
 
 
 async def _validate_referenced_asset_media_types(

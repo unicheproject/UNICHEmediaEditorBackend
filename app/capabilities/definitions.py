@@ -366,13 +366,27 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "FFmpeg",
         "title": "Video Crop",
-        "description": "Crop a video to a rectangle (x, y, width, height).",
+        "description": (
+            "Crop a video to a rectangle (x, y, width, height). Coordinates refer to "
+            "the video as displayed, after any rotation, and the rectangle must fit "
+            "inside it. Odd sizes or offsets may be rounded down to even numbers."
+        ),
         "media": _V,
         "properties": {
-            "x": _integer("Left offset", "Horizontal crop offset.", **{"x-unit": "pixels"}),
-            "y": _integer("Top offset", "Vertical crop offset.", **{"x-unit": "pixels"}),
-            "width": _integer("Width", "Crop width.", minimum=1, **{"x-unit": "pixels"}),
-            "height": _integer("Height", "Crop height.", minimum=1, **{"x-unit": "pixels"}),
+            "x": _integer(
+                "Left offset", "Distance from the left edge of the video.",
+                minimum=0, **{"x-unit": "pixels"},
+            ),
+            "y": _integer(
+                "Top offset", "Distance from the top edge of the video.",
+                minimum=0, **{"x-unit": "pixels"},
+            ),
+            "width": _integer(
+                "Width", "Width of the area to keep.", minimum=1, **{"x-unit": "pixels"}
+            ),
+            "height": _integer(
+                "Height", "Height of the area to keep.", minimum=1, **{"x-unit": "pixels"}
+            ),
         },
         "required": ["x", "y", "width", "height"],
     },
@@ -406,7 +420,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "media": _V,
         "properties": {
             "timestamp": _number(
-                "Timestamp", "Time of the frame to extract.", **{"x-unit": "seconds"}
+                "Timestamp",
+                "Time of the frame to extract, in seconds; must be before the video ends.",
+                minimum=0,
+                **{"x-unit": "seconds"},
             )
         },
         "required": ["timestamp"],
