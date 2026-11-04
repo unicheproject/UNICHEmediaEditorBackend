@@ -474,9 +474,32 @@ async def video_crop(src: str, dst: str, x: int, y: int, width: int, height: int
                 output.unlink()
 
 
-async def video_resize(src: str, dst: str, width: int, height: int) -> None:
-    scale = f"scale={_num(width, 'width')}:{_num(height, 'height')}"
-    await runner.run([*_BASE, "-i", src, "-vf", scale, dst])
+def even_scale_dimensions(width: int | None, height: int | None) -> tuple[int, int]:
+    """Map requested resize dimensions to an FFmpeg scale pair with even sizes.
+
+    4:2:0 encoders (H.264, VP9 as used here) reject odd sizes, so explicit sizes
+    round down to even and an omitted side becomes -2: aspect-preserving,
+    rounded to even. Shared by the direct handler and the Agent render path.
+    """
+    if width is None and height is None:
+        raise ValidationError("Resize needs a width, a height, or both")
+    sides = []
+    for name, value in (("width", width), ("height", height)):
+        if value is None:
+            sides.append(-2)
+            continue
+        _num(value, name)
+        if value < 2:
+            raise ValidationError(f"Resize {name} must be at least 2 pixels")
+        sides.append(value - value % 2)
+    return sides[0], sides[1]
+
+
+async def video_resize(
+    src: str, dst: str, width: int | None = None, height: int | None = None
+) -> None:
+    out_width, out_height = even_scale_dimensions(width, height)
+    await runner.run([*_BASE, "-i", src, "-vf", f"scale={out_width}:{out_height}", dst])
 
 
 def check_thumbnail_time(timestamp: float, *, duration: float | None) -> None:

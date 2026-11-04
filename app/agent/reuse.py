@@ -38,8 +38,10 @@ REUSE_VERSIONS: dict[str, str] = {
     # ignored. A retry with that same input now has different output semantics.
     "video.transcode": "2",
     "video.mute": "1",
-    "video.crop": "1",
-    "video.resize": "1",
+    # 2: out-of-frame rectangles are rejected instead of silently shifted.
+    "video.crop": "2",
+    # 2: optional side keeps aspect; sizes round down to even instead of failing.
+    "video.resize": "2",
     "video.thumbnail": "1",
     "image.resize": "1",
     "image.crop": "1",

@@ -36,8 +36,8 @@ class TemporalTrim:
 
 @dataclass(frozen=True)
 class Resize:
-    width: int
-    height: int
+    width: int | None = None  # None keeps the aspect ratio from the other side
+    height: int | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ def _operation(step: PlanStep) -> dict[str, Any]:
     if step.capability_id == "video.trim":
         value: RenderOperation = TemporalTrim(params["start"], params.get("end"))
     elif step.capability_id == "video.resize":
-        value = Resize(params["width"], params["height"])
+        value = Resize(params.get("width"), params.get("height"))
     elif step.capability_id == "video.crop":
         value = Crop(params["x"], params["y"], params["width"], params["height"])
     elif step.capability_id == "video.lowerthird":
@@ -233,8 +233,11 @@ def compile_execution_plan(plan: Plan, asset_facts: dict[str, dict[str, Any]]) -
             if not identity:
                 value = op["value"]
                 if op["kind"] == "resize":
-                    width = value["width"] if value["width"] > 0 else None
-                    height = value["height"] if value["height"] > 0 else None
+                    from app.tools.ffmpeg import even_scale_dimensions
+
+                    scaled = even_scale_dimensions(value["width"], value["height"])
+                    width = scaled[0] if scaled[0] > 0 else None
+                    height = scaled[1] if scaled[1] > 0 else None
                 elif op["kind"] == "crop":
                     width, height = value["width"], value["height"]
                 elif op["kind"] == "lowerthird":
@@ -392,7 +395,10 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
         elif isinstance(operation, Resize):
             video_index += 1
             next_video = f"v{video_index}"
-            graph.append(f"[{current}]scale={operation.width}:{operation.height}[{next_video}]")
+            scale_width, scale_height = ffmpeg.even_scale_dimensions(
+                operation.width, operation.height
+            )
+            graph.append(f"[{current}]scale={scale_width}:{scale_height}[{next_video}]")
             current = next_video
         elif isinstance(operation, Crop):
             video_index += 1

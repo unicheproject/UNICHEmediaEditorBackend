@@ -121,7 +121,7 @@ class VideoResizeHandler(LocalToolHandler):
         src = require_input(ctx)
         out = _video_out(ctx, "resize")
         await ffmpeg.video_resize(
-            src, str(out.path), require(ctx.params, "width"), require(ctx.params, "height")
+            src, str(out.path), ctx.params.get("width"), ctx.params.get("height")
         )
         return HandlerResult(data={"operation": "video.resize"}, outputs=[out])
 

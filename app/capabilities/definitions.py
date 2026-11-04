@@ -395,21 +395,27 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "FFmpeg",
         "title": "Video Resize",
-        "description": "Resize a video to the given dimensions.",
+        "description": (
+            "Resize a video. Give a width, a height, or both; when only one is given, "
+            "the other follows the source's aspect ratio. Sizes are rounded down to "
+            "even numbers, as standard video formats require."
+        ),
         "media": _V,
         "properties": {
             "width": _integer(
                 "Width",
-                "Output width; FFmpeg also accepts -1 for automatic aspect-preserving size.",
+                "Output width. Omit it to keep the aspect ratio from the height.",
+                minimum=2,
                 **{"x-unit": "pixels"},
             ),
             "height": _integer(
                 "Height",
-                "Output height; FFmpeg also accepts -1 for automatic aspect-preserving size.",
+                "Output height. Omit it to keep the aspect ratio from the width.",
+                minimum=2,
                 **{"x-unit": "pixels"},
             ),
         },
-        "required": ["width", "height"],
+        "allOf": [{"anyOf": [{"required": ["width"]}, {"required": ["height"]}]}],
     },
     {
         "id": "video.thumbnail",
