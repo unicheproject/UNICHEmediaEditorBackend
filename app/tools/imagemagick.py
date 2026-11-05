@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+from pathlib import Path
+
 from app.core.errors import ToolError
 from app.tools import runner
+from app.tools.geometry import check_crop_rectangle
 
 CONVERT = "convert"
+IDENTIFY = "identify"
 
 # Bundled in the Docker image via fonts-dejavu-core.
 DEFAULT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -49,12 +54,50 @@ async def thumbnail(src: str, dst: str, max_size: int = 512) -> None:
     )
 
 
+# EXIF orientations that turn the stored image a quarter turn when displayed.
+_QUARTER_TURN_ORIENTATIONS = {"LeftTop", "RightTop", "RightBottom", "LeftBottom"}
+
+
+async def display_size(src: str) -> tuple[int, int]:
+    """First frame's size as displayed (after EXIF orientation), like thumbnails."""
+    out = await runner.run_stdout(
+        [IDENTIFY, "-ping", "-format", "%w %h %[orientation]\n", f"{src}[0]"]
+    )
+    try:
+        raw_width, raw_height, orientation = out.splitlines()[0].split(" ", 2)
+        width, height = int(raw_width), int(raw_height)
+    except (IndexError, ValueError) as exc:
+        raise ToolError("Cannot read source image dimensions") from exc
+    if orientation.strip() in _QUARTER_TURN_ORIENTATIONS:
+        return height, width
+    return width, height
+
+
 async def crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> None:
+    """Crop the first frame, as displayed, to a rectangle that must fit inside it."""
     geom = (
         f"{_int(width, 'width')}x{_int(height, 'height')}"
         f"+{_int(x, 'x')}+{_int(y, 'y')}"
     )
-    await runner.run([CONVERT, src, "-crop", geom, "+repage", dst])
+    frame_width, frame_height = await display_size(src)
+    check_crop_rectangle(
+        x, y, width, height, frame_width=frame_width, frame_height=frame_height,
+        media="image",
+    )
+    output = Path(dst)
+    validated = False
+    try:
+        # [0]: multi-page inputs would otherwise write dst-0, dst-1, ... and no dst.
+        await runner.run([CONVERT, f"{src}[0]", "-auto-orient", "-crop", geom, "+repage", dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Crop output is missing or empty")
+        if await display_size(dst) != (width, height):
+            raise ToolError("Crop output does not match the requested size")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 async def convert_format(src: str, dst: str) -> None:

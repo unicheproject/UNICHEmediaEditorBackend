@@ -27,6 +27,7 @@ from app.tools.export_policy import (
     ExportContainer,
     FitPolicy,
 )
+from app.tools.geometry import check_crop_rectangle
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -415,23 +416,6 @@ async def video_transcode(
 
 async def video_mute(src: str, dst: str) -> None:
     await runner.run([*_BASE, "-i", src, "-an", "-c:v", "copy", dst])
-
-
-def check_crop_rectangle(
-    x: int, y: int, width: int, height: int, *, frame_width: int, frame_height: int
-) -> None:
-    """Reject a crop rectangle that does not lie fully inside the displayed frame.
-
-    FFmpeg's crop filter would otherwise silently move the rectangle inward and
-    produce a different region than requested.
-    """
-    if x < 0 or y < 0:
-        raise ValidationError("Crop offsets must not be negative")
-    if x + width > frame_width or y + height > frame_height:
-        raise ValidationError(
-            f"Crop rectangle must fit inside the video ({frame_width}×{frame_height}): "
-            f"x + width ≤ {frame_width} and y + height ≤ {frame_height}"
-        )
 
 
 async def probe_display_size(path: str) -> tuple[int, int]:

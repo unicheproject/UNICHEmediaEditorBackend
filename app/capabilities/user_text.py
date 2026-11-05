@@ -151,7 +151,8 @@ USER_TEXT: dict[str, UserText] = {
     "image.crop": {
         "summary": (
             "Cut away the edges of an image and keep only the area you select. The "
-            "image's size is shown in its details."
+            "area must fit inside the picture; the image's size is shown in its "
+            "details."
         ),
         "params": {
             "x": "How far from the left edge the kept area begins, in pixels.",

@@ -524,13 +524,27 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "ImageMagick",
         "title": "Image Crop",
-        "description": "Crop an image to a rectangle (x, y, width, height).",
+        "description": (
+            "Crop an image to a rectangle (x, y, width, height). Coordinates refer to "
+            "the first frame as displayed, after EXIF orientation, and the rectangle "
+            "must fit inside it."
+        ),
         "media": _I,
         "properties": {
-            "x": _integer("Left offset", "Horizontal crop offset.", **{"x-unit": "pixels"}),
-            "y": _integer("Top offset", "Vertical crop offset.", **{"x-unit": "pixels"}),
-            "width": _integer("Width", "Crop width.", minimum=1, **{"x-unit": "pixels"}),
-            "height": _integer("Height", "Crop height.", minimum=1, **{"x-unit": "pixels"}),
+            "x": _integer(
+                "Left offset", "Distance from the left edge of the image.",
+                minimum=0, **{"x-unit": "pixels"},
+            ),
+            "y": _integer(
+                "Top offset", "Distance from the top edge of the image.",
+                minimum=0, **{"x-unit": "pixels"},
+            ),
+            "width": _integer(
+                "Width", "Width of the area to keep.", minimum=1, **{"x-unit": "pixels"}
+            ),
+            "height": _integer(
+                "Height", "Height of the area to keep.", minimum=1, **{"x-unit": "pixels"}
+            ),
         },
         "required": ["x", "y", "width", "height"],
     },

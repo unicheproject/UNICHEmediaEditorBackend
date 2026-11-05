@@ -45,7 +45,8 @@ REUSE_VERSIONS: dict[str, str] = {
     "video.resize": "2",
     "video.thumbnail": "1",
     "image.resize": "1",
-    "image.crop": "1",
+    # 2: out-of-frame rectangles are rejected; first frame, EXIF-oriented.
+    "image.crop": "2",
     "image.format": "1",
     "image.colour.adjust": "1",
     # 2: empty/out-of-range windows are rejected; end is optional.

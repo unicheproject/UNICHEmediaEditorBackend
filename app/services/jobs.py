@@ -210,18 +210,20 @@ def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: d
         )
     elif capability_id == "video.thumbnail":
         ffmpeg.check_thumbnail_time(job_input["timestamp"], duration=asset.duration_seconds)
-    elif capability_id == "video.crop" and asset.width and asset.height:
-        # Stored dimensions are coded, not rotation-aware: reject only rectangles
-        # that fit neither orientation. Execution checks the displayed size exactly.
+    elif capability_id in {"video.crop", "image.crop"} and asset.width and asset.height:
+        # Stored dimensions are coded/unoriented (video rotation, EXIF orientation):
+        # reject only rectangles that fit neither orientation. Execution checks
+        # the displayed size exactly.
         rect = (job_input["x"], job_input["y"], job_input["width"], job_input["height"])
+        media = "image" if capability_id == "image.crop" else "video"
         try:
             ffmpeg.check_crop_rectangle(
-                *rect, frame_width=asset.width, frame_height=asset.height
+                *rect, frame_width=asset.width, frame_height=asset.height, media=media
             )
         except ValidationError as stored_orientation_error:
             try:
                 ffmpeg.check_crop_rectangle(
-                    *rect, frame_width=asset.height, frame_height=asset.width
+                    *rect, frame_width=asset.height, frame_height=asset.width, media=media
                 )
             except ValidationError:
                 raise stored_orientation_error from None
