@@ -32,7 +32,7 @@ class ImageResizeHandler(LocalToolHandler):
         src = require_input(ctx)
         out = _image_out(ctx, "resize")
         await imagemagick.resize(
-            src, str(out.path), require(ctx.params, "width"), require(ctx.params, "height")
+            src, str(out.path), ctx.params.get("width"), ctx.params.get("height")
         )
         return HandlerResult(data={"operation": "image.resize"}, outputs=[out])
 

@@ -152,9 +152,9 @@ def test_unknown_capability_rejected() -> None:
 
 
 def test_bad_params_rejected() -> None:
-    # image.resize requires width+height
+    # image.resize requires a width, a height, or both
     plan = _plan([{"id": "s1", "capability_id": "image.resize",
-                   "params": {"width": 64}, "asset": IMG}])
+                   "params": {}, "asset": IMG}])
     with pytest.raises(PlanValidationError):
         validate_plan(plan, SCOPE)
 

@@ -44,7 +44,8 @@ REUSE_VERSIONS: dict[str, str] = {
     # 2: optional side keeps aspect; sizes round down to even instead of failing.
     "video.resize": "2",
     "video.thumbnail": "1",
-    "image.resize": "1",
+    # 2: one side keeps aspect; first frame, EXIF-oriented.
+    "image.resize": "2",
     # 2: out-of-frame rectangles are rejected; first frame, EXIF-oriented.
     "image.crop": "2",
     "image.format": "1",

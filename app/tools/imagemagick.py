@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import suppress
 from pathlib import Path
 
-from app.core.errors import ToolError
+from app.core.errors import ToolError, ValidationError
 from app.tools import runner
 from app.tools.geometry import check_crop_rectangle
 
@@ -22,10 +22,38 @@ def _int(value: object, name: str) -> str:
     return str(value)
 
 
-async def resize(src: str, dst: str, width: int, height: int) -> None:
-    # "WxH!" forces exact dimensions (ignore aspect ratio).
-    geom = f"{_int(width, 'width')}x{_int(height, 'height')}!"
-    await runner.run([CONVERT, src, "-resize", geom, dst])
+async def resize(
+    src: str, dst: str, width: int | None = None, height: int | None = None
+) -> None:
+    """Resize the first frame as displayed; one side keeps the aspect ratio.
+
+    "WxH!" forces exact dimensions; "Wx" / "xH" preserve the aspect ratio.
+    """
+    if width is None and height is None:
+        raise ValidationError("Resize needs a width, a height, or both")
+    if width is not None and height is not None:
+        geom = f"{_int(width, 'width')}x{_int(height, 'height')}!"
+    elif width is not None:
+        geom = f"{_int(width, 'width')}x"
+    else:
+        geom = f"x{_int(height, 'height')}"
+    output = Path(dst)
+    validated = False
+    try:
+        # [0]: multi-page inputs would otherwise write dst-0, dst-1, ... and no dst.
+        await runner.run([CONVERT, f"{src}[0]", "-auto-orient", "-resize", geom, dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Resize output is missing or empty")
+        out_width, out_height = await display_size(dst)
+        if (width is not None and out_width != width) or (
+            height is not None and out_height != height
+        ):
+            raise ToolError("Resize output does not match the requested size")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
 
 
 async def thumbnail(src: str, dst: str, max_size: int = 512) -> None:

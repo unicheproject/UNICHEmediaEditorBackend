@@ -511,13 +511,24 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "ImageMagick",
         "title": "Image Resize",
-        "description": "Resize an image to the given dimensions.",
+        "description": (
+            "Resize the first frame of an image, as displayed after EXIF orientation. "
+            "Give a width, a height, or both; when only one is given the other follows "
+            "the image's aspect ratio, and when both are given the output has exactly "
+            "that size (the picture may be stretched)."
+        ),
         "media": _I,
         "properties": {
-            "width": _integer("Width", "Exact output width.", minimum=1, **{"x-unit": "pixels"}),
-            "height": _integer("Height", "Exact output height.", minimum=1, **{"x-unit": "pixels"}),
+            "width": _integer(
+                "Width", "Output width. Omit it to keep the aspect ratio from the height.",
+                minimum=1, **{"x-unit": "pixels"},
+            ),
+            "height": _integer(
+                "Height", "Output height. Omit it to keep the aspect ratio from the width.",
+                minimum=1, **{"x-unit": "pixels"},
+            ),
         },
-        "required": ["width", "height"],
+        "allOf": [{"anyOf": [{"required": ["width"]}, {"required": ["height"]}]}],
     },
     {
         "id": "image.crop",

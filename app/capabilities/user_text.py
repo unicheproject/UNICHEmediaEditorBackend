@@ -139,13 +139,13 @@ USER_TEXT: dict[str, UserText] = {
     # --- image editing ---------------------------------------------------
     "image.resize": {
         "summary": (
-            "Make an image larger or smaller. The image gets exactly the width and "
-            "height you enter, so if they do not match its proportions the picture "
-            "will look stretched or squashed."
+            "Make an image larger or smaller. Enter only a width or only a height to "
+            "keep the picture's proportions. If you enter both, the image gets exactly "
+            "that size and may look stretched or squashed."
         ),
         "params": {
-            "width": "New width in pixels.",
-            "height": "New height in pixels.",
+            "width": "New width in pixels. Leave empty to keep the proportions.",
+            "height": "New height in pixels. Leave empty to keep the proportions.",
         },
     },
     "image.crop": {
