@@ -290,12 +290,21 @@ async def test_job_submission_and_api_remain_async_while_jobs_run(
 
     monkeypatch.setitem(registry._HANDLERS, "image.caption", _BlockingHandler())
 
-    async def _run_in_worker(job_id: uuid.UUID) -> None:
+    # One gate per dispatched Job. Like a separate worker process, a task starts
+    # only after the submission response; otherwise the in-process task could
+    # claim the Job while the route re-reads it, and the response would
+    # (legitimately) say "running" instead of "queued".
+    worker_gates: list[asyncio.Event] = []
+
+    async def _run_in_worker(job_id: uuid.UUID, gate: asyncio.Event) -> None:
+        await gate.wait()
         async with async_session_factory() as session:
             await execute_job(session, job_id)
 
     async def _background_enqueue(job_id: uuid.UUID) -> None:
-        tasks.append(asyncio.create_task(_run_in_worker(job_id)))
+        gate = asyncio.Event()
+        worker_gates.append(gate)
+        tasks.append(asyncio.create_task(_run_in_worker(job_id, gate)))
 
     app.dependency_overrides[get_enqueuer] = lambda: _background_enqueue
     try:
@@ -310,6 +319,7 @@ async def test_job_submission_and_api_remain_async_while_jobs_run(
         assert first.status_code == 201
         assert first.json()["status"] == "queued"
         first_id = first.json()["id"]
+        worker_gates[0].set()
         await asyncio.wait_for(first_started.wait(), timeout=2)
 
         # Independent authorized routes and polling remain responsive while the
@@ -336,6 +346,7 @@ async def test_job_submission_and_api_remain_async_while_jobs_run(
         assert second.status_code == 201
         assert second.json()["status"] == "queued"
         second_id = second.json()["id"]
+        worker_gates[1].set()
         await asyncio.wait_for(second_started.wait(), timeout=2)
 
         release.set()
@@ -344,6 +355,8 @@ async def test_job_submission_and_api_remain_async_while_jobs_run(
         assert (await client.get(f"{API}/jobs/{second_id}")).json()["status"] == "succeeded"
     finally:
         release.set()
+        for gate in worker_gates:
+            gate.set()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
