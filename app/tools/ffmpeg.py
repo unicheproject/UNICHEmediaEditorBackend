@@ -1071,3 +1071,31 @@ async def video_export(src: str, dst: str, settings: EffectiveExportSettings) ->
         if not validated:
             with suppress(OSError):
                 output.unlink()
+
+
+async def extract_speech_audio(src: str, dst: str) -> None:
+    """First soundtrack as small mono AAC/M4A for speech recognition uploads.
+
+    Keeps uploads well under provider size limits and avoids sending video
+    containers some transcription endpoints reject.
+    """
+    try:
+        metadata = await probe_media(Path(src), MediaType.video)
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot read the input's audio") from exc
+    if not metadata.has_audio_stream:
+        raise ValidationError("The input has no sound to create subtitles from")
+    output = Path(dst)
+    validated = False
+    try:
+        await runner.run([
+            *_BASE, "-i", src, "-map", "0:a:0", "-vn", "-ac", "1",
+            "-c:a", "aac", "-b:a", "64k", dst,
+        ])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Speech audio extraction produced no output")
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()

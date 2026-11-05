@@ -433,6 +433,8 @@ USER_TEXT: dict[str, UserText] = {
         ),
         "params": {
             "asset_id": "The recording or video to create subtitles for.",
+            "language": "The language spoken, as a two-letter code such as en or el. "
+                        "Leave empty to detect it automatically.",
         },
     },
     "audio.tts": {

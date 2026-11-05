@@ -37,6 +37,17 @@ class MockInferenceProvider(BaseInferenceProvider):
                 "provider": self.name,
             }
 
+        if request.capability_id == "subtitle.autogenerate":
+            return {
+                "text": f"[mock subtitles for '{original}'] First line. Second line.",
+                "language": "en",
+                "segments": [
+                    {"id": 0, "start": 0.0, "end": 1.5, "text": " First line."},
+                    {"id": 1, "start": 1.5, "end": 3.0, "text": " Second line."},
+                ],
+                "provider": self.name,
+            }
+
         if request.capability_id == "audio.tts":
             # No offline synthesis: report what would have been spoken, without
             # producing an audio file (unlike the "openrouter" provider).

@@ -53,6 +53,8 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
         ] = {
             "audio.tts": (self._speech, settings.openrouter_tts_model),
             "audio.transcribe": (self._transcribe, settings.openrouter_transcribe_model),
+            # Same Whisper endpoint; verbose_json segments become timed cues.
+            "subtitle.autogenerate": (self._transcribe, settings.openrouter_transcribe_model),
         }
 
     def configuration_ready(self, capability_id: str) -> bool:
@@ -167,7 +169,7 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
         if not api_key:
             raise ProviderError("OPENROUTER_API_KEY is not configured")
         if not request.file_path:
-            raise ProviderError("audio.transcribe requires an input asset")
+            raise ProviderError("Transcription requires an input asset")
 
         path = Path(request.file_path)
         audio_bytes = path.read_bytes()
@@ -211,13 +213,17 @@ class OpenRouterInferenceProvider(BaseInferenceProvider):
         except (ValueError, UnicodeDecodeError) as exc:
             raise ProviderError("OpenRouter transcription returned invalid JSON") from exc
         body = require_transcript(body)
-        return {
+        result = {
             "text": body["text"],
             "language": body.get("language") or language,
             "model": model,
             "provider": self.name,
             "generation_id": response.headers.get("X-Generation-Id"),
         }
+        if request.capability_id == "subtitle.autogenerate":
+            # audio.transcribe keeps its existing output; only subtitles need timings.
+            result["segments"] = body.get("segments")
+        return result
 
 
 def _wrap_pcm_as_wav(

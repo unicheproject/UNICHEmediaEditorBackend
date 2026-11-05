@@ -10,6 +10,7 @@ from app.capabilities.handlers.base import CapabilityHandler, ProviderBackedHand
 from app.capabilities.handlers.image_caption import ImageCaptionHandler
 from app.capabilities.handlers.not_implemented import NotImplementedHandler
 from app.capabilities.handlers.project_export import ProjectExportHandler
+from app.capabilities.handlers.subtitle_autogenerate import SubtitleAutogenerateHandler
 from app.core.errors import NotFoundError
 from app.schemas.capability import DeploymentRequirement, ImplementationReadiness
 
@@ -52,6 +53,7 @@ _TOOL_HANDLERS: list[CapabilityHandler] = [
 _HANDLERS: dict[str, CapabilityHandler] = {
     "image.caption": ImageCaptionHandler(),
     "audio.transcribe": AudioTranscribeHandler(),
+    "subtitle.autogenerate": SubtitleAutogenerateHandler(),
     "audio.tts": AudioTtsHandler(),
     "project.export": ProjectExportHandler(),
     **{h.capability_id: h for h in _TOOL_HANDLERS},

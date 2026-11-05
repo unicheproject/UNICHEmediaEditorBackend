@@ -1152,14 +1152,42 @@ CAPABILITIES: list[CapabilityDef] = [
     _def(
         id="subtitle.autogenerate",
         layer=CapabilityLayer.AI_ASSISTED,
-        tool="Not implemented",
+        tool="Configured inference backend",
         ai_content_effect=AiContentEffect.generated,
-        implementation=ImplementationReadiness.UNAVAILABLE,
+        implementation=ImplementationReadiness.AVAILABLE,
+        deployment_requirement=DeploymentRequirement.INFERENCE_PROVIDER,
         title="Subtitle Auto-generation",
-        description="Generate time-coded subtitles from audio/video.",
+        description=(
+            "Generate time-coded SRT subtitles from the speech in an audio or video "
+            "asset and return them as a new subtitle Asset, ready for "
+            "video.subtitle.embed. The first soundtrack is transcribed with segment "
+            "timestamps by the configured inference backend."
+        ),
         media=[MediaType.audio, MediaType.video],
         cost_class=CostClass.hosted_ai,
-        output_schema={"type": "object", "properties": {"srt": {"type": "string"}}},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": _string(
+                    "Input asset", "Audio or video whose speech is subtitled.", format="uuid"
+                ),
+                "language": _string(
+                    "Spoken language",
+                    "Optional ISO-639-1 code of the spoken language (e.g. en, el); "
+                    "omit to detect it automatically.",
+                    pattern="^[a-z]{2}$",
+                ),
+            },
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "outputs": _FILE_OUTPUT_SCHEMA["properties"]["outputs"],  # type: ignore[index]
+                "language": {"type": ["string", "null"]},
+                "segment_count": {"type": "integer", "minimum": 1},
+            },
+            "required": ["segment_count"],
+        },
     ),
     _def(
         id="audio.tts",

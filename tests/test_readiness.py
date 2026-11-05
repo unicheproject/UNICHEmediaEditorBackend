@@ -48,11 +48,13 @@ from app.tools import realesrgan
 
 API = "/api/v1"
 UNIMPLEMENTED = {
-    "subtitle.autogenerate", "audio.music.generate", "audio.separate.stems",
+    "audio.music.generate", "audio.separate.stems",
     "image.background.remove", "image.inpaint", "image.restore.face", "image.tag",
     "video.upscale",
 }
-PROVIDER_CAPABILITIES = {"audio.transcribe", "audio.tts", "image.caption"}
+PROVIDER_CAPABILITIES = {
+    "audio.transcribe", "audio.tts", "image.caption", "subtitle.autogenerate",
+}
 
 
 def _settings(**overrides) -> Settings:

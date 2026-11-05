@@ -30,6 +30,8 @@ class HTTPInferenceProvider(BaseInferenceProvider):
         self._paths: dict[str, str] = {
             "image.caption": settings.inference_image_caption_path,
             "audio.transcribe": settings.inference_audio_transcribe_path,
+            # Same transcription endpoint; it must also return timed `segments`.
+            "subtitle.autogenerate": settings.inference_audio_transcribe_path,
         }
 
     def _endpoint_for(self, capability_id: str) -> str:
