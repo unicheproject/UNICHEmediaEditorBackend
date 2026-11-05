@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from app.core.errors import ValidationError
 
+# EXIF orientations (ImageMagick names) that turn the stored image a quarter
+# turn when displayed, swapping width and height.
+QUARTER_TURN_ORIENTATIONS = frozenset({"LeftTop", "RightTop", "RightBottom", "LeftBottom"})
+
+
+def is_quarter_turn(rotation_degrees: object) -> bool:
+    """True for a video display rotation of ±90/±270 degrees."""
+    try:
+        return round(float(str(rotation_degrees))) % 180 == 90
+    except ValueError:
+        return False
+
 
 def check_crop_rectangle(
     x: int,

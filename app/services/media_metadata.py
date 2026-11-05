@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.services.storage import get_storage
+from app.tools.geometry import QUARTER_TURN_ORIENTATIONS, is_quarter_turn
 from app.tools.process_policy import media_process
 
 logger = get_logger(__name__)
@@ -43,6 +44,9 @@ class TechnicalMetadata:
     container_format: str | None = None
     width: int | None = None
     height: int | None = None
+    # Size as shown to users: after video display rotation / EXIF orientation.
+    display_width: int | None = None
+    display_height: int | None = None
     has_video_stream: bool | None = None
     has_audio_stream: bool | None = None
     video_codec: str | None = None
@@ -231,9 +235,13 @@ def _unavailable() -> TechnicalMetadata:
 
 async def _probe_image(path: Path) -> TechnicalMetadata:
     # The first frame/page is the representative image for multi-page formats.
-    output = await _run_probe(["identify", "-ping", "-format", "%m\t%w\t%h", f"{path}[0]"])
+    output = await _run_probe(
+        ["identify", "-ping", "-format", "%m\t%w\t%h\t%[orientation]", f"{path}[0]"]
+    )
     try:
-        fmt, raw_width, raw_height = output.decode("utf-8").strip().split("\t")
+        fmt, raw_width, raw_height, orientation = (
+            output.decode("utf-8").strip("\r\n").split("\t")
+        )
         width, height = int(raw_width), int(raw_height)
         if width <= 0 or height <= 0:
             raise ValueError("invalid dimensions")
@@ -244,6 +252,8 @@ async def _probe_image(path: Path) -> TechnicalMetadata:
         container_format=_text(fmt),
         width=width,
         height=height,
+        display_width=height if orientation.strip() in QUARTER_TURN_ORIENTATIONS else width,
+        display_height=width if orientation.strip() in QUARTER_TURN_ORIENTATIONS else height,
         has_video_stream=False,
         has_audio_stream=False,
         technical_streams={
@@ -291,6 +301,17 @@ def _normalized_stream(stream: dict[str, Any]) -> dict[str, Any]:
         if any(flags.values()):
             result["disposition"] = flags
     return result
+
+
+def _video_rotation(stream: dict[str, Any]) -> object:
+    """Display rotation from side data (current FFmpeg) or the legacy rotate tag."""
+    side_data = stream.get("side_data_list")
+    if isinstance(side_data, list):
+        for entry in side_data:
+            if isinstance(entry, dict) and "rotation" in entry:
+                return entry["rotation"]
+    tags = stream.get("tags")
+    return tags.get("rotate", 0) if isinstance(tags, dict) else 0
 
 
 def _parse_ffprobe(payload: bytes) -> TechnicalMetadata:
@@ -342,12 +363,19 @@ def _parse_ffprobe(payload: bytes) -> TechnicalMetadata:
             primary_audio.get("bit_rate")
         )
 
+    width, height = primary_video.get("width"), primary_video.get("height")
+    display_width, display_height = width, height
+    if raw_video is not None and width and height and is_quarter_turn(_video_rotation(raw_video)):
+        display_width, display_height = height, width
+
     return TechnicalMetadata(
         status=TechnicalMetadataStatus.available,
         duration_seconds=duration,
         container_format=_text(raw_format.get("format_name")),
-        width=primary_video.get("width"),
-        height=primary_video.get("height"),
+        width=width,
+        height=height,
+        display_width=display_width,
+        display_height=display_height,
         has_video_stream=raw_video is not None,
         has_audio_stream=raw_audio is not None,
         video_codec=primary_video.get("codec"),
@@ -374,7 +402,8 @@ async def probe_media(path: Path, media_type: MediaType) -> TechnicalMetadata:
         "format=format_name,duration,bit_rate:"
         "stream=index,codec_type,codec_name,profile,width,height,avg_frame_rate,"
         "r_frame_rate,sample_rate,channels,channel_layout,bit_rate,duration:"
-        "stream_tags=language:stream_disposition=default,forced"
+        "stream_tags=language,rotate:stream_side_data=rotation:"
+        "stream_disposition=default,forced"
     )
     output = await _run_probe(
         [
@@ -415,6 +444,8 @@ def apply_metadata(asset: Asset, metadata: TechnicalMetadata) -> None:
     asset.container_format = metadata.container_format
     asset.width = metadata.width
     asset.height = metadata.height
+    asset.display_width = metadata.display_width
+    asset.display_height = metadata.display_height
     asset.has_video_stream = metadata.has_video_stream
     asset.has_audio_stream = metadata.has_audio_stream
     asset.video_codec = metadata.video_codec

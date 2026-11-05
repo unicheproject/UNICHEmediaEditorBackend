@@ -27,7 +27,7 @@ from app.tools.export_policy import (
     ExportContainer,
     FitPolicy,
 )
-from app.tools.geometry import check_crop_rectangle
+from app.tools.geometry import check_crop_rectangle, is_quarter_turn
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -439,11 +439,7 @@ async def probe_display_size(path: str) -> tuple[int, int]:
          if isinstance(entry, dict) and "rotation" in entry),
         stream.get("tags", {}).get("rotate", 0),
     )
-    try:
-        quarter_turn = round(float(str(rotation))) % 180 == 90
-    except ValueError:
-        quarter_turn = False
-    return (height, width) if quarter_turn else (width, height)
+    return (height, width) if is_quarter_turn(rotation) else (width, height)
 
 
 async def video_crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> None:

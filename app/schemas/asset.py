@@ -127,8 +127,16 @@ class AssetRead(ORMModel):
     technical_metadata_status: TechnicalMetadataStatus
     duration_seconds: float | None
     container_format: str | None
-    width: int | None
-    height: int | None
+    width: int | None = Field(description="Stored (coded) width, before rotation/orientation.")
+    height: int | None = Field(description="Stored (coded) height, before rotation/orientation.")
+    display_width: int | None = Field(default=None, description=(
+        "Width as displayed, after video rotation or EXIF orientation. Use this for "
+        "cards and crop coordinates. Null when not yet known; fall back to width."
+    ))
+    display_height: int | None = Field(default=None, description=(
+        "Height as displayed, after video rotation or EXIF orientation. Null when "
+        "not yet known; fall back to height."
+    ))
     has_video_stream: bool | None
     has_audio_stream: bool | None
     video_codec: str | None

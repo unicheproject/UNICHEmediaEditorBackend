@@ -112,6 +112,10 @@ class Asset(Base, TimestampMixin, SoftDeleteMixin):
     container_format: Mapped[str | None] = mapped_column(String(128), nullable=True)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # As displayed (video rotation / EXIF orientation applied); null until probed
+    # by a version that records it.
+    display_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    display_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_video_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     has_audio_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     video_codec: Mapped[str | None] = mapped_column(String(128), nullable=True)

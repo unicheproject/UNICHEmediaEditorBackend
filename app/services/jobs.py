@@ -38,6 +38,7 @@ from app.services.projects import get_project
 from app.services.storage import get_storage
 from app.services.waveforms import enrich_asset_waveform
 from app.tools import progress
+from app.tools.geometry import check_crop_rectangle
 from app.workers.queue import DispatchOutcome
 
 logger = get_logger(__name__)
@@ -210,23 +211,38 @@ def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: d
         )
     elif capability_id == "video.thumbnail":
         ffmpeg.check_thumbnail_time(job_input["timestamp"], duration=asset.duration_seconds)
-    elif capability_id in {"video.crop", "image.crop"} and asset.width and asset.height:
-        # Stored dimensions are coded/unoriented (video rotation, EXIF orientation):
-        # reject only rectangles that fit neither orientation. Execution checks
-        # the displayed size exactly.
-        rect = (job_input["x"], job_input["y"], job_input["width"], job_input["height"])
-        media = "image" if capability_id == "image.crop" else "video"
+    elif capability_id in {"video.crop", "image.crop"}:
+        _validate_crop_against_asset(capability_id, asset, job_input)
+
+
+def _validate_crop_against_asset(capability_id: str, asset: Asset, job_input: dict) -> None:
+    """Exact check against the displayed size when known; else orientation-tolerant.
+
+    Stored width/height are coded/unoriented (video rotation, EXIF orientation).
+    Assets probed before display sizes were recorded only reject rectangles that
+    fit neither orientation; execution always checks the displayed size exactly.
+    """
+    rect = (job_input["x"], job_input["y"], job_input["width"], job_input["height"])
+    media = "image" if capability_id == "image.crop" else "video"
+    if asset.display_width and asset.display_height:
+        check_crop_rectangle(
+            *rect, frame_width=asset.display_width, frame_height=asset.display_height,
+            media=media,
+        )
+        return
+    if not (asset.width and asset.height):
+        return
+    try:
+        check_crop_rectangle(
+            *rect, frame_width=asset.width, frame_height=asset.height, media=media
+        )
+    except ValidationError as stored_orientation_error:
         try:
-            ffmpeg.check_crop_rectangle(
-                *rect, frame_width=asset.width, frame_height=asset.height, media=media
+            check_crop_rectangle(
+                *rect, frame_width=asset.height, frame_height=asset.width, media=media
             )
-        except ValidationError as stored_orientation_error:
-            try:
-                ffmpeg.check_crop_rectangle(
-                    *rect, frame_width=asset.height, frame_height=asset.width, media=media
-                )
-            except ValidationError:
-                raise stored_orientation_error from None
+        except ValidationError:
+            raise stored_orientation_error from None
 
 
 async def _validate_referenced_asset_media_types(

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.core.errors import ToolError, ValidationError
 from app.tools import runner
-from app.tools.geometry import check_crop_rectangle
+from app.tools.geometry import QUARTER_TURN_ORIENTATIONS, check_crop_rectangle
 
 CONVERT = "convert"
 IDENTIFY = "identify"
@@ -82,10 +82,6 @@ async def thumbnail(src: str, dst: str, max_size: int = 512) -> None:
     )
 
 
-# EXIF orientations that turn the stored image a quarter turn when displayed.
-_QUARTER_TURN_ORIENTATIONS = {"LeftTop", "RightTop", "RightBottom", "LeftBottom"}
-
-
 async def display_size(src: str) -> tuple[int, int]:
     """First frame's size as displayed (after EXIF orientation), like thumbnails."""
     out = await runner.run_stdout(
@@ -96,7 +92,7 @@ async def display_size(src: str) -> tuple[int, int]:
         width, height = int(raw_width), int(raw_height)
     except (IndexError, ValueError) as exc:
         raise ToolError("Cannot read source image dimensions") from exc
-    if orientation.strip() in _QUARTER_TURN_ORIENTATIONS:
+    if orientation.strip() in QUARTER_TURN_ORIENTATIONS:
         return height, width
     return width, height
 

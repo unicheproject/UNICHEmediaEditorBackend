@@ -122,6 +122,19 @@ The command can be rerun safely; already available Assets are skipped. An
 optional `--project-id UUID` scopes the operation and `--batch-size N` controls
 the number of Asset IDs loaded at a time.
 
+`width`/`height` are the stored (coded) dimensions; `display_width` and
+`display_height` are the size as shown, after video display rotation or EXIF
+orientation, and are what crop coordinates refer to. Migration
+`0016_asset_display_size` leaves them null for already-probed Assets, because
+only a fresh probe can tell whether a file is rotated. Fill them with:
+
+```bash
+docker compose exec api python -m app.scripts.backfill_asset_display_size
+```
+
+It writes only the two display fields, is safe to rerun, and accepts the same
+`--project-id` and `--batch-size` options.
+
 ## Asset waveform previews
 
 Audio Assets and video Assets containing audio receive best-effort waveform

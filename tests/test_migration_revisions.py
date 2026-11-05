@@ -16,7 +16,7 @@ def test_revision_identifiers_fit_postgres_version_column() -> None:
     context = MigrationContext.configure(dialect_name="postgresql")
     limit = context._version.c.version_num.type.length
     assert limit is not None
-    assert scripts.get_heads() == ["0015_asset_modified_at"]
+    assert scripts.get_heads() == ["0016_asset_display_size"]
     for revision in scripts.walk_revisions():
         assert len(revision.revision) <= limit, (
             f"Revision {revision.revision!r} exceeds alembic_version limit {limit}"

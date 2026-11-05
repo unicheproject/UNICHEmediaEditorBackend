@@ -43,7 +43,7 @@ def test_single_head_and_postgres_offline_upgrade_sql(monkeypatch) -> None:
     output = io.StringIO()
     config = Config(output_buffer=output)
     config.set_main_option("script_location", str(ROOT / "alembic"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0015_asset_modified_at"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0016_asset_display_size"]
     monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://test:test@localhost/test")
     command.upgrade(config, "0012_project_compositions:head", sql=True)
     sql = output.getvalue()
