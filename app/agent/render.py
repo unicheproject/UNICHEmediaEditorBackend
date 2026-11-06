@@ -392,6 +392,38 @@ async def _check_crop_bounds(source: Path, operations: list[RenderOperation]) ->
             frame = (operation.width, operation.height)
 
 
+async def _check_trim_windows(source: Path, operations: list[RenderOperation]) -> None:
+    """Reject trims an ordinary video.trim Job would reject, before FFmpeg runs.
+
+    A fused group bypasses video.trim's admission and execution checks, and
+    FFmpeg's trim filter returns success with no frames for a window starting
+    at/after the end or shorter than a frame. Each trim applies to the result of
+    the previous one (setpts restarts it at 0); as in video.trim, an end at or
+    after the remaining duration keeps the rest. Unknown timing skips only the
+    checks that need it, as resolve_trim_window does.
+    """
+    if not any(isinstance(operation, TemporalTrim) for operation in operations):
+        return
+    from app.core.errors import ToolError
+    from app.models.enums import MediaType
+    from app.services.media_metadata import MetadataProbeError
+    from app.tools import ffmpeg
+
+    try:
+        metadata = await ffmpeg.probe_media(source, MediaType.video)
+    except MetadataProbeError as exc:
+        raise ToolError("Cannot read source video timing for trim") from exc
+    duration = metadata.duration_seconds
+    for operation in operations:
+        if isinstance(operation, TemporalTrim):
+            end = ffmpeg.resolve_trim_window(
+                operation.start, operation.end,
+                duration=duration, frame_rate=metadata.frame_rate,
+            )
+            if duration is not None:
+                duration = (end if end is not None else duration) - operation.start
+
+
 async def render_group(source: Path, output: Path, work_dir: Path, group: dict[str, Any]) -> bool:
     """Render a group with one explicit FFmpeg invocation; return audio presence.
 
@@ -406,6 +438,7 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
     active = [op for op in operations if op is not None]
     if not active:
         raise ValueError("An identity-only render group must not be rendered")
+    await _check_trim_windows(source, active)
     await _check_crop_bounds(source, active)
     audio_present = await ffmpeg._has_audio(str(source))
     output_ext = group["output_extension"]

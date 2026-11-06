@@ -104,6 +104,16 @@ async def test_agent_render_resize_with_one_side(monkeypatch, tmp_path) -> None:
         calls.append(args)
         return ""
 
+    async def source_timing(_path, _media_type):
+        from app.models.enums import TechnicalMetadataStatus
+        from app.services.media_metadata import TechnicalMetadata
+
+        return TechnicalMetadata(
+            TechnicalMetadataStatus.available, duration_seconds=240.0, frame_rate=25.0,
+            has_video_stream=True,
+        )
+
+    monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
     plan = Plan.model_validate({"type": "plan", "steps": [

@@ -411,6 +411,16 @@ async def test_render_filtergraph_preserves_logical_order(monkeypatch, tmp_path)
         return 1280, 720
 
     monkeypatch.setattr(ffmpeg, "probe_display_size", source_size)
+    async def source_timing(_path, _media_type):
+        from app.models.enums import TechnicalMetadataStatus
+        from app.services.media_metadata import TechnicalMetadata
+
+        return TechnicalMetadata(
+            TechnicalMetadataStatus.available, duration_seconds=240.0, frame_rate=25.0,
+            has_video_stream=True,
+        )
+
+    monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
     monkeypatch.setattr(imagemagick, "render_lowerthird", make_overlay)
@@ -699,6 +709,16 @@ async def _render_crop_group(
         return ""
 
     monkeypatch.setattr(ffmpeg, "probe_display_size", source_size)
+    async def source_timing(_path, _media_type):
+        from app.models.enums import TechnicalMetadataStatus
+        from app.services.media_metadata import TechnicalMetadata
+
+        return TechnicalMetadata(
+            TechnicalMetadataStatus.available, duration_seconds=240.0, frame_rate=25.0,
+            has_video_stream=True,
+        )
+
+    monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
     group = compile_execution_plan(_plan(steps), _PENDING_VIDEO)["nodes"][0]
@@ -833,6 +853,122 @@ async def test_out_of_frame_fused_crop_fails_without_an_output_asset(
         )
     assert len(jobs) == 1 and jobs[0].status.value == "failed"
     assert "Crop rectangle must fit inside the video (100×80)" in (jobs[0].error or "")
+    assert len(assets) == 1
+
+
+
+def _trim(asset: str, start: float, end: float | None = None, step: str = "trim") -> dict:
+    params: dict = {"start": start} if end is None else {"start": start, "end": end}
+    return {"id": step, "capability_id": "video.trim", "asset": asset, "params": params}
+
+
+# The fused-render helper's source is 240 s at 25 fps.
+@pytest.mark.parametrize(("start", "end"), [
+    (10, 30), (10, None), (0, 240),
+    (10, 300),  # as in video.trim, an end past the duration keeps the rest
+])
+async def test_fused_trim_inside_the_source_renders(
+    monkeypatch, tmp_path, start: float, end: float | None
+) -> None:
+    calls = await _render_crop_group(monkeypatch, tmp_path, [_trim(VID, start, end)])
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(("start", "end", "message"), [
+    (-5, 30, "must not be negative"),
+    (30, 10, "end must be after the start"),
+    (10, 10, "end must be after the start"),
+    (250, 260, "start must be before the end"),
+    (10, 10.01, "at least one video frame"),  # shorter than 1/25 s
+])
+async def test_fused_trim_outside_the_source_is_rejected_before_ffmpeg(
+    monkeypatch, tmp_path, start: float, end: float, message: str
+) -> None:
+    calls: list[list[str]] = []
+    with pytest.raises(ValidationError, match=message):
+        await _render_crop_group(monkeypatch, tmp_path, [_trim(VID, start, end)], calls)
+    assert calls == []
+
+
+@pytest.mark.parametrize(("second", "valid"), [
+    # The first trim leaves 20 s; the second applies to that result.
+    (_trim("@first", 5, 15), True),
+    (_trim("@first", 5, 25), True),   # end past the remaining 20 s keeps the rest
+    (_trim("@first", 25, 30), False),  # starts after the remaining 20 s
+    (_trim("@first", 19.99), False),   # less than one frame remains
+])
+async def test_fused_trim_after_trim_uses_the_remaining_duration(
+    monkeypatch, tmp_path, second: dict, valid: bool
+) -> None:
+    steps = [_trim(VID, 10, 30, "first"), second]
+    if valid:
+        assert len(await _render_crop_group(monkeypatch, tmp_path, steps)) == 1
+    else:
+        with pytest.raises(ValidationError):
+            await _render_crop_group(monkeypatch, tmp_path, steps)
+
+
+async def test_fused_trim_after_resize_and_crop_keeps_the_duration(
+    monkeypatch, tmp_path
+) -> None:
+    steps = [
+        {"id": "resize", "capability_id": "video.resize", "asset": VID,
+         "params": {"width": 640, "height": 360}},
+        _crop("@resize", 0, 0, 320, 180),
+        _trim("@crop", 200, 240),
+    ]
+    assert len(await _render_crop_group(monkeypatch, tmp_path, steps)) == 1
+
+
+async def test_invalid_fused_trim_fails_without_an_output_asset(
+    client: AsyncClient, make_project, monkeypatch
+) -> None:
+    from app.models.enums import TechnicalMetadataStatus
+    from app.services.media_metadata import TechnicalMetadata
+    from app.tools import ffmpeg, runner
+
+    pid = await make_project("agent-render-trim-bounds")
+    upload = await client.post(
+        f"{API}/projects/{pid}/assets",
+        files={"file": ("source.mp4", b"fixture", "video/mp4")},
+    )
+    asset_id = upload.json()["id"]
+    session_id = (await client.post(
+        f"{API}/agent/sessions", json={"project_id": pid, "asset_ids": [asset_id]}
+    )).json()["id"]
+    plan = _plan([_trim(asset_id, 10, 20)])  # the source is only 4 s long
+
+    async def fake_propose(*_args, **_kwargs):
+        return plan, []
+
+    async def source_timing(_path, _media_type):
+        return TechnicalMetadata(
+            TechnicalMetadataStatus.available, duration_seconds=4.0, frame_rate=10.0,
+            has_video_stream=True,
+        )
+
+    async def no_ffmpeg(*_args, **_kwargs) -> str:
+        raise AssertionError("FFmpeg must not run for a trim outside the source")
+
+    monkeypatch.setattr("app.services.agent.llm.propose", fake_propose)
+    monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
+    monkeypatch.setattr(runner, "run", no_ffmpeg)
+    plan_id = (await client.post(
+        f"{API}/agent/sessions/{session_id}/messages", json={"content": "Trim"}
+    )).json()["plan"]["id"]
+    await client.post(f"{API}/agent/plans/{plan_id}/approve")
+    final = (await client.get(f"{API}/agent/plans/{plan_id}")).json()
+    assert final["status"] == "failed"
+    assert final["step_runs"][0].get("output_asset_id") is None
+    async with async_session_factory() as db:
+        jobs = list(
+            (await db.execute(select(Job).where(Job.project_id == uuid.UUID(pid)))).scalars()
+        )
+        assets = list(
+            (await db.execute(select(Asset).where(Asset.project_id == uuid.UUID(pid)))).scalars()
+        )
+    assert len(jobs) == 1 and jobs[0].status.value == "failed"
+    assert "Trim start must be before the end of the video" in (jobs[0].error or "")
     assert len(assets) == 1
 
 
