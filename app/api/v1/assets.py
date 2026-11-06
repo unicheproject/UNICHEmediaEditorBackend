@@ -185,6 +185,26 @@ async def get_asset_waveform(
     return result
 
 
+@router.post(
+    "/assets/{asset_id}/duplicate",
+    response_model=AssetRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplicate an Asset within its project",
+    description=(
+        "Copies the media into a new Asset in the same project, named with the next "
+        "free counter (photo_2.jpg). Lineage, AI provenance and technical metadata "
+        "are kept, since the bytes are identical; the copy is never temporary. "
+        "Expired temporary media returns 410."
+    ),
+)
+async def duplicate_asset(
+    asset: Asset = Depends(require_asset_access),
+    session: AsyncSession = Depends(get_session),
+) -> AssetRead:
+    copy = await svc.duplicate_asset(session, asset)
+    return AssetRead.model_validate(copy)
+
+
 @router.patch("/assets/{asset_id}", response_model=AssetRead)
 async def update_asset(
     asset_id: uuid.UUID,

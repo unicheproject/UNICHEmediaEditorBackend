@@ -438,3 +438,60 @@ def ensure_asset_binary_available(asset: Asset) -> Path:
     if not path.is_file():
         raise NotFoundError("Asset media is not available")
     return path
+
+
+# Columns copied verbatim by duplicate_asset: content type, lineage and probe
+# results describe the bytes, which are identical in the copy.
+_DUPLICATED_COLUMNS = (
+    "media_type", "mime_type", "extension", "source_asset_id", "provenance_kind",
+    "ai_provenance", "source_job_id", "technical_metadata_status", "duration_seconds",
+    "container_format", "width", "height", "display_width", "display_height",
+    "has_video_stream", "has_audio_stream", "video_codec", "audio_codec", "frame_rate",
+    "audio_sample_rate", "audio_channels", "bit_rate", "technical_streams",
+)
+
+
+async def duplicate_asset(session: AsyncSession, source: Asset) -> Asset:
+    """Copy an Asset's media into a new Asset in the same project.
+
+    The copy keeps the source's lineage and technical metadata (same bytes),
+    gets the next free name (photo_2.jpg), and is never a temporary result.
+    """
+    path = ensure_asset_binary_available(source)
+    asset_id = uuid.uuid4()
+    storage = get_storage()
+    with path.open("rb") as src:
+        storage_path, size_bytes = storage.save_upload(
+            source.project_id, asset_id, source.filename, src
+        )
+    try:
+        checksum = storage.calculate_checksum(storage_path)
+        if checksum != source.checksum_sha256:
+            raise AppError("Asset copy does not match its source")
+        waveform_status, waveform_reason = initial_waveform_state(source.media_type)
+        await lock_project_filenames(session, source.project_id)
+        (name,) = await unique_filenames(session, source.project_id, [source.original_filename])
+        copy = Asset(
+            id=asset_id,
+            project_id=source.project_id,
+            filename=source.filename,
+            original_filename=name,
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            checksum_sha256=checksum,
+            is_intermediate=False,
+            waveform_status=waveform_status.value,
+            waveform_reason=waveform_reason.value if waveform_reason else None,
+            **{column: getattr(source, column) for column in _DUPLICATED_COLUMNS},
+        )
+        session.add(copy)
+        await session.commit()
+    except BaseException:
+        await session.rollback()
+        discard_prepared_asset(source.project_id, asset_id)
+        raise
+    await session.refresh(copy)
+    if copy.media_type in (MediaType.audio, MediaType.video):
+        await enrich_asset_waveform(session, copy.id)
+        await session.refresh(copy)
+    return copy
