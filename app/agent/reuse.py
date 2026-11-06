@@ -48,7 +48,8 @@ REUSE_VERSIONS: dict[str, str] = {
     "image.resize": "2",
     # 2: out-of-frame rectangles are rejected; first frame, EXIF-oriented.
     "image.crop": "2",
-    "image.format": "1",
+    # 2: explicit quality defaults, first frame, auto-orient, lossless TIFF.
+    "image.format": "2",
     "image.colour.adjust": "1",
     # 2: empty/out-of-range windows are rejected; end is optional.
     "audio.trim": "2",

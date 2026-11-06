@@ -169,6 +169,13 @@ USER_TEXT: dict[str, UserText] = {
         ),
         "params": {
             "format": "The file type of the new copy.",
+            "quality": "For JPEG and WebP only: how much detail to keep. Higher keeps "
+                       "more detail and makes a larger file; 90 is very good, 75 is fine "
+                       "for the web. Leave empty for a high-quality default.",
+            "lossless": "For WebP only: keep every detail exactly, like PNG, at a "
+                        "larger file size.",
+            "flatten_transparency": "Fill see-through areas with white. JPEG always "
+                                    "does this, because it cannot store transparency.",
         },
     },
     "image.colour.adjust": {

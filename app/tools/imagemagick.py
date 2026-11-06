@@ -124,9 +124,52 @@ async def crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> N
                 output.unlink()
 
 
-async def convert_format(src: str, dst: str) -> None:
-    # Output format is inferred from the destination file extension.
-    await runner.run([CONVERT, src, dst])
+# Encoder settings used when the caller gives no quality, stated rather than
+# left to ImageMagick (whose WebP default is 75 and JPEG default follows the input).
+DEFAULT_IMAGE_QUALITY = {"jpeg": 92, "webp": 90}
+LOSSY_IMAGE_FORMATS = frozenset(DEFAULT_IMAGE_QUALITY)
+
+
+async def convert_format(
+    src: str,
+    dst: str,
+    *,
+    fmt: str,
+    quality: int | None = None,
+    lossless: bool = False,
+    flatten: bool = False,
+) -> dict[str, object]:
+    """Convert the first frame, as displayed, and report the encoding used.
+
+    JPEG cannot hold transparency, so it is always flattened onto white; TIFF
+    is written with lossless LZW compression whatever the source used.
+    """
+    args = [CONVERT, f"{src}[0]", "-auto-orient"]
+    if flatten or fmt == "jpeg":
+        args += ["-background", "white", "-alpha", "remove", "-alpha", "off"]
+    used: dict[str, object] = {"lossless": fmt not in LOSSY_IMAGE_FORMATS or lossless}
+    if fmt in LOSSY_IMAGE_FORMATS and not lossless:
+        value = DEFAULT_IMAGE_QUALITY[fmt] if quality is None else quality
+        args += ["-quality", _int(value, "quality")]
+        used["quality"] = value
+    elif fmt == "webp":
+        args += ["-define", "webp:lossless=true", "-quality", "100"]
+    elif fmt == "tiff":
+        args += ["-compress", "LZW"]
+    output = Path(dst)
+    validated = False
+    try:
+        # [0]: multi-page inputs would otherwise write dst-0, dst-1, ... and no dst.
+        await runner.run([*args, dst])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ToolError("Format conversion output is missing or empty")
+        await display_size(dst)
+        validated = True
+    finally:
+        if not validated:
+            with suppress(OSError):
+                output.unlink()
+    return used
 
 
 async def colour_adjust(

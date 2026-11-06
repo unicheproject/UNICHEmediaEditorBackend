@@ -55,15 +55,28 @@ class ImageFormatHandler(LocalToolHandler):
     capability_id = "image.format"
 
     async def process(self, ctx: JobContext) -> HandlerResult:
-        from app.core.errors import ValidationError
-
         src = require_input(ctx)
         fmt = str(require(ctx.params, "format")).lstrip(".").lower()
+        if fmt == "jpg":  # accepted from older clients; same format as jpeg
+            fmt = "jpeg"
         if fmt not in _FORMAT_EXT:
             raise ValidationError(f"Unsupported target format '{fmt}'")
+        quality = ctx.params.get("quality")
+        lossless = bool(ctx.params.get("lossless", False))
+        if quality is not None and fmt not in imagemagick.LOSSY_IMAGE_FORMATS:
+            raise ValidationError(f"Quality applies only to JPEG and WebP, not '{fmt}'")
+        if lossless and fmt != "webp":
+            raise ValidationError("Lossless applies only to WebP")
+        if lossless and quality is not None:
+            raise ValidationError("Choose either a quality or lossless WebP, not both")
         out = _image_out(ctx, "convert", ext=_FORMAT_EXT[fmt])
-        await imagemagick.convert_format(src, str(out.path))
-        return HandlerResult(data={"operation": "image.format", "format": fmt}, outputs=[out])
+        used = await imagemagick.convert_format(
+            src, str(out.path), fmt=fmt, quality=quality, lossless=lossless,
+            flatten=bool(ctx.params.get("flatten_transparency", False)),
+        )
+        return HandlerResult(
+            data={"operation": "image.format", "format": fmt, **used}, outputs=[out]
+        )
 
 
 class ImageUpscaleHandler(LocalToolHandler):

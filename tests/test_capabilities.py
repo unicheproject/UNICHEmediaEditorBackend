@@ -252,7 +252,6 @@ async def test_capability_schema_exposes_execution_and_semantic_contract(
     ]
     assert image_format["properties"]["format"]["enum"] == [
         "jpeg",
-        "jpg",
         "png",
         "webp",
         "tiff",

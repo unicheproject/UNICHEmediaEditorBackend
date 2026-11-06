@@ -564,16 +564,71 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "layer": CapabilityLayer.DETERMINISTIC_MEDIA,
         "tool": "ImageMagick",
         "title": "Image Format Convert",
-        "description": "Convert an image between formats (jpeg/png/webp/tiff).",
+        "description": (
+            "Convert the first frame of an image, as displayed after EXIF orientation, "
+            "to JPEG, PNG, WebP or TIFF. JPEG and WebP are lossy: quality (1-100) "
+            "defaults to 92 for JPEG and 90 for WebP, and WebP can instead be lossless. "
+            "PNG and TIFF are always lossless (TIFF uses LZW). JPEG cannot hold "
+            "transparency and is flattened onto white; other formats keep it unless "
+            "flatten_transparency is set."
+        ),
         "media": _I,
         "properties": {
             "format": _string(
                 "Output format",
                 "Image format produced by the conversion.",
-                enum=["jpeg", "jpg", "png", "webp", "tiff"],
-            )
+                enum=["jpeg", "png", "webp", "tiff"],
+                **{
+                    "x-enum-descriptions": {
+                        "jpeg": "JPEG: small lossy files; no transparency.",
+                        "png": "PNG: lossless, keeps transparency.",
+                        "webp": "WebP: small files for the web; lossy or lossless.",
+                        "tiff": "TIFF: lossless (LZW), suited to archiving.",
+                    }
+                },
+            ),
+            "quality": _integer(
+                "Quality",
+                "Lossy encoding quality for JPEG and WebP; higher keeps more detail and "
+                "makes larger files. Omit for 92 (JPEG) or 90 (WebP).",
+                minimum=1,
+                maximum=100,
+                **{"x-unit": "percent"},
+            ),
+            "lossless": {
+                "type": "boolean",
+                "title": "Lossless WebP",
+                "description": "Encode WebP without any loss; cannot be combined with quality.",
+                "default": False,
+                "x-option-constraints": {
+                    "depends_on": "format",
+                    "allowed_values": {"webp": [False, True]},
+                },
+            },
+            "flatten_transparency": {
+                "type": "boolean",
+                "title": "Remove transparency",
+                "description": (
+                    "Fill transparent areas with white. JPEG output is always flattened."
+                ),
+                "default": False,
+            },
         },
         "required": ["format"],
+        "allOf": [
+            {
+                "if": {"properties": {"format": {"enum": ["png", "tiff"]}}},
+                "then": {"not": {"required": ["quality"]}},
+            },
+            {
+                "if": {"properties": {"format": {"not": {"const": "webp"}}}},
+                "then": {"properties": {"lossless": {"const": False}}},
+            },
+            {
+                "if": {"properties": {"lossless": {"const": True}}, "required": ["lossless"]},
+                "then": {"not": {"required": ["quality"]}},
+            },
+        ],
     },
     {
         "id": "image.colour.adjust",
