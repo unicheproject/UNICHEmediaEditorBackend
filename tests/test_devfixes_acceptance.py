@@ -57,6 +57,21 @@ def test_u7_user_text_does_not_name_the_implementation(capability) -> None:
         assert not IMPLEMENTATION_NAMES.search(text), (capability.id, text)
 
 
+@pytest.mark.parametrize("gain_db", [-61, 31])
+def test_c9_gain_has_a_bounded_range(gain_db: float) -> None:
+    from app.capabilities import registry
+    from app.capabilities.validation import (
+        CapabilityInputValidationError,
+        validate_capability_input,
+    )
+
+    cap = registry.get("audio.gain")
+    validate_capability_input(cap, {"gain_db": 0})
+    validate_capability_input(cap, {"gain_db": -60})
+    with pytest.raises(CapabilityInputValidationError):
+        validate_capability_input(cap, {"gain_db": gain_db})
+
+
 def test_u5_resize_help_does_not_describe_encoder_tricks() -> None:
     for capability in CAPABILITIES:
         if capability.id in {"video.resize", "image.resize"}:

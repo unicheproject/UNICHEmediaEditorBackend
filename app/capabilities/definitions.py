@@ -810,7 +810,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "media": _VA,
         "properties": {
             "gain_db": _number(
-                "Gain", "Gain adjustment applied to the audio.", **{"x-unit": "decibels"}
+                "Gain",
+                "Gain adjustment applied to the audio; 0 leaves it unchanged. "
+                "Product range: -60 (near silence) to +30.",
+                minimum=-60,
+                maximum=30,
+                **{"x-unit": "decibels"},
             )
         },
         "required": ["gain_db"],
