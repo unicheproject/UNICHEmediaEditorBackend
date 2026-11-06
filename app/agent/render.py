@@ -344,6 +344,54 @@ def typed_operations(group: dict[str, Any]) -> list[RenderOperation | None]:
     return result
 
 
+def _scaled_size(
+    frame: tuple[int, int], width: int | None, height: int | None
+) -> tuple[int, int]:
+    """Frame size after the fused scale filter, computed as FFmpeg does.
+
+    Explicit sides are rounded down to even; an omitted side is FFmpeg's -2,
+    i.e. av_rescale(side, other_in, side_in * 2) * 2 (rounding half up).
+    """
+    from app.tools.ffmpeg import even_scale_dimensions
+
+    out_width, out_height = even_scale_dimensions(width, height)
+    in_width, in_height = frame
+    if out_width < 0:
+        out_width = (out_height * in_width + in_height) // (2 * in_height) * 2
+    if out_height < 0:
+        out_height = (out_width * in_height + in_width) // (2 * in_width) * 2
+    return out_width, out_height
+
+
+async def _check_crop_bounds(source: Path, operations: list[RenderOperation]) -> None:
+    """Reject a crop outside the frame it applies to, before FFmpeg runs.
+
+    Ordinary video.crop Jobs check this at admission and in ffmpeg.video_crop;
+    a fused group bypasses both, and FFmpeg's crop filter would silently shift
+    an out-of-frame rectangle inward. Each crop is checked against the size
+    left by the earlier resizes and crops in the group (trims and lower thirds
+    keep it), starting from the source's displayed size.
+    """
+    if not any(isinstance(operation, Crop) for operation in operations):
+        return
+    from app.core.errors import ValidationError
+    from app.tools import ffmpeg
+    from app.tools.geometry import check_crop_rectangle
+
+    frame = await ffmpeg.probe_display_size(str(source))
+    for operation in operations:
+        if isinstance(operation, Resize):
+            frame = _scaled_size(frame, operation.width, operation.height)
+        elif isinstance(operation, Crop):
+            if operation.width <= 0 or operation.height <= 0:
+                raise ValidationError("Crop width and height must be positive")
+            check_crop_rectangle(
+                operation.x, operation.y, operation.width, operation.height,
+                frame_width=frame[0], frame_height=frame[1],
+            )
+            frame = (operation.width, operation.height)
+
+
 async def render_group(source: Path, output: Path, work_dir: Path, group: dict[str, Any]) -> bool:
     """Render a group with one explicit FFmpeg invocation; return audio presence.
 
@@ -358,6 +406,7 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
     active = [op for op in operations if op is not None]
     if not active:
         raise ValueError("An identity-only render group must not be rendered")
+    await _check_crop_bounds(source, active)
     audio_present = await ffmpeg._has_audio(str(source))
     output_ext = group["output_extension"]
     video_args = _video_settings(output_ext)

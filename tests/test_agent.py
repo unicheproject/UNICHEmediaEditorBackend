@@ -407,6 +407,10 @@ async def test_render_filtergraph_preserves_logical_order(monkeypatch, tmp_path)
         from pathlib import Path
         Path(dst).write_bytes(b"png")
 
+    async def source_size(_path: str) -> tuple[int, int]:
+        return 1280, 720
+
+    monkeypatch.setattr(ffmpeg, "probe_display_size", source_size)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
     monkeypatch.setattr(imagemagick, "render_lowerthird", make_overlay)
@@ -667,6 +671,169 @@ async def test_grouped_render_failure_has_truthful_job_and_no_output_asset(
         assert len(jobs) == 1 and jobs[0].status.value == "failed"
         assert len(assets) == 1
         assert final["execution_summary"]["nodes"][0]["status"] == "failed"
+
+
+
+_PENDING_VIDEO = {VID: {
+    "media_type": "video", "extension": "mp4", "checksum_sha256": "e" * 64,
+    "technical_metadata_status": "pending", "has_audio_stream": None,
+}}
+
+
+async def _render_crop_group(
+    monkeypatch, tmp_path, steps: list[dict], calls: list[list[str]] | None = None
+) -> list[list[str]]:
+    """Render a fused group from a 1280x720 source; return the FFmpeg calls made."""
+    from app.tools import ffmpeg, runner
+
+    calls = [] if calls is None else calls
+
+    async def source_size(_path: str) -> tuple[int, int]:
+        return 1280, 720
+
+    async def no_audio(_path: str) -> bool:
+        return False
+
+    async def capture(args: list[str], **_kwargs) -> str:
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr(ffmpeg, "probe_display_size", source_size)
+    monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
+    monkeypatch.setattr(runner, "run", capture)
+    group = compile_execution_plan(_plan(steps), _PENDING_VIDEO)["nodes"][0]
+    assert group["kind"] == "render_group"
+    await render_group(tmp_path / "in.mp4", tmp_path / "out.mp4", tmp_path, group)
+    return calls
+
+
+def _crop(asset: str, x: int, y: int, width: int, height: int, step: str = "crop") -> dict:
+    return {"id": step, "capability_id": "video.crop", "asset": asset,
+            "params": {"x": x, "y": y, "width": width, "height": height}}
+
+
+async def test_fused_crop_inside_the_frame_renders(monkeypatch, tmp_path) -> None:
+    calls = await _render_crop_group(monkeypatch, tmp_path, [_crop(VID, 100, 100, 640, 360)])
+    assert len(calls) == 1
+    assert "crop=640:360:100:100" in calls[0][calls[0].index("-filter_complex") + 1]
+
+
+@pytest.mark.parametrize("rect", [
+    (1000, 100, 640, 360),  # beyond the width: FFmpeg would shift it left silently
+    (100, 650, 640, 360),   # beyond the height: FFmpeg would shift it up silently
+    (-20, 100, 640, 360),   # negative x
+    (100, -20, 640, 360),   # negative y
+    (100, 100, 0, 360),     # zero width
+    (100, 100, 640, 0),     # zero height
+])
+async def test_fused_crop_outside_the_frame_is_rejected_before_ffmpeg(
+    monkeypatch, tmp_path, rect: tuple[int, int, int, int]
+) -> None:
+    calls: list[list[str]] = []
+    with pytest.raises(ValidationError):
+        await _render_crop_group(monkeypatch, tmp_path, [_crop(VID, *rect)], calls)
+    assert calls == []
+
+
+@pytest.mark.parametrize("rect", [
+    (-20, 100, 640, 360), (100, -20, 640, 360), (100, 100, 0, 360), (100, 100, 640, 0),
+])
+def test_agent_plan_rejects_negative_or_empty_crop(rect: tuple[int, int, int, int]) -> None:
+    with pytest.raises(PlanValidationError):
+        validate_plan(_plan([_crop(VID, *rect)]), {VID: "video"})
+
+
+@pytest.mark.parametrize(("steps", "valid"), [
+    # Resized to 640x360 first: x=500 + 300 exceeds 640, though it fits 1280.
+    ([{"id": "resize", "capability_id": "video.resize", "asset": VID,
+       "params": {"width": 640, "height": 360}},
+      _crop("@resize", 500, 0, 300, 200)], False),
+    ([{"id": "resize", "capability_id": "video.resize", "asset": VID,
+       "params": {"width": 640, "height": 360}},
+      _crop("@resize", 300, 0, 300, 200)], True),
+    # Width-only resize: FFmpeg makes 1280x720 at width 400 into 400x226.
+    ([{"id": "resize", "capability_id": "video.resize", "asset": VID,
+       "params": {"width": 400}},
+      _crop("@resize", 0, 0, 400, 226)], True),
+    ([{"id": "resize", "capability_id": "video.resize", "asset": VID,
+       "params": {"width": 400}},
+      _crop("@resize", 0, 0, 400, 228)], False),
+    # A second crop is checked against the first crop's size.
+    ([_crop(VID, 0, 0, 640, 360, "first"), _crop("@first", 400, 0, 300, 100)], False),
+    ([_crop(VID, 0, 0, 640, 360, "first"), _crop("@first", 300, 0, 300, 100)], True),
+])
+async def test_fused_crop_uses_the_size_left_by_earlier_steps(
+    monkeypatch, tmp_path, steps: list[dict], valid: bool
+) -> None:
+    if valid:
+        assert len(await _render_crop_group(monkeypatch, tmp_path, steps)) == 1
+    else:
+        with pytest.raises(ValidationError, match="Crop rectangle must fit"):
+            await _render_crop_group(monkeypatch, tmp_path, steps)
+
+
+async def test_trim_crop_then_transcode_keeps_one_fused_render(monkeypatch, tmp_path) -> None:
+    steps = [
+        {"id": "trim", "capability_id": "video.trim", "asset": VID,
+         "params": {"start": 1, "end": 3}},
+        _crop("@trim", 100, 100, 640, 360),
+        {"id": "transcode", "capability_id": "video.transcode", "asset": "@crop",
+         "params": {"format": "mp4"}},
+    ]
+    summary = compile_execution_plan(_plan(steps), _PENDING_VIDEO)
+    assert [node["kind"] for node in summary["nodes"]] == ["render_group", "job"]
+    assert summary["nodes"][0]["step_ids"] == ["trim", "crop"]
+    calls = await _render_crop_group(monkeypatch, tmp_path, steps)
+    graph = calls[0][calls[0].index("-filter_complex") + 1]
+    assert graph.index("trim=start=1:end=3") < graph.index("crop=640:360:100:100")
+
+
+async def test_out_of_frame_fused_crop_fails_without_an_output_asset(
+    client: AsyncClient, make_project, monkeypatch
+) -> None:
+    from app.tools import ffmpeg, runner
+
+    pid = await make_project("agent-render-crop-bounds")
+    upload = await client.post(
+        f"{API}/projects/{pid}/assets",
+        files={"file": ("source.mp4", b"fixture", "video/mp4")},
+    )
+    asset_id = upload.json()["id"]
+    session_id = (await client.post(
+        f"{API}/agent/sessions", json={"project_id": pid, "asset_ids": [asset_id]}
+    )).json()["id"]
+    plan = _plan([_crop(asset_id, 50, 0, 80, 40)])  # 50 + 80 > 100
+
+    async def fake_propose(*_args, **_kwargs):
+        return plan, []
+
+    async def source_size(_path: str) -> tuple[int, int]:
+        return 100, 80
+
+    async def no_ffmpeg(*_args, **_kwargs) -> str:
+        raise AssertionError("FFmpeg must not run for an out-of-frame crop")
+
+    monkeypatch.setattr("app.services.agent.llm.propose", fake_propose)
+    monkeypatch.setattr(ffmpeg, "probe_display_size", source_size)
+    monkeypatch.setattr(runner, "run", no_ffmpeg)
+    plan_id = (await client.post(
+        f"{API}/agent/sessions/{session_id}/messages", json={"content": "Crop"}
+    )).json()["plan"]["id"]
+    await client.post(f"{API}/agent/plans/{plan_id}/approve")
+    final = (await client.get(f"{API}/agent/plans/{plan_id}")).json()
+    assert final["status"] == "failed"
+    assert final["step_runs"][0]["status"] == "failed"
+    assert final["step_runs"][0].get("output_asset_id") is None
+    async with async_session_factory() as db:
+        jobs = list(
+            (await db.execute(select(Job).where(Job.project_id == uuid.UUID(pid)))).scalars()
+        )
+        assets = list(
+            (await db.execute(select(Asset).where(Asset.project_id == uuid.UUID(pid)))).scalars()
+        )
+    assert len(jobs) == 1 and jobs[0].status.value == "failed"
+    assert "Crop rectangle must fit inside the video (100×80)" in (jobs[0].error or "")
+    assert len(assets) == 1
 
 
 @pytest.mark.skipif(not NEED_ALL, reason="needs ffmpeg + convert + font")
