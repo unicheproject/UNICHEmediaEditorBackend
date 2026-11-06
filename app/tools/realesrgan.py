@@ -42,15 +42,21 @@ def check_runtime_readiness() -> None:
         available = torch.cuda.is_available()
     except (ImportError, OSError, RuntimeError) as exc:
         raise CapabilityUnavailableError(
-            "CUDA worker runtime is not configured (configuration_required)."
+            "Image Upscale is not available on this server: its graphics card (GPU) "
+            "software has not been set up. Ask your administrator.",
+            reason_code="configuration_required",
         ) from exc
     if not available:
         raise CapabilityUnavailableError(
-            "CUDA worker has no available GPU (gpu_unavailable); no CPU fallback."
+            "Image Upscale cannot run right now: the graphics card (GPU) it needs is "
+            "not available, and it does not run without one. Ask your administrator.",
+            reason_code="gpu_unavailable",
         )
     if not Path(MODEL_PATH).is_file():
         raise CapabilityUnavailableError(
-            "CUDA worker model is not configured (configuration_required)."
+            "Image Upscale is not available on this server: its model file has not "
+            "been installed. Ask your administrator.",
+            reason_code="configuration_required",
         )
 
 

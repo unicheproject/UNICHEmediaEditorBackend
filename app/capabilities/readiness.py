@@ -49,6 +49,39 @@ def resolve_readiness(
     )
 
 
+_UNAVAILABLE_MESSAGES: dict[ReadinessReason, str] = {
+    ReadinessReason.NOT_IMPLEMENTED: "{title} is not available yet: it has not been built.",
+    ReadinessReason.PROVIDER_NOT_CONFIGURED: (
+        "{title} is not available on this server: the AI service it uses has not been "
+        "set up. Ask your administrator."
+    ),
+    ReadinessReason.CONFIGURATION_REQUIRED: (
+        "{title} is not available on this server: it needs a setup step that has not "
+        "been done. Ask your administrator."
+    ),
+    ReadinessReason.GPU_UNAVAILABLE: (
+        "{title} cannot run right now: the graphics card (GPU) it needs is not "
+        "available. Ask your administrator."
+    ),
+    ReadinessReason.CAPABILITY_DISABLED: "{title} has been switched off on this server.",
+}
+# image.upscale's configuration step is specifically a GPU worker.
+_GPU_CONFIGURATION_MESSAGE = (
+    "{title} is not available on this server: it needs a graphics card (GPU) that "
+    "has not been set up. Ask your administrator."
+)
+
+
+def unavailable_message(capability: CapabilityDefinition, reason: ReadinessReason) -> str:
+    template = _UNAVAILABLE_MESSAGES[reason]
+    if (
+        reason == ReadinessReason.CONFIGURATION_REQUIRED
+        and capability.deployment_requirement == DeploymentRequirement.CUDA_WORKER
+    ):
+        template = _GPU_CONFIGURATION_MESSAGE
+    return template.format(title=capability.title)
+
+
 def resolve_availability(
     capability: CapabilityDefinition, *, settings: Settings | None = None
 ) -> CapabilityAvailability:
@@ -56,13 +89,18 @@ def resolve_availability(
     reason = readiness.reason_code
     if reason is None and not capability.enabled:
         reason = ReadinessReason.CAPABILITY_DISABLED
+    executable = (
+        capability.enabled
+        and readiness.implementation == ImplementationReadiness.AVAILABLE
+        and readiness.deployment == DeploymentReadiness.READY
+    )
     return CapabilityAvailability(
-        executable=(
-            capability.enabled
-            and readiness.implementation == ImplementationReadiness.AVAILABLE
-            and readiness.deployment == DeploymentReadiness.READY
-        ),
+        executable=executable,
         reason_code=reason,
+        message=(
+            unavailable_message(capability, reason)
+            if not executable and reason is not None else None
+        ),
     )
 
 
@@ -80,8 +118,8 @@ def require_executable(capability: CapabilityDefinition) -> None:
     availability = resolve_availability(capability)
     if not availability.executable:
         raise CapabilityUnavailableError(
-            f"Capability '{capability.id}' is unavailable "
-            f"({availability.reason_code})."
+            availability.message or f"{capability.title} is not available.",
+            reason_code=availability.reason_code,
         )
 
 

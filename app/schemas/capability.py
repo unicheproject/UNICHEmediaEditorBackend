@@ -77,6 +77,10 @@ class CapabilityReadiness(BaseModel):
 class CapabilityAvailability(BaseModel):
     executable: bool
     reason_code: ReadinessReason | None = None
+    message: str | None = Field(default=None, description=(
+        "Plain-language explanation for end users when not executable; null when "
+        "executable. reason_code stays the machine-readable value."
+    ))
 
 
 class CapabilityMetadata(BaseModel):

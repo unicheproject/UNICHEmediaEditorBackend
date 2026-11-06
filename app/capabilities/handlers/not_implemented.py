@@ -15,5 +15,7 @@ class NotImplementedHandler(CapabilityHandler):
 
     async def run(self, ctx: JobContext) -> HandlerResult:
         raise CapabilityUnavailableError(
-            f"Capability '{ctx.capability_id}' is unavailable (not_implemented)."
+            f"The operation '{ctx.capability_id}' is not available yet: it has not "
+            "been built.",
+            reason_code="not_implemented",
         )

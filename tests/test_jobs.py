@@ -95,7 +95,7 @@ async def test_audio_tts_job_rejects_mock_provider(
     )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "capability_unavailable"
-    assert "provider_not_configured" in resp.json()["error"]["message"]
+    assert resp.json()["error"]["reason_code"] == "provider_not_configured"
 
 
 async def test_primary_asset_applicability_is_enforced_before_queue(
@@ -224,7 +224,7 @@ async def test_not_implemented_capability_is_rejected(
     )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "capability_unavailable"
-    assert "not_implemented" in resp.json()["error"]["message"]
+    assert resp.json()["error"]["reason_code"] == "not_implemented"
 
 
 async def test_invalid_capability_rejected(client: AsyncClient) -> None:

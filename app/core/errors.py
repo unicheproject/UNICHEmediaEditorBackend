@@ -56,9 +56,17 @@ class BadRequestError(AppError):
 
 
 class CapabilityUnavailableError(ValidationError):
-    """Safe readiness rejection at admission or during queued execution."""
+    """Safe readiness rejection at admission or during queued execution.
+
+    The message is a plain sentence for end users; the machine-readable reason
+    travels separately as reason_code in the error body.
+    """
 
     code = "capability_unavailable"
+
+    def __init__(self, message: str, *, reason_code: str | None = None) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 class ConflictError(AppError):
@@ -100,8 +108,11 @@ class ToolError(AppError):
     code = "tool_error"
 
 
-def _error_body(code: str, message: str) -> dict:
-    return {"error": {"code": code, "message": message}}
+def _error_body(code: str, message: str, reason_code: str | None = None) -> dict:
+    error: dict[str, str] = {"code": code, "message": message}
+    if reason_code is not None:
+        error["reason_code"] = reason_code
+    return {"error": error}
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -109,5 +120,5 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _handle_app_error(_request: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
-            content=_error_body(exc.code, exc.message),
+            content=_error_body(exc.code, exc.message, getattr(exc, "reason_code", None)),
         )

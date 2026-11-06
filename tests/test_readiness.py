@@ -137,12 +137,17 @@ async def test_capability_listing_includes_unavailable_with_additive_fields(clie
             "implementation": "unavailable", "deployment": "ready",
             "reason_code": "not_implemented",
         }
-        assert cap["availability"] == {"executable": False, "reason_code": "not_implemented"}
+        assert cap["availability"] == {
+            "executable": False, "reason_code": "not_implemented",
+            "message": f"{cap['title']} is not available yet: it has not been built.",
+        }
         assert cap["applicability"] == registry.get(capability_id).applicability.model_dump(
             mode="json"
         )
         assert "x-ui" not in str(cap)
-    assert caps["project.export"]["availability"] == {"executable": True, "reason_code": None}
+    assert caps["project.export"]["availability"] == {
+        "executable": True, "reason_code": None, "message": None,
+    }
     assert caps["image.upscale"]["readiness"]["implementation"] == "available"
     detail = (await client.get(f"{API}/capabilities/video.upscale")).json()
     assert detail == caps["video.upscale"]
@@ -177,6 +182,7 @@ async def test_disabled_capability_discovery_does_not_enable_job_admission(
     assert listed[disabled.id]["availability"] == {
         "executable": False,
         "reason_code": "capability_disabled",
+        "message": "Video Trim has been switched off on this server.",
     }
 
     detail = await client.get(f"{API}/capabilities/{disabled.id}")
@@ -237,7 +243,7 @@ async def test_unavailable_http_admission_never_persists_or_enqueues(
     response = await client.post(f"{API}/jobs", json=body)
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == "capability_unavailable"
-    assert "not_implemented" in response.json()["error"]["message"]
+    assert response.json()["error"]["reason_code"] == "not_implemented"
     assert queued == []
     async with async_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(Job)) == 0
@@ -245,7 +251,7 @@ async def test_unavailable_http_admission_never_persists_or_enqueues(
 
 async def test_service_admission_is_also_guarded() -> None:
     async with async_session_factory() as session:
-        with pytest.raises(CapabilityUnavailableError, match="not_implemented"):
+        with pytest.raises(CapabilityUnavailableError, match="not available yet"):
             await create_job(session, JobCreate(
                 capability_id="audio.music.generate", project_id=uuid.uuid4(),
                 input={"prompt": "Test"},
@@ -254,7 +260,7 @@ async def test_service_admission_is_also_guarded() -> None:
 
 
 async def test_fallback_direct_invocation_always_fails() -> None:
-    with pytest.raises(CapabilityUnavailableError, match="not_implemented"):
+    with pytest.raises(CapabilityUnavailableError, match="not available yet"):
         await NotImplementedHandler().run(JobContext(capability_id="legacy.operation"))
 
 
@@ -273,7 +279,7 @@ async def test_old_queued_unavailable_and_fallback_worker_jobs_fail_without_outp
         await session.commit()
         job = await execute_job(session, job.id)
         assert job.status == JobStatus.failed
-        assert "not_implemented" in job.error
+        assert "not available yet" in job.error
         assert not job.output
         assert await session.scalar(select(func.count()).select_from(Asset)) == 0
 
@@ -320,7 +326,7 @@ async def test_mock_configuration_does_not_admit_even_source_less_jobs(
         "capability_id": "audio.tts", "project_id": pid, "input": {"text": "Test"},
     })
     assert response.status_code == 422
-    assert "provider_not_configured" in response.json()["error"]["message"]
+    assert response.json()["error"]["reason_code"] == "provider_not_configured"
     assert (await client.get(f"{API}/projects/{pid}/jobs")).json()["total"] == 0
 
 
@@ -362,7 +368,7 @@ async def test_provider_configuration_changed_after_queue_is_rechecked(
         monkeypatch.setattr(settings, "inference_provider", "mock")
         result = await execute_job(session, job.id)
         assert result.status == JobStatus.failed
-        assert "provider_not_configured" in result.error
+        assert "AI service" in result.error
         assert not result.output
 
 
@@ -395,8 +401,9 @@ def test_gpu_prerequisite_probe_rejects_cuda_absence_without_cpu_fallback(monkey
         cuda=SimpleNamespace(is_available=lambda: False)
     ))
     monkeypatch.setattr(realesrgan, "_upsampler", None)
-    with pytest.raises(CapabilityUnavailableError, match="gpu_unavailable"):
+    with pytest.raises(CapabilityUnavailableError, match="graphics card") as exc:
         realesrgan.check_runtime_readiness()
+    assert exc.value.reason_code == "gpu_unavailable"
     with pytest.raises(ToolError, match="no CPU fallback"):
         realesrgan._get_upsampler()
 
@@ -406,8 +413,9 @@ def test_gpu_prerequisite_probe_checks_model_without_loading_it(monkeypatch, tmp
         cuda=SimpleNamespace(is_available=lambda: True)
     ))
     monkeypatch.setattr(realesrgan, "MODEL_PATH", str(tmp_path / "absent.pth"))
-    with pytest.raises(CapabilityUnavailableError, match="configuration_required"):
+    with pytest.raises(CapabilityUnavailableError, match="model file") as exc:
         realesrgan.check_runtime_readiness()
+    assert exc.value.reason_code == "configuration_required"
     model = tmp_path / "present.pth"
     model.touch()
     monkeypatch.setattr(realesrgan, "MODEL_PATH", str(model))
@@ -431,7 +439,7 @@ async def test_gpu_worker_does_not_execute_when_runtime_is_unavailable(
     assert response.status_code == 201
     result = (await client.get(f"{API}/jobs/{response.json()['id']}")).json()
     assert result["status"] == "failed"
-    assert "gpu_unavailable" in result["error"]
+    assert "graphics card (GPU)" in result["error"]
     assert not result["output"]
 
 
@@ -439,7 +447,7 @@ def test_global_enabled_is_a_separate_gate_and_reason() -> None:
     cap = registry.get("video.trim").model_copy(update={"enabled": False})
     assert resolve_readiness(cap).implementation == ImplementationReadiness.AVAILABLE
     assert resolve_availability(cap).reason_code == ReadinessReason.CAPABILITY_DISABLED
-    with pytest.raises(CapabilityUnavailableError, match="capability_disabled"):
+    with pytest.raises(CapabilityUnavailableError, match="switched off"):
         require_executable(cap)
 
 
@@ -452,7 +460,7 @@ def test_agent_catalog_and_validator_use_readiness_generically(monkeypatch) -> N
         plan = Plan.model_validate({"type": "plan", "summary": "Test", "steps": [{
             "id": "step", "capability_id": capability_id, "params": {},
         }]})
-        with pytest.raises(PlanValidationError, match="unavailable"):
+        with pytest.raises(PlanValidationError, match="not available"):
             validate_plan(plan, {})
     monkeypatch.setattr(settings, "inference_provider", "openrouter")
     monkeypatch.setattr(settings, "openrouter_api_key", "test-only-key")
@@ -505,7 +513,7 @@ async def test_agent_claimed_attempt_rechecks_configuration_truthfully(
         monkeypatch.setattr(settings, "inference_provider", "mock")
         result = await execute_plan(session, plan.id, attempt.id)
         assert result.status == AgentPlanStatus.failed
-        assert "provider_not_configured" in result.error
+        assert "AI service" in result.error
         assert attempt.status == "failed"
         assert await session.scalar(select(func.count()).select_from(Job)) == 0
 
@@ -518,3 +526,30 @@ def test_openapi_exposes_stable_readiness_and_availability_models() -> None:
     assert schemas["CapabilityAvailability"]["properties"]["executable"]["type"] == "boolean"
     assert "deployment_requirement" not in schemas["CapabilityRead"]["properties"]
     assert "x-ui" not in str(schemas["CapabilityRead"])
+
+
+async def test_unavailable_capability_explains_itself_in_plain_words(
+    client: AsyncClient, make_project, monkeypatch
+) -> None:
+    """devfixes U-8/U-10: a sentence for the curator, the code kept separately."""
+    monkeypatch.setattr(settings, "image_upscale_worker_ready", False)
+    cap = (await client.get(f"{API}/capabilities/image.upscale")).json()
+    assert cap["availability"]["executable"] is False
+    assert cap["availability"]["reason_code"] == "configuration_required"
+    message = cap["availability"]["message"]
+    assert message.startswith("Image Upscale is not available on this server")
+    assert "graphics card (GPU)" in message and "(configuration_required)" not in message
+
+    pid = await make_project("Plain unavailable")
+    asset = (await client.post(f"{API}/projects/{pid}/assets", files={
+        "file": ("pic.png", b"source", "image/png"),
+    })).json()["id"]
+    response = await client.post(f"{API}/jobs", json={
+        "capability_id": "image.upscale", "asset_id": asset, "input": {"scale": 2},
+    })
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error == {
+        "code": "capability_unavailable", "message": message,
+        "reason_code": "configuration_required",
+    }
