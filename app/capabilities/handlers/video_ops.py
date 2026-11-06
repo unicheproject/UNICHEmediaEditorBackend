@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import (
+    aspect_ratio_change,
     input_ext,
     input_stem,
     num_tag,
@@ -150,14 +151,27 @@ class VideoResizeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
+        fit = ctx.params.get("fit", "stretch")
+        source = await ffmpeg.probe_display_size(src)
         work = _video_out(ctx, "resize")
         await ffmpeg.video_resize(
-            src, str(work.path), ctx.params.get("width"), ctx.params.get("height")
+            src, str(work.path), ctx.params.get("width"), ctx.params.get("height"), fit=fit,
         )
         width, height = await ffmpeg.probe_display_size(str(work.path))
         filename = f"{input_stem(ctx)}_resize_{width}x{height}.{input_ext(ctx)}"
         out = OutputFile(path=work.path, filename=filename, media_type=MediaType.video)
-        return HandlerResult(data={"operation": "video.resize"}, outputs=[out])
+        return HandlerResult(
+            data={
+                "operation": "video.resize", "fit": fit, "width": width, "height": height,
+                "aspect_ratio_change": aspect_ratio_change(
+                    source, (width, height),
+                    cropped=fit == "cover" and None not in (
+                        ctx.params.get("width"), ctx.params.get("height")
+                    ),
+                ),
+            },
+            outputs=[out],
+        )
 
 
 class VideoThumbnailHandler(LocalToolHandler):

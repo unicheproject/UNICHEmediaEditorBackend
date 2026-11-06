@@ -469,9 +469,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "tool": "FFmpeg",
         "title": "Video Resize",
         "description": (
-            "Resize a video. Give a width, a height, or both; when only one is given, "
-            "the other follows the source's aspect ratio. Sizes are rounded down to "
-            "even numbers, as standard video formats require."
+            "Resize a video as displayed. Give a width, a height, or both; when only one "
+            "is given, the other follows the source's aspect ratio. With both, fit "
+            "chooses stretch (exact size), contain or cover. Sizes are rounded down to "
+            "even numbers, as standard video formats require. The output reports its "
+            "size and aspect_ratio_change."
         ),
         "media": _V,
         "properties": {
@@ -487,8 +489,30 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 minimum=2,
                 **{"x-unit": "pixels"},
             ),
+            "fit": _string(
+                "Fit",
+                "How to use both sides when width and height are given: stretch to "
+                "exactly that size, contain inside it, or cover it and crop the overflow. "
+                "Requires both width and height.",
+                default="stretch",
+                enum=["stretch", "contain", "cover"],
+                **{
+                    "x-enum-descriptions": {
+                        "stretch": "Exactly width x height; the picture is distorted if "
+                                   "the aspect ratio differs (reported as "
+                                   "aspect_ratio_change).",
+                        "contain": "As large as possible inside width x height, keeping the "
+                                   "aspect ratio; one side may come out smaller.",
+                        "cover": "Fills width x height exactly, keeping the aspect ratio "
+                                 "and cropping the overflow from the centre.",
+                    }
+                },
+            ),
         },
-        "allOf": [{"anyOf": [{"required": ["width"]}, {"required": ["height"]}]}],
+        "allOf": [
+            {"anyOf": [{"required": ["width"]}, {"required": ["height"]}]},
+            {"if": {"required": ["fit"]}, "then": {"required": ["width", "height"]}},
+        ],
     },
     {
         "id": "video.thumbnail",
@@ -515,8 +539,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Resize the first frame of an image, as displayed after EXIF orientation. "
             "Give a width, a height, or both; when only one is given the other follows "
-            "the image's aspect ratio, and when both are given the output has exactly "
-            "that size (the picture may be stretched)."
+            "the image's aspect ratio. With both, fit chooses stretch (exactly that "
+            "size; the picture may be distorted), contain or cover. Optional quality "
+            "applies to JPEG and WebP images. The output reports its size and "
+            "aspect_ratio_change."
         ),
         "media": _I,
         "properties": {
@@ -528,8 +554,36 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "Height", "Output height. Omit it to keep the aspect ratio from the width.",
                 minimum=1, **{"x-unit": "pixels"},
             ),
+            "fit": _string(
+                "Fit",
+                "How to use both sides when width and height are given: stretch to "
+                "exactly that size, contain inside it, or cover it and crop the overflow. "
+                "Requires both width and height.",
+                default="stretch",
+                enum=["stretch", "contain", "cover"],
+                **{
+                    "x-enum-descriptions": {
+                        "stretch": "Exactly width x height; the picture is distorted if "
+                                   "the aspect ratio differs (reported as "
+                                   "aspect_ratio_change).",
+                        "contain": "As large as possible inside width x height, keeping the "
+                                   "aspect ratio; one side may come out smaller.",
+                        "cover": "Fills width x height exactly, keeping the aspect ratio "
+                                 "and cropping the overflow from the centre.",
+                    }
+                },
+            ),
+            "quality": _integer(
+                "Quality",
+                "Encoding quality for JPEG and WebP images (1-100); higher keeps more "
+                "detail. Omit to let ImageMagick follow the source's quality.",
+                minimum=1, maximum=100, **{"x-unit": "percent"},
+            ),
         },
-        "allOf": [{"anyOf": [{"required": ["width"]}, {"required": ["height"]}]}],
+        "allOf": [
+            {"anyOf": [{"required": ["width"]}, {"required": ["height"]}]},
+            {"if": {"required": ["fit"]}, "then": {"required": ["width", "height"]}},
+        ],
     },
     {
         "id": "image.crop",

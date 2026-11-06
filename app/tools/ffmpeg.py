@@ -651,11 +651,36 @@ def even_scale_dimensions(width: int | None, height: int | None) -> tuple[int, i
     return sides[0], sides[1]
 
 
-async def video_resize(
-    src: str, dst: str, width: int | None = None, height: int | None = None
-) -> None:
+RESIZE_FITS = ("stretch", "contain", "cover")
+
+
+def resize_scale_filter(width: int | None, height: int | None, fit: str = "stretch") -> str:
+    """FFmpeg filter for a resize; fit only matters when both sides are given.
+
+    stretch: exactly WxH. contain: inside WxH keeping the aspect ratio.
+    cover: fill WxH keeping the aspect ratio, cropping the overflow centrally.
+    """
+    if fit not in RESIZE_FITS:
+        raise ValidationError(f"Unsupported resize fit '{fit}'")
     out_width, out_height = even_scale_dimensions(width, height)
-    await runner.run([*_BASE, "-i", src, "-vf", f"scale={out_width}:{out_height}", dst])
+    if fit == "stretch" or width is None or height is None:
+        return f"scale={out_width}:{out_height}"
+    if fit == "contain":
+        return (
+            f"scale={out_width}:{out_height}:force_original_aspect_ratio=decrease"
+            ":force_divisible_by=2"
+        )
+    return (
+        f"scale={out_width}:{out_height}:force_original_aspect_ratio=increase"
+        f":force_divisible_by=2,crop={out_width}:{out_height}"
+    )
+
+
+async def video_resize(
+    src: str, dst: str, width: int | None = None, height: int | None = None,
+    *, fit: str = "stretch",
+) -> None:
+    await runner.run([*_BASE, "-i", src, "-vf", resize_scale_filter(width, height, fit), dst])
 
 
 def check_thumbnail_time(timestamp: float, *, duration: float | None) -> None:

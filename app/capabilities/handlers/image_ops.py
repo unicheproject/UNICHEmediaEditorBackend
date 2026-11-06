@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import (
+    aspect_ratio_change,
     input_ext,
     input_stem,
     num_tag,
@@ -26,21 +27,44 @@ def _image_out(ctx: JobContext, suffix: str, ext: str | None = None) -> OutputFi
     return OutputFile(path=ctx.out_path(filename), filename=filename, media_type=MediaType.image)
 
 
+def _resize_report(
+    operation: str, source: tuple[int, int], output: tuple[int, int], fit: str,
+    quality: int | None = None,
+) -> dict[str, object]:
+    data: dict[str, object] = {
+        "operation": operation, "fit": fit, "width": output[0], "height": output[1],
+        # Non-zero only when stretching: the picture is distorted by this much.
+        "aspect_ratio_change": aspect_ratio_change(source, output, cropped=fit == "cover"),
+    }
+    if quality is not None:
+        data["quality"] = quality
+    return data
+
+
 class ImageResizeHandler(LocalToolHandler):
     capability_id = "image.resize"
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
+        quality = ctx.params.get("quality")
+        if quality is not None and input_ext(ctx) not in imagemagick.LOSSY_EXTENSIONS:
+            raise ValidationError("Quality applies only to JPEG and WebP images")
+        fit = ctx.params.get("fit", "stretch")
+        source = await imagemagick.display_size(src)
         work = _image_out(ctx, "resize")
         await imagemagick.resize(
-            src, str(work.path), ctx.params.get("width"), ctx.params.get("height")
+            src, str(work.path), ctx.params.get("width"), ctx.params.get("height"),
+            fit=fit, quality=quality,
         )
         width, height = await imagemagick.display_size(str(work.path))
         out = OutputFile(
             path=work.path, filename=f"{input_stem(ctx)}_resize_{width}x{height}.{input_ext(ctx)}",
             media_type=MediaType.image,
         )
-        return HandlerResult(data={"operation": "image.resize"}, outputs=[out])
+        return HandlerResult(
+            data=_resize_report("image.resize", source, (width, height), fit, quality),
+            outputs=[out],
+        )
 
 
 class ImageCropHandler(LocalToolHandler):

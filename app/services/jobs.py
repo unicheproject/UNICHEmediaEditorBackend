@@ -190,6 +190,12 @@ def _validate_input_against_asset(capability_id: str, asset: Asset, job_input: d
     Pending/unavailable metadata defers these bounds to execution, which probes
     the source itself; admission never blocks on a probe.
     """
+    if (
+        capability_id == "image.resize"
+        and job_input.get("quality") is not None
+        and (asset.extension or "").lower() not in {"jpg", "jpeg", "webp"}
+    ):
+        raise ValidationError("Quality applies only to JPEG and WebP images")
     if asset.technical_metadata_status != TechnicalMetadataStatus.available.value:
         return
     from app.tools import ffmpeg

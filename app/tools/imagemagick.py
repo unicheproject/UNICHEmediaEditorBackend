@@ -23,29 +23,53 @@ def _int(value: object, name: str) -> str:
 
 
 async def resize(
-    src: str, dst: str, width: int | None = None, height: int | None = None
+    src: str,
+    dst: str,
+    width: int | None = None,
+    height: int | None = None,
+    *,
+    fit: str = "stretch",
+    quality: int | None = None,
 ) -> None:
     """Resize the first frame as displayed; one side keeps the aspect ratio.
 
-    "WxH!" forces exact dimensions; "Wx" / "xH" preserve the aspect ratio.
+    With both sides, fit chooses: stretch to exactly WxH ("WxH!"), contain
+    inside WxH ("WxH"), or cover WxH and crop the centre ("WxH^" + extent).
     """
     if width is None and height is None:
         raise ValidationError("Resize needs a width, a height, or both")
-    if width is not None and height is not None:
-        geom = f"{_int(width, 'width')}x{_int(height, 'height')}!"
+    if fit not in ("stretch", "contain", "cover"):
+        raise ValidationError(f"Unsupported resize fit '{fit}'")
+    both = width is not None and height is not None
+    ops: list[str]
+    if both:
+        box = f"{_int(width, 'width')}x{_int(height, 'height')}"
+        if fit == "stretch":
+            ops = ["-resize", f"{box}!"]
+        elif fit == "contain":
+            ops = ["-resize", box]
+        else:
+            ops = ["-resize", f"{box}^", "-gravity", "center", "-extent", box, "+repage"]
     elif width is not None:
-        geom = f"{_int(width, 'width')}x"
+        ops = ["-resize", f"{_int(width, 'width')}x"]
     else:
-        geom = f"x{_int(height, 'height')}"
+        ops = ["-resize", f"x{_int(height, 'height')}"]
+    if quality is not None:
+        ops += ["-quality", _int(quality, "quality")]
     output = Path(dst)
     validated = False
     try:
         # [0]: multi-page inputs would otherwise write dst-0, dst-1, ... and no dst.
-        await runner.run([CONVERT, f"{src}[0]", "-auto-orient", "-resize", geom, dst])
+        await runner.run([CONVERT, f"{src}[0]", "-auto-orient", *ops, dst])
         if not output.is_file() or output.stat().st_size == 0:
             raise ToolError("Resize output is missing or empty")
         out_width, out_height = await display_size(dst)
-        if (width is not None and out_width != width) or (
+        if both and fit == "contain":
+            assert width is not None and height is not None
+            fits = out_width <= width and out_height <= height
+            if not fits or (out_width != width and out_height != height):
+                raise ToolError("Resize output does not match the requested size")
+        elif (width is not None and out_width != width) or (
             height is not None and out_height != height
         ):
             raise ToolError("Resize output does not match the requested size")
@@ -128,6 +152,7 @@ async def crop(src: str, dst: str, x: int, y: int, width: int, height: int) -> N
 # left to ImageMagick (whose WebP default is 75 and JPEG default follows the input).
 DEFAULT_IMAGE_QUALITY = {"jpeg": 92, "webp": 90}
 LOSSY_IMAGE_FORMATS = frozenset(DEFAULT_IMAGE_QUALITY)
+LOSSY_EXTENSIONS = frozenset({"jpg", "jpeg", "webp"})
 
 
 async def convert_format(

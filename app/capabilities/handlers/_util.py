@@ -47,3 +47,19 @@ def num_tag(value: object) -> str:
 def trim_tag(start: object, end: object | None) -> str:
     """trim_10-240, or trim_10-end when the interval runs to the end."""
     return f"trim_{num_tag(start)}-{'end' if end is None else num_tag(end)}"
+
+
+def aspect_ratio_change(
+    source: tuple[int, int], output: tuple[int, int], *, cropped: bool = False
+) -> float | None:
+    """How much the picture is stretched (0.07 = 7% wider); None if unknown.
+
+    cropped: a cover fit scales uniformly and trims the overflow, so the
+    picture itself is not distorted whatever the frame shape.
+    """
+    if cropped:
+        return 0.0
+    (sw, sh), (ow, oh) = source, output
+    if min(sw, sh, ow, oh) <= 0:
+        return None
+    return round((ow / oh) / (sw / sh) - 1, 4)

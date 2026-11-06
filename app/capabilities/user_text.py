@@ -120,6 +120,10 @@ USER_TEXT: dict[str, UserText] = {
             "width": "New width in pixels. Leave empty to keep the proportions.",
             "height": "New height in pixels, for example 480, 720 or 1080. Leave "
                       "empty to keep the proportions.",
+            "fit": "Only when you enter both width and height. Stretch gives exactly "
+                   "that size and may squash the picture; Contain keeps the "
+                   "proportions and fits inside the size; Cover keeps the proportions, "
+                   "fills the size and trims the edges.",
         },
     },
     "video.thumbnail": {
@@ -141,12 +145,20 @@ USER_TEXT: dict[str, UserText] = {
     "image.resize": {
         "summary": (
             "Make an image larger or smaller. Enter only a width or only a height to "
-            "keep the picture's proportions. If you enter both, the image gets exactly "
-            "that size and may look stretched or squashed."
+            "keep the picture's proportions. If you enter both, choose how it fits: "
+            "stretched to exactly that size, kept whole inside it, or filling it with "
+            "the edges trimmed."
         ),
         "params": {
             "width": "New width in pixels. Leave empty to keep the proportions.",
             "height": "New height in pixels. Leave empty to keep the proportions.",
+            "fit": "Only when you enter both width and height. Stretch gives exactly "
+                   "that size and may squash the picture; Contain keeps the "
+                   "proportions and fits inside the size; Cover keeps the proportions, "
+                   "fills the size and trims the edges.",
+            "quality": "For JPEG and WebP images only: how much detail to keep. Higher "
+                       "keeps more detail and makes a larger file. Leave empty to keep "
+                       "the original's level.",
         },
     },
     "image.crop": {
