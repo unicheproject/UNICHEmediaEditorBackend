@@ -61,6 +61,11 @@ class CapabilityUnavailableError(ValidationError):
     code = "capability_unavailable"
 
 
+class ConflictError(AppError):
+    status_code = 409
+    code = "conflict"
+
+
 class PreconditionFailedError(AppError):
     status_code = 412
     code = "precondition_failed"

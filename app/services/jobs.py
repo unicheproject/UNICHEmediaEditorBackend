@@ -566,6 +566,15 @@ async def _persist_outputs(
             prepared_keys.append((asset.project_id, asset.id))
         output = dict(result.data)
         if prepared:
+            # Parameterised names can still repeat (same operation twice):
+            # number them so no two live Assets in a project share a name.
+            await assets_svc.lock_project_filenames(session, prepared[0].project_id)
+            names = await assets_svc.unique_filenames(
+                session, prepared[0].project_id,
+                [asset.original_filename for asset in prepared],
+            )
+            for asset, name in zip(prepared, names, strict=True):
+                asset.original_filename = name
             output["outputs"] = [{
                 "asset_id": str(asset.id), "filename": asset.original_filename,
                 "media_type": asset.media_type.value, "size_bytes": asset.size_bytes,

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import (
     AppError,
+    ConflictError,
     GoneError,
     NotFoundError,
     PayloadTooLargeError,
@@ -23,6 +24,7 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import AiProvenance, MediaType, ProvenanceKind, TechnicalMetadataStatus
+from app.models.project import Project
 from app.schemas.asset import (
     AssetBulkDeleteItem,
     AssetBulkDeleteRequest,
@@ -58,6 +60,55 @@ def _allowed_extensions() -> set[str]:
         | settings.allowed_video_extensions
         | settings.allowed_subtitle_extensions
     )
+
+
+def numbered_filename(name: str, number: int) -> str:
+    """photo.jpg -> photo_2.jpg: the counter goes before the extension."""
+    path = Path(name)
+    return f"{path.stem}_{number}{path.suffix}" if path.stem else f"{name}_{number}"
+
+
+async def lock_project_filenames(session: AsyncSession, project_id: uuid.UUID) -> None:
+    """Serialize name assignment per project until the transaction ends.
+
+    Row lock on PostgreSQL; SQLite (tests) ignores FOR UPDATE and is serial anyway.
+    """
+    await session.execute(
+        select(Project.id).where(Project.id == project_id).with_for_update()
+    )
+
+
+async def unique_filenames(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    names: list[str],
+    *,
+    exclude_asset_id: uuid.UUID | None = None,
+) -> list[str]:
+    """Give each name a counter if a live Asset in the project already uses it.
+
+    Names compare case-insensitively; names in the same list are kept apart too.
+    Call within a transaction that holds lock_project_filenames.
+    """
+    taken: set[str] = set()
+    for stem in {Path(name).stem or name for name in names}:
+        stmt = select(Asset.original_filename).where(
+            Asset.project_id == project_id,
+            Asset.deleted_at.is_(None),
+            Asset.original_filename.istartswith(stem, autoescape=True),
+        )
+        if exclude_asset_id is not None:
+            stmt = stmt.where(Asset.id != exclude_asset_id)
+        taken.update(name.lower() for name in (await session.scalars(stmt)).all())
+    result: list[str] = []
+    for name in names:
+        candidate, number = name, 2
+        while candidate.lower() in taken:
+            candidate = numbered_filename(name, number)
+            number += 1
+        taken.add(candidate.lower())
+        result.append(candidate)
+    return result
 
 
 async def create_asset(
@@ -124,11 +175,13 @@ async def create_asset(
     )
 
     waveform_status, waveform_reason = initial_waveform_state(media_type)
+    await lock_project_filenames(session, project_id)
+    (display_name,) = await unique_filenames(session, project_id, [original_filename])
     asset = Asset(
         id=asset_id,
         project_id=project_id,
         filename=stored_name,
-        original_filename=original_filename,
+        original_filename=display_name,
         media_type=media_type,
         mime_type=mime_type,
         extension=extension,
@@ -258,7 +311,17 @@ async def update_asset(
     asset = await get_asset(session, asset_id)
     fields = data.model_dump(exclude_unset=True)
     if "original_filename" in fields and fields["original_filename"] != asset.original_filename:
-        asset.original_filename = fields["original_filename"]
+        name = fields["original_filename"]
+        await lock_project_filenames(session, asset.project_id)
+        (free,) = await unique_filenames(
+            session, asset.project_id, [name], exclude_asset_id=asset.id
+        )
+        if free != name:
+            await session.rollback()
+            raise ConflictError(
+                f"Another file in this project is already named '{name}'"
+            )
+        asset.original_filename = name
         asset.modified_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(asset)

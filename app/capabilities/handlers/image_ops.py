@@ -6,6 +6,7 @@ from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import (
     input_ext,
     input_stem,
+    num_tag,
     require,
     require_input,
 )
@@ -30,9 +31,14 @@ class ImageResizeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _image_out(ctx, "resize")
+        work = _image_out(ctx, "resize")
         await imagemagick.resize(
-            src, str(out.path), ctx.params.get("width"), ctx.params.get("height")
+            src, str(work.path), ctx.params.get("width"), ctx.params.get("height")
+        )
+        width, height = await imagemagick.display_size(str(work.path))
+        out = OutputFile(
+            path=work.path, filename=f"{input_stem(ctx)}_resize_{width}x{height}.{input_ext(ctx)}",
+            media_type=MediaType.image,
         )
         return HandlerResult(data={"operation": "image.resize"}, outputs=[out])
 
@@ -42,7 +48,9 @@ class ImageCropHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _image_out(ctx, "crop")
+        out = _image_out(
+            ctx, f"crop_{require(ctx.params, 'width')}x{require(ctx.params, 'height')}"
+        )
         await imagemagick.crop(
             src, str(out.path),
             require(ctx.params, "x"), require(ctx.params, "y"),
@@ -69,7 +77,9 @@ class ImageFormatHandler(LocalToolHandler):
             raise ValidationError("Lossless applies only to WebP")
         if lossless and quality is not None:
             raise ValidationError("Choose either a quality or lossless WebP, not both")
-        out = _image_out(ctx, "convert", ext=_FORMAT_EXT[fmt])
+        variant = "lossless" if lossless else (f"q{quality}" if quality is not None else "")
+        suffix = f"convert_{variant}" if variant else "convert"
+        out = _image_out(ctx, suffix, ext=_FORMAT_EXT[fmt])
         used = await imagemagick.convert_format(
             src, str(out.path), fmt=fmt, quality=quality, lossless=lossless,
             flatten=bool(ctx.params.get("flatten_transparency", False)),
@@ -88,7 +98,7 @@ class ImageUpscaleHandler(LocalToolHandler):
         if ext not in _UPSCALE_EXTS:
             raise ValidationError(f"image.upscale does not support '.{ext}' input images")
         scale = ctx.params.get("scale")
-        out = _image_out(ctx, "upscaled")
+        out = _image_out(ctx, f"upscaled_x{scale or 4}")
         await realesrgan.upscale(src, str(out.path), scale)
         return HandlerResult(
             data={"operation": "image.upscale", "scale": scale or 4}, outputs=[out]
@@ -100,11 +110,15 @@ class ImageColourAdjustHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _image_out(ctx, "colour")
+        brightness = ctx.params.get("brightness", 100)
+        saturation = ctx.params.get("saturation", 100)
+        contrast = ctx.params.get("contrast", 0)
+        out = _image_out(
+            ctx,
+            f"colour_b{num_tag(brightness)}-c{num_tag(contrast)}-s{num_tag(saturation)}",
+        )
         await imagemagick.colour_adjust(
             src, str(out.path),
-            brightness=ctx.params.get("brightness", 100),
-            saturation=ctx.params.get("saturation", 100),
-            contrast=ctx.params.get("contrast", 0),
+            brightness=brightness, saturation=saturation, contrast=contrast,
         )
         return HandlerResult(data={"operation": "image.colour.adjust"}, outputs=[out])

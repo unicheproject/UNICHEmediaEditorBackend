@@ -6,8 +6,10 @@ from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import (
     input_ext,
     input_stem,
+    num_tag,
     require,
     require_input,
+    trim_tag,
 )
 from app.capabilities.handlers.base import LocalToolHandler
 from app.composition.export_presets import resolve_effective_settings
@@ -27,7 +29,7 @@ class VideoTrimHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _video_out(ctx, "trim")
+        out = _video_out(ctx, trim_tag(require(ctx.params, "start"), ctx.params.get("end")))
         await ffmpeg.video_trim(
             src, str(out.path), require(ctx.params, "start"), ctx.params.get("end")
         )
@@ -83,10 +85,11 @@ class VideoTranscodeHandler(LocalToolHandler):
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
         fmt = str(require(ctx.params, "format")).lstrip(".").lower()
-        out = _video_out(ctx, "transcode", ext=fmt)
+        quality = ctx.params.get("quality")
+        out = _video_out(ctx, f"transcode_{fmt}" + (f"-{quality}" if quality else ""), ext=fmt)
         cap = await ffmpeg.video_transcode(
             src, str(out.path), ctx.params.get("video_codec"), ctx.params.get("audio_codec"),
-            quality=ctx.params.get("quality"),
+            quality=quality,
         )
         data: dict[str, object] = {"operation": "video.transcode", "format": fmt}
         if cap is not None:
@@ -131,7 +134,9 @@ class VideoCropHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _video_out(ctx, "crop")
+        out = _video_out(
+            ctx, f"crop_{require(ctx.params, 'width')}x{require(ctx.params, 'height')}"
+        )
         await ffmpeg.video_crop(
             src, str(out.path),
             require(ctx.params, "x"), require(ctx.params, "y"),
@@ -145,10 +150,13 @@ class VideoResizeHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        out = _video_out(ctx, "resize")
+        work = _video_out(ctx, "resize")
         await ffmpeg.video_resize(
-            src, str(out.path), ctx.params.get("width"), ctx.params.get("height")
+            src, str(work.path), ctx.params.get("width"), ctx.params.get("height")
         )
+        width, height = await ffmpeg.probe_display_size(str(work.path))
+        filename = f"{input_stem(ctx)}_resize_{width}x{height}.{input_ext(ctx)}"
+        out = OutputFile(path=work.path, filename=filename, media_type=MediaType.video)
         return HandlerResult(data={"operation": "video.resize"}, outputs=[out])
 
 
@@ -157,11 +165,12 @@ class VideoThumbnailHandler(LocalToolHandler):
 
     async def process(self, ctx: JobContext) -> HandlerResult:
         src = require_input(ctx)
-        filename = f"{input_stem(ctx)}_thumb.jpg"
+        timestamp = require(ctx.params, "timestamp")
+        filename = f"{input_stem(ctx)}_thumb_{num_tag(timestamp)}s.jpg"
         out = OutputFile(
             path=ctx.out_path(filename), filename=filename, media_type=MediaType.image
         )
-        await ffmpeg.video_thumbnail(src, str(out.path), require(ctx.params, "timestamp"))
+        await ffmpeg.video_thumbnail(src, str(out.path), timestamp)
         return HandlerResult(data={"operation": "video.thumbnail"}, outputs=[out])
 
 

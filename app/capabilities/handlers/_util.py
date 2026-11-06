@@ -32,3 +32,18 @@ def input_ext(ctx: JobContext) -> str:
     if ctx.input_path:
         return Path(ctx.input_path).suffix.lstrip(".").lower() or "bin"
     return "bin"
+
+
+def num_tag(value: object) -> str:
+    """Compact number for output names: 10.0 -> "10", 10.5 -> "10.5", -3 -> "-3"."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.3f}".rstrip("0").rstrip(".")
+
+
+def trim_tag(start: object, end: object | None) -> str:
+    """trim_10-240, or trim_10-end when the interval runs to the end."""
+    return f"trim_{num_tag(start)}-{'end' if end is None else num_tag(end)}"
