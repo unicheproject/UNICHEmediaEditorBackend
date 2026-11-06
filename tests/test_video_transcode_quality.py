@@ -155,7 +155,7 @@ async def test_video_quality_retry_identity_separates_prequality_cache_entries(
             params={**legacy_parameters, "quality": "compressed"},
         )
 
-    assert REUSE_VERSIONS["video.transcode"] == "2"
+    assert REUSE_VERSIONS["video.transcode"] == "3"
     assert legacy_identity == omitted_again
     assert legacy_identity != high_identity
     assert high_identity != compressed_identity
@@ -333,3 +333,73 @@ async def test_compression_changes_real_encoded_size(tmp_path, codec):
     # Only a controlled-input ordering/margin, never an exact filesize promise.
     assert sizes["compressed"] < sizes["high"] * 0.85, sizes
     print(f"{codec}: high={sizes['high']} compressed={sizes['compressed']} bytes")
+
+
+# --- devfixes C-4: "compressed" must not enlarge an efficiently encoded source ---
+
+
+def _efficient_source(path: Path) -> None:
+    """640x360 H.264 at ~150 kbps: CRF 28 alone makes this about 60% larger."""
+    _run([
+        "ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+        "testsrc2=size=640x360:rate=25:duration=6",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+        "-c:v", "libx264", "-preset", "slow", "-b:v", "150k",
+        "-c:a", "aac", "-b:a", "64k", "-shortest", str(path),
+    ])
+
+
+async def test_compressed_caps_bitrate_from_the_probed_source(monkeypatch):
+    run = AsyncMock()
+    monkeypatch.setattr(runner, "run", run)
+    monkeypatch.setattr(ffmpeg, "probe_video_bit_rate", AsyncMock(return_value=4_000_000))
+    cap = await ffmpeg.video_transcode(
+        "/input.mp4", "/output.mp4", "libx264", "aac", quality="compressed"
+    )
+    assert cap == 3_000_000
+    assert run.await_args.args[0][-5:] == [
+        "-maxrate", "3000000", "-bufsize", "3000000", "/output.mp4",
+    ]
+    cap = await ffmpeg.video_transcode(
+        "/input.mp4", "/output.webm", "libvpx-vp9", None, quality="compressed"
+    )
+    assert run.await_args.args[0][-3:] == ["-b:v", "3000000", "/output.webm"]
+    # High and balanced stay uncapped quality targets.
+    assert await ffmpeg.video_transcode(
+        "/input.mp4", "/output.mp4", "libx264", None, quality="balanced"
+    ) is None
+
+
+@NEEDS_TOOLS
+async def test_probe_video_bit_rate_reads_the_video_stream(tmp_path):
+    source = tmp_path / "efficient.mp4"
+    _efficient_source(source)
+    rate = await ffmpeg.probe_video_bit_rate(str(source))
+    assert rate is not None and 100_000 < rate < 220_000
+    assert await ffmpeg.probe_video_bit_rate(str(tmp_path / "missing.mp4")) is None
+
+
+@NEEDS_TOOLS
+@pytest.mark.parametrize("container,codec,audio", [
+    ("mp4", "libx264", "aac"), ("mkv", "libx265", "aac"), ("webm", "libvpx-vp9", "libopus"),
+])
+async def test_compressed_job_is_smaller_than_an_efficient_source(
+    client, make_project, tmp_path, container, codec, audio,
+):
+    source = tmp_path / "efficient.mp4"
+    _efficient_source(source)
+    project_id = await make_project()
+    upload = await client.post(f"{API}/projects/{project_id}/assets", files={
+        "file": ("efficient.mp4", source.read_bytes(), "video/mp4"),
+    })
+    response = await client.post(f"{API}/jobs", json={
+        "capability_id": "video.transcode", "asset_id": upload.json()["id"],
+        "input": {"format": container, "video_codec": codec, "audio_codec": audio,
+                  "quality": "compressed"},
+    })
+    assert response.status_code == 201, response.text
+    job = (await client.get(f"{API}/jobs/{response.json()['id']}")).json()
+    assert job["status"] == "succeeded", job.get("error")
+    assert job["output"]["max_video_bit_rate"] > 0
+    comparison = job["output"]["size_comparison"]
+    assert comparison["ratio"] < 1, comparison

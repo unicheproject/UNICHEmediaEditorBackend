@@ -514,25 +514,75 @@ async def video_concat(sources: list[str], dst: str, work_dir: Path) -> None:
                 path.unlink(missing_ok=True)
 
 
+# "compressed" promises a smaller file: its constant-quality target is capped at
+# this share of the source video bitrate, because an already efficiently encoded
+# source otherwise came out larger (devfixes C-4: +10% and +28% on real 1080p).
+COMPRESSED_MAX_SOURCE_BIT_RATE_RATIO = 0.75
+
+
+async def probe_video_bit_rate(path: str) -> int | None:
+    """First video stream's bitrate, else container rate minus audio; None if unknown."""
+    try:
+        out = await runner.run_stdout(
+            [
+                FFPROBE, "-v", "error", "-show_entries",
+                "stream=codec_type,bit_rate:format=bit_rate", "-of", "json", path,
+            ],
+            timeout=60,
+        )
+        payload = json.loads(out)
+        streams = [s for s in payload.get("streams", []) if isinstance(s, dict)]
+        fmt = payload.get("format", {})
+    except (ToolError, json.JSONDecodeError, AttributeError, TypeError):
+        return None
+    video = [s for s in streams if s.get("codec_type") == "video"]
+    if not video:
+        return None
+    rate = _positive_int(video[0].get("bit_rate"))
+    if rate is not None:
+        return rate
+    total = _positive_int(fmt.get("bit_rate")) if isinstance(fmt, dict) else None
+    if total is None:
+        return None
+    others = 0
+    for stream in streams:
+        if stream is video[0]:
+            continue
+        other = _positive_int(stream.get("bit_rate"))
+        if other is None and stream.get("codec_type") in {"audio", "video"}:
+            return None
+        others += other or 0
+    return _positive_int(total - others)
+
+
 async def video_transcode(
     src: str, dst: str, video_codec: str | None, audio_codec: str | None,
     *, quality: str | None = None,
-) -> None:
+) -> int | None:
+    """Transcode; returns the video bitrate cap applied for "compressed", if any."""
     args = [*_BASE, "-i", src]
     if video_codec:
         args += ["-c:v", video_codec]
     if audio_codec:
         args += ["-c:a", audio_codec]
+    cap: int | None = None
     if quality is not None:
         levels = VIDEO_QUALITY_CRF.get(video_codec or "", {})
         if quality not in levels:
             raise ToolError("Unsupported video quality/codec combination.")
         args += ["-crf", str(levels[quality])]
+        if quality == "compressed":
+            source_rate = await probe_video_bit_rate(src)
+            if source_rate is not None:
+                cap = max(int(source_rate * COMPRESSED_MAX_SOURCE_BIT_RATE_RATIO), 1000)
         if video_codec == "libvpx-vp9":
-            # Unconstrained constant quality, rather than a bitrate target/cap.
-            args += ["-b:v", "0"]
+            # Constant quality, or constrained quality under the cap.
+            args += ["-b:v", str(cap) if cap is not None else "0"]
+        elif cap is not None:
+            args += ["-maxrate", str(cap), "-bufsize", str(cap)]
     args.append(dst)
     await runner.run(args)
+    return cap
 
 
 async def video_mute(src: str, dst: str) -> None:

@@ -328,7 +328,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "Transcode a video to a supported container and optional codec combination. "
             "Omitting a codec lets FFmpeg choose its default for the selected container. "
             "Optional quality controls compression with an explicit video codec; "
-            "it does not guarantee an output file size."
+            "high and balanced do not guarantee an output file size, while compressed "
+            "also caps the video bitrate at 75% of the source's when it is known."
         ),
         "media": _V,
         "properties": {

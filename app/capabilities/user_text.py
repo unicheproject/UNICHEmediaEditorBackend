@@ -72,10 +72,11 @@ USER_TEXT: dict[str, UserText] = {
                            "and a suitable choice is made for the file type.",
             "audio_codec": "How the sound is stored inside the file. Leave empty "
                            "and a suitable choice is made for the file type.",
-            "quality": "The balance between picture quality and file size. This "
-                       "aims at a level of quality, not a file size: the copy can "
-                       "still be larger than the original. Needs a picture "
-                       "storage choice above.",
+            "quality": "The balance between picture quality and file size. High "
+                       "and Balanced aim at a level of quality, not a file size, so "
+                       "the copy can be larger than the original. Compressed always "
+                       "keeps the picture smaller than the original's. Needs a "
+                       "picture storage choice above.",
         },
     },
     "video.export": {

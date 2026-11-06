@@ -84,11 +84,14 @@ class VideoTranscodeHandler(LocalToolHandler):
         src = require_input(ctx)
         fmt = str(require(ctx.params, "format")).lstrip(".").lower()
         out = _video_out(ctx, "transcode", ext=fmt)
-        await ffmpeg.video_transcode(
+        cap = await ffmpeg.video_transcode(
             src, str(out.path), ctx.params.get("video_codec"), ctx.params.get("audio_codec"),
             quality=ctx.params.get("quality"),
         )
-        return HandlerResult(data={"operation": "video.transcode", "format": fmt}, outputs=[out])
+        data: dict[str, object] = {"operation": "video.transcode", "format": fmt}
+        if cap is not None:
+            data["max_video_bit_rate"] = cap
+        return HandlerResult(data=data, outputs=[out])
 
 
 class VideoExportHandler(LocalToolHandler):

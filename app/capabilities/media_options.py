@@ -19,7 +19,8 @@ VIDEO_CODEC_DESCRIPTIONS = {
 VIDEO_QUALITY_DESCRIPTIONS = {
     "high": "Prioritize visual quality; usually produces larger files.",
     "balanced": "Balance visual quality and compression.",
-    "compressed": "Prioritize smaller files at lower visual quality.",
+    "compressed": "Prioritize smaller files at lower visual quality; the video is "
+                  "kept below the source's bitrate.",
 }
 
 # These are codec-specific product choices, not equivalent numeric quality scales.

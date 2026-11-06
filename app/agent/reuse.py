@@ -37,7 +37,8 @@ REUSE_VERSIONS: dict[str, str] = {
     "video.concat": "1",
     # Quality was historically accepted as an unknown extra parameter and
     # ignored. A retry with that same input now has different output semantics.
-    "video.transcode": "2",
+    # 3: "compressed" caps the video bitrate below the source's.
+    "video.transcode": "3",
     "video.mute": "1",
     # 2: out-of-frame rectangles are rejected instead of silently shifted.
     "video.crop": "2",
