@@ -33,14 +33,42 @@ def test_aspect_ratio_change() -> None:
     assert aspect_ratio_change((0, 10), (10, 10)) is None
 
 
+_ACCEPTED_RESIZE_INPUTS = [
+    # Clients that seed the schema default send fit "stretch" with one side.
+    {"width": 640, "fit": "stretch"},
+    {"height": 480, "fit": "stretch"},
+    {"width": 640},
+    {"height": 480},
+    {"width": 640, "height": 480},
+    {"width": 640, "height": 480, "fit": "stretch"},
+    {"width": 640, "height": 480, "fit": "contain"},
+    {"width": 640, "height": 480, "fit": "cover"},
+]
+_REJECTED_RESIZE_INPUTS = [
+    {},
+    {"fit": "stretch"},
+    {"fit": "contain"},
+    {"width": 640, "height": 480, "fit": "pad"},
+    {"width": 640, "fit": "pad"},
+    # Contain and cover are defined against a box: one side is not enough.
+    {"width": 640, "fit": "contain"},
+    {"height": 480, "fit": "contain"},
+    {"width": 640, "fit": "cover"},
+    {"height": 480, "fit": "cover"},
+]
+
+
 @pytest.mark.parametrize("capability", ["image.resize", "video.resize"])
-def test_fit_needs_both_sides(capability: str) -> None:
-    cap = registry.get(capability)
-    for fit in ("stretch", "contain", "cover"):
-        validate_capability_input(cap, {"width": 640, "height": 480, "fit": fit})
-    for params in ({"width": 640, "fit": "cover"}, {"width": 640, "height": 480, "fit": "pad"}):
-        with pytest.raises(CapabilityInputValidationError):
-            validate_capability_input(cap, params)
+@pytest.mark.parametrize("params", _ACCEPTED_RESIZE_INPUTS)
+def test_resize_contract_accepts(capability: str, params: dict) -> None:
+    validate_capability_input(registry.get(capability), params)
+
+
+@pytest.mark.parametrize("capability", ["image.resize", "video.resize"])
+@pytest.mark.parametrize("params", _REJECTED_RESIZE_INPUTS)
+def test_resize_contract_rejects(capability: str, params: dict) -> None:
+    with pytest.raises(CapabilityInputValidationError):
+        validate_capability_input(registry.get(capability), params)
 
 
 def test_video_scale_filters() -> None:
@@ -149,3 +177,59 @@ async def test_video_fit_modes(client: AsyncClient, make_project, tmp_path: Path
                        {"width": 400, "height": 400, "fit": "cover"})
     assert (cover["width"], cover["height"]) == (400, 400)
     assert cover["aspect_ratio_change"] == 0  # cropped, not distorted
+
+
+async def _rejected(client: AsyncClient, asset_id: str, capability: str, params: dict) -> None:
+    resp = await client.post(f"{API}/jobs", json={
+        "capability_id": capability, "asset_id": asset_id, "input": params,
+    })
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.skipif(not HAVE_CONVERT, reason="ImageMagick not installed")
+async def test_image_one_side_with_default_fit_keeps_aspect(
+    client: AsyncClient, make_project, tmp_path: Path
+) -> None:
+    # The frontend seeds fit "stretch" from the schema default and omits an empty side.
+    src = tmp_path / "plate.jpg"
+    subprocess.run(["convert", "-size", "2400x1600", "gradient:navy-gold", str(src)], check=True)
+    pid = await make_project("resize-one-side-image")
+    aid = await _upload(client, pid, src, "image/jpeg")
+
+    by_width = await _job(client, aid, "image.resize", {"width": 1600, "fit": "stretch"})
+    assert (by_width["width"], by_width["height"], by_width["fit"]) == (1600, 1067, "stretch")
+    assert abs(by_width["aspect_ratio_change"]) < 0.001
+    assert by_width["outputs"][0]["filename"] == "plate_resize_1600x1067.jpg"
+
+    by_height = await _job(client, aid, "image.resize", {"height": 1000, "fit": "stretch"})
+    assert (by_height["width"], by_height["height"]) == (1500, 1000)
+    assert by_height["aspect_ratio_change"] == 0
+
+    for params in ({"fit": "stretch"}, {"width": 1600, "fit": "contain"},
+                   {"height": 1000, "fit": "cover"}):
+        await _rejected(client, aid, "image.resize", params)
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+async def test_video_one_side_with_default_fit_keeps_aspect(
+    client: AsyncClient, make_project, tmp_path: Path
+) -> None:
+    src = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "testsrc=duration=1:size=640x360:rate=10", "-pix_fmt", "yuv420p",
+                    str(src)], check=True)
+    pid = await make_project("resize-one-side-video")
+    aid = await _upload(client, pid, src, "video/mp4")
+
+    by_height = await _job(client, aid, "video.resize", {"height": 180, "fit": "stretch"})
+    assert (by_height["width"], by_height["height"], by_height["fit"]) == (320, 180, "stretch")
+    assert by_height["aspect_ratio_change"] == 0
+
+    by_width = await _job(client, aid, "video.resize", {"width": 400, "fit": "stretch"})
+    # 640x360 at width 400 is 225 high; video sizes are rounded to even numbers.
+    assert by_width["width"] == 400 and by_width["height"] in (224, 226)
+    assert abs(by_width["aspect_ratio_change"]) < 0.01
+
+    for params in ({"fit": "stretch"}, {"width": 400, "fit": "cover"},
+                   {"height": 180, "fit": "contain"}):
+        await _rejected(client, aid, "video.resize", params)

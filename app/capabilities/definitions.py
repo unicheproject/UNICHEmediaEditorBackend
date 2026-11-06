@@ -238,6 +238,16 @@ VIDEO_EXPORT_PRESETS: dict[str, str] = {
                 "than the source.",
 }
 
+# image.resize / video.resize: contain and cover are defined against a box, so
+# they need both sides. Stretch (the default) with one side keeps the aspect
+# ratio, so clients that always send the default fit can still give one side.
+def _contain_cover_need_both_sides() -> dict:
+    return {
+        "if": {"required": ["fit"], "properties": {"fit": {"enum": ["contain", "cover"]}}},
+        "then": {"required": ["width", "height"]},
+    }
+
+
 # Declarative specs for the deterministic local-tool capabilities.
 _DETERMINISTIC_SPECS: list[dict] = [
     {
@@ -493,7 +503,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "Fit",
                 "How to use both sides when width and height are given: stretch to "
                 "exactly that size, contain inside it, or cover it and crop the overflow. "
-                "Requires both width and height.",
+                "Contain and cover require both width and height; stretch (the default) "
+                "with only one side keeps the aspect ratio.",
                 default="stretch",
                 enum=["stretch", "contain", "cover"],
                 **{
@@ -511,7 +522,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         },
         "allOf": [
             {"anyOf": [{"required": ["width"]}, {"required": ["height"]}]},
-            {"if": {"required": ["fit"]}, "then": {"required": ["width", "height"]}},
+            _contain_cover_need_both_sides(),
         ],
     },
     {
@@ -558,7 +569,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "Fit",
                 "How to use both sides when width and height are given: stretch to "
                 "exactly that size, contain inside it, or cover it and crop the overflow. "
-                "Requires both width and height.",
+                "Contain and cover require both width and height; stretch (the default) "
+                "with only one side keeps the aspect ratio.",
                 default="stretch",
                 enum=["stretch", "contain", "cover"],
                 **{
@@ -582,7 +594,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         },
         "allOf": [
             {"anyOf": [{"required": ["width"]}, {"required": ["height"]}]},
-            {"if": {"required": ["fit"]}, "then": {"required": ["width", "height"]}},
+            _contain_cover_need_both_sides(),
         ],
     },
     {
