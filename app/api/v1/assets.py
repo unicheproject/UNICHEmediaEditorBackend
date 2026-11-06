@@ -19,6 +19,7 @@ from app.api.deps import require_asset_access, require_project
 from app.core.database import get_session
 from app.core.errors import ValidationError
 from app.models.asset import Asset
+from app.models.enums import TechnicalMetadataStatus
 from app.models.project import Project
 from app.schemas.asset import (
     AssetBulkDeleteRequest,
@@ -40,6 +41,26 @@ router = APIRouter(tags=["assets"])
 async def get_asset_probe_enqueuer() -> Callable[[uuid.UUID], Awaitable[None]]:
     """Dependency seam for safely testing asynchronous upload probing."""
     return enqueue_asset_probe
+
+
+async def _enqueue_probe_best_effort(
+    enqueue_probe: Callable[[uuid.UUID], Awaitable[None]], asset: Asset
+) -> None:
+    """Queue the metadata probe for a committed Asset; failures only log.
+
+    The Asset stays usable and pending, as for uploads; the metadata backfill
+    script recovers pending Assets.
+    """
+    try:
+        await enqueue_probe(asset.id)
+    except Exception as exc:  # noqa: BLE001 - Asset success is independent of probing
+        from app.core.logging import get_logger
+
+        get_logger(__name__).warning(
+            "Could not enqueue technical metadata probe for asset %s (%s)",
+            asset.id,
+            type(exc).__name__,
+        )
 
 
 @router.post(
@@ -76,16 +97,7 @@ async def upload_asset(
         content_type=file.content_type,
         derived_from_job_id=derived_from_job_id,
     )
-    try:
-        await enqueue_probe(asset.id)
-    except Exception as exc:  # noqa: BLE001 - upload success is independent of probing
-        from app.core.logging import get_logger
-
-        get_logger(__name__).warning(
-            "Could not enqueue technical metadata probe for asset %s (%s)",
-            asset.id,
-            type(exc).__name__,
-        )
+    await _enqueue_probe_best_effort(enqueue_probe, asset)
     return AssetRead.model_validate(asset)
 
 
@@ -200,8 +212,13 @@ async def get_asset_waveform(
 async def duplicate_asset(
     asset: Asset = Depends(require_asset_access),
     session: AsyncSession = Depends(get_session),
+    enqueue_probe: Callable[[uuid.UUID], Awaitable[None]] = Depends(get_asset_probe_enqueuer),
 ) -> AssetRead:
     copy = await svc.duplicate_asset(session, asset)
+    # A source still being probed gives a pending copy: probe the copy itself.
+    # Available and unavailable results describe the same bytes and are kept.
+    if copy.technical_metadata_status == TechnicalMetadataStatus.pending.value:
+        await _enqueue_probe_best_effort(enqueue_probe, copy)
     return AssetRead.model_validate(copy)
 
 
