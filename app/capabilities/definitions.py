@@ -687,7 +687,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Gain",
         "description": (
             "Adjust the soundtrack gain (gain_db). Audio input produces audio; "
-            "video input preserves the video stream and produces video with processed audio."
+            "video input preserves the video stream and produces video with processed audio. "
+            "The sound keeps its source sample rate, channels, codec and bitrate."
         ),
         "media": _VA,
         "properties": {
@@ -705,7 +706,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Normalize soundtrack loudness to a target integrated level (LUFS). Audio input "
             "produces audio; video input preserves the video stream and produces video with "
-            "normalized audio."
+            "normalized audio. The sound keeps its source sample rate, channels, codec and "
+            "bitrate."
         ),
         "media": _VA,
         "properties": {
@@ -726,7 +728,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Fade",
         "description": (
             "Apply fade-in and/or fade-out (seconds) to a soundtrack. Audio input produces "
-            "audio; video input preserves the video stream and produces video with faded audio."
+            "audio; video input preserves the video stream and produces video with faded audio. "
+            "The sound keeps its source sample rate, channels, codec and bitrate."
         ),
         "media": _VA,
         "properties": {
@@ -780,7 +783,8 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Audio Denoise",
         "description": (
             "Reduce soundtrack background noise with RNNoise. Audio input produces audio; "
-            "video input preserves the video stream and produces video with denoised audio."
+            "video input preserves the video stream and produces video with denoised audio. "
+            "The sound keeps its source sample rate, channels, codec and bitrate."
         ),
         "media": _VA,
         "properties": {

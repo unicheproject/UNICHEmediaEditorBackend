@@ -6,6 +6,7 @@ container/codec is generally chosen by FFmpeg from the output file extension.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from contextlib import suppress
@@ -276,6 +277,119 @@ async def probe_audio_duration(path: str) -> float:
         return 0.0
 
 
+@dataclasses.dataclass(frozen=True)
+class AudioFormat:
+    """First audio stream's format, used to keep processed audio like its source."""
+
+    codec: str | None = None
+    sample_rate: int | None = None
+    channels: int | None = None
+    sample_fmt: str | None = None
+    bit_rate: int | None = None
+
+
+def _positive_int(value: object) -> int | None:
+    try:
+        number = int(str(value))
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+async def probe_audio_format(path: str) -> AudioFormat:
+    """Probe the first audio stream; unknown fields stay None (never fails)."""
+    try:
+        out = await runner.run_stdout(
+            [
+                FFPROBE, "-v", "error", "-select_streams", "a:0",
+                "-show_entries",
+                "stream=codec_name,sample_rate,channels,sample_fmt,bit_rate:format=bit_rate",
+                "-of", "json", path,
+            ],
+            timeout=60,
+        )
+        payload = json.loads(out)
+        stream = payload.get("streams", [{}])[0]
+    except (ToolError, json.JSONDecodeError, IndexError, AttributeError, TypeError):
+        return AudioFormat()
+    if not isinstance(stream, dict):
+        return AudioFormat()
+    bit_rate = _positive_int(stream.get("bit_rate"))
+    codec = stream.get("codec_name") if isinstance(stream.get("codec_name"), str) else None
+    if bit_rate is None and codec is not None and not _is_lossless_audio(codec):
+        # Audio-only containers often report the rate only at format level.
+        audio_only = len(payload.get("streams", [])) == 1
+        fmt = payload.get("format", {})
+        if audio_only and isinstance(fmt, dict):
+            bit_rate = _positive_int(fmt.get("bit_rate"))
+    sample_fmt = stream.get("sample_fmt")
+    return AudioFormat(
+        codec=codec,
+        sample_rate=_positive_int(stream.get("sample_rate")),
+        channels=_positive_int(stream.get("channels")),
+        sample_fmt=sample_fmt if isinstance(sample_fmt, str) else None,
+        bit_rate=bit_rate,
+    )
+
+
+_LOSSY_AUDIO_ENCODERS = {
+    "mp3": "libmp3lame",
+    "aac": "aac",
+    "vorbis": "libvorbis",
+    "opus": "libopus",
+}
+_OPUS_SAMPLE_RATES = {8000, 12000, 16000, 24000, 48000}
+# Bounds for re-encoding a video soundtrack at its source bitrate.
+_SOUNDTRACK_MIN_BIT_RATE = 32_000
+_SOUNDTRACK_MAX_BIT_RATE = 320_000
+
+
+def _is_lossless_audio(codec: str) -> bool:
+    return codec.startswith("pcm_") or codec in {"flac", "alac"}
+
+
+def _rate_and_layout_args(source: AudioFormat, encoder: str | None) -> list[str]:
+    args: list[str] = []
+    if source.sample_rate is not None:
+        if encoder == "libopus" and source.sample_rate not in _OPUS_SAMPLE_RATES:
+            args += ["-ar", "48000"]
+        else:
+            args += ["-ar", str(source.sample_rate)]
+    if source.channels is not None:
+        args += ["-ac", str(source.channels)]
+    return args
+
+
+def preserved_audio_args(source: AudioFormat) -> list[str]:
+    """Encode an audio-only result like its source.
+
+    Filters such as loudnorm (192 kHz) or arnndn (48 kHz) resample internally;
+    without this a 16-bit 44.1 kHz WAV came back several times larger.
+    """
+    codec = source.codec
+    if codec is None:
+        return _rate_and_layout_args(source, None)
+    if _is_lossless_audio(codec):
+        args = ["-c:a", codec]
+        if not codec.startswith("pcm_") and source.sample_fmt:
+            args += ["-sample_fmt", source.sample_fmt]
+        return [*args, *_rate_and_layout_args(source, codec)]
+    encoder = _LOSSY_AUDIO_ENCODERS.get(codec)
+    if encoder is None:
+        return _rate_and_layout_args(source, None)
+    args = ["-c:a", encoder]
+    if source.bit_rate is not None:
+        args += ["-b:a", str(source.bit_rate)]
+    return [*args, *_rate_and_layout_args(source, encoder)]
+
+
+async def _run_audio_filter(src: str, dst: str, audio_filter: str) -> None:
+    source = await probe_audio_format(src)
+    await runner.run(
+        [*_BASE, "-i", src, "-filter:a", audio_filter, *preserved_audio_args(source), dst]
+    )
+
+
 def _video_audio_codec(dst: str) -> tuple[str, str]:
     """Choose a known audio encoder for the preserved source container."""
     extension = Path(dst).suffix.lower()
@@ -297,11 +411,18 @@ async def video_audio_transform(src: str, dst: str, audio_filter: str) -> None:
     if not await _has_audio(src):
         raise ToolError("Cannot process soundtrack: video has no audio stream")
     audio_codec, bitrate = _video_audio_codec(dst)
+    source = await probe_audio_format(src)
+    if source.bit_rate is not None:
+        # Keep the soundtrack's size: re-encoding a 64k track at 192k grew videos.
+        bitrate = str(
+            min(max(source.bit_rate, _SOUNDTRACK_MIN_BIT_RATE), _SOUNDTRACK_MAX_BIT_RATE)
+        )
     await runner.run(
         [
             *_BASE, "-i", src,
             "-map", "0:v:0", "-map", "0:a:0",
             "-c:v", "copy", "-c:a", audio_codec, "-b:a", bitrate,
+            *_rate_and_layout_args(source, audio_codec),
             "-filter:a", audio_filter,
             dst,
         ]
@@ -578,9 +699,7 @@ async def audio_concat(sources: list[str], dst: str) -> None:
 
 
 async def audio_gain(src: str, dst: str, gain_db: float) -> None:
-    await runner.run(
-        [*_BASE, "-i", src, "-filter:a", f"volume={_num(gain_db, 'gain_db')}dB", dst]
-    )
+    await _run_audio_filter(src, dst, f"volume={_num(gain_db, 'gain_db')}dB")
 
 
 async def video_audio_gain(src: str, dst: str, gain_db: float) -> None:
@@ -591,7 +710,7 @@ async def video_audio_gain(src: str, dst: str, gain_db: float) -> None:
 
 async def audio_normalize(src: str, dst: str, target_i: float) -> None:
     filt = f"loudnorm=I={_num(target_i, 'target_i')}:TP=-1.5:LRA=11"
-    await runner.run([*_BASE, "-i", src, "-filter:a", filt, dst])
+    await _run_audio_filter(src, dst, filt)
 
 
 async def video_audio_normalize(src: str, dst: str, target_i: float) -> None:
@@ -609,7 +728,7 @@ async def audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> Non
         filters.append(f"afade=t=out:st={start}:d={_num(fade_out, 'fade_out')}")
     if not filters:
         raise ToolError("audio.fade requires fade_in and/or fade_out > 0")
-    await runner.run([*_BASE, "-i", src, "-filter:a", ",".join(filters), dst])
+    await _run_audio_filter(src, dst, ",".join(filters))
 
 
 async def video_audio_fade(src: str, dst: str, fade_in: float, fade_out: float) -> None:
@@ -631,7 +750,7 @@ DEFAULT_RNNOISE_MODEL = "/usr/share/rnnoise/model.rnnn"
 async def audio_denoise(src: str, dst: str, strength: float | None) -> None:
     mix = 1.0 if strength is None else strength
     filt = f"arnndn=m={DEFAULT_RNNOISE_MODEL}:mix={_num(mix, 'strength')}"
-    await runner.run([*_BASE, "-i", src, "-filter:a", filt, dst])
+    await _run_audio_filter(src, dst, filt)
 
 
 async def video_audio_denoise(src: str, dst: str, strength: float | None) -> None:

@@ -53,11 +53,13 @@ REUSE_VERSIONS: dict[str, str] = {
     # 2: empty/out-of-range windows are rejected; end is optional.
     "audio.trim": "2",
     "audio.concat": "1",
-    "audio.gain": "1",
-    "audio.normalize": "1",
-    "audio.fade": "1",
+    # 2 (gain/normalize/fade/denoise): output keeps the source sample rate,
+    # channels, codec and bitrate instead of the filter's or encoder's defaults.
+    "audio.gain": "2",
+    "audio.normalize": "2",
+    "audio.fade": "2",
     "audio.transcode": "1",
-    "audio.denoise": "1",
+    "audio.denoise": "2",
     "video.audio.extract": "1",
     "audio.mix": "1",
     "video.lowerthird": "1",

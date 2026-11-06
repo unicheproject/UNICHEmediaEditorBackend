@@ -230,7 +230,9 @@ USER_TEXT: dict[str, UserText] = {
     "audio.normalize": {
         "summary": (
             "Bring the sound to a standard overall loudness, so recordings play at "
-            "a similar volume. Works on audio files and on the sound of a video."
+            "a similar volume. Works on audio files and on the sound of a video. "
+            "The file keeps its original sound quality settings, so its size stays "
+            "about the same."
         ),
         "params": {
             "target_i": "How loud the result should be overall. -16 suits websites "
