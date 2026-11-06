@@ -258,10 +258,16 @@ curl -s -X POST $BASE/jobs \
 |------|---------------|
 | System | `GET /health` |
 | Projects | `POST /api/v1/projects` · `GET /api/v1/projects` · `GET/PATCH/DELETE /api/v1/projects/{id}` |
-| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets/search` (filtered page) · `POST /api/v1/projects/{id}/assets/bulk-delete` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename) · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
+| Assets | `POST /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets` · `GET /api/v1/projects/{id}/assets/search` (filtered page) · `POST /api/v1/projects/{id}/assets/bulk-delete` · `GET /api/v1/assets/{id}` · `PATCH /api/v1/assets/{id}` (rename; 409 if the name is taken) · `POST /api/v1/assets/{id}/duplicate` · `GET /api/v1/assets/{id}/download` · `GET /api/v1/assets/{id}/thumbnail` (JPEG image/video preview) · `GET /api/v1/assets/{id}/waveform` (bounded JSON audio preview) · `DELETE /api/v1/assets/{id}` |
 | Capabilities | `GET /api/v1/capabilities` · `GET /api/v1/capabilities/{id}` |
 | Jobs | `POST /api/v1/jobs` · `GET /api/v1/jobs/{id}` · `GET /api/v1/projects/{id}/jobs` (paginated) · `GET /api/v1/jobs/{id}/events` (SSE) |
 | Agent | `POST /api/v1/agent/sessions` · `GET /api/v1/agent/sessions/{id}` · `POST /api/v1/agent/sessions/{id}/messages` · `GET /api/v1/agent/plans/{id}` · `POST /api/v1/agent/plans/{id}/approve` |
+
+Asset names are unique per project (case-insensitive) among live Assets: uploads,
+Job outputs and duplicates get `_2`, `_3` before the extension, and a rename to a
+taken name returns 409. Job outputs carry their defining parameters in the name
+(`clip_trim_10-240.mp4`, `scan_resize_1600x1067.jpg`). Assignment runs under a
+per-project row lock on PostgreSQL.
 
 `GET /api/v1/projects/{id}/jobs` is paginated: `?limit=` (default 50, max 200)
 and `?offset=`, newest first. An optional `?status=queued|running|succeeded|failed|cancelled`
