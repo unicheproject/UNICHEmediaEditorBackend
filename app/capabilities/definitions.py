@@ -734,10 +734,17 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "properties": {
             "scale": _integer(
                 "Scale",
-                "Real-ESRGAN output scale factor.",
+                "How many times larger the output is in each direction.",
                 default=4,
                 enum=[2, 3, 4],
-                **{"x-unit": "ratio"},
+                **{
+                    "x-unit": "ratio",
+                    "x-enum-descriptions": {
+                        "2": "2x: twice the width and height (4 times the pixels).",
+                        "3": "3x: three times the width and height (9 times the pixels).",
+                        "4": "4x: four times the width and height (16 times the pixels).",
+                    },
+                },
             )
         },
     },
@@ -996,6 +1003,12 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "Whether the animation zooms in or out.",
                 default="in",
                 enum=["in", "out"],
+                **{
+                    "x-enum-descriptions": {
+                        "in": "Starts with the whole image and moves closer to its focus.",
+                        "out": "Starts close on the focus and pulls back to the whole image.",
+                    }
+                },
             ),
             "width": _integer(
                 "Width",
@@ -1092,6 +1105,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
                 "description": "Horizontal placement along the bottom edge.",
                 "enum": ["bottom-left", "bottom-center", "bottom-right"],
                 "default": "bottom-left",
+                "x-enum-descriptions": {
+                    "bottom-left": "Bottom edge, left side.",
+                    "bottom-center": "Bottom edge, centred.",
+                    "bottom-right": "Bottom edge, right side.",
+                },
             },
             "background": _string(
                 "Background colour",
