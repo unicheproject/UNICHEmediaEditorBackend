@@ -232,7 +232,8 @@ _AUDIO_TRANSCODE_SCHEMA_CONSTRAINTS = [
 # settings as project.export, without its Advanced escape hatch.
 VIDEO_EXPORT_PRESETS: dict[str, str] = {
     "web": "MP4/H.264 for web playback; fits within 1920x1080 without upscaling.",
-    "social": "MP4/H.264 padded to the selected square or portrait canvas.",
+    "social": "MP4/H.264 scaled to fit the selected square or portrait canvas and "
+              "padded; smaller videos are enlarged.",
     "preview": "Lightweight MP4/H.264 fitting within 1280x720 without upscaling.",
     "archival": "Lossless MKV using FFV1 video and FLAC audio; usually much larger "
                 "than the source.",
@@ -246,6 +247,19 @@ def _contain_cover_need_both_sides() -> dict:
         "if": {"required": ["fit"], "properties": {"fit": {"enum": ["contain", "cover"]}}},
         "then": {"required": ["width", "height"]},
     }
+
+
+# audio.gain/normalize/fade/denoise output format, as app/tools/ffmpeg.py
+# implements it: audio-only results follow the source; a video's picture is
+# stream-copied while its soundtrack is re-encoded for the video's container.
+_SOUND_FORMAT_NOTE = (
+    "For audio input the result keeps the source sample rate and channels where the "
+    "format allows, and its codec and bitrate where supported (PCM, FLAC, ALAC, MP3, "
+    "AAC, Vorbis, Opus); lossy sources are re-encoded. For video input the picture is "
+    "stream-copied unchanged, while the soundtrack is re-encoded as AAC (MP4/MOV/MKV) "
+    "or Opus (WebM), keeping its sample rate and channels where the format allows and "
+    "its bitrate clamped to 32-320 kbps (a fixed default when unknown)."
+)
 
 
 # Declarative specs for the deterministic local-tool capabilities.
@@ -339,7 +353,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
             "Omitting a codec lets FFmpeg choose its default for the selected container. "
             "Optional quality controls compression with an explicit video codec; "
             "high and balanced do not guarantee an output file size, while compressed "
-            "also caps the video bitrate at 75% of the source's when it is known."
+            "also caps the video bitrate at 75% of the source's when it is known. "
+            "Audio and container overhead are not capped, and no cap applies when the "
+            "source video bitrate is unknown, so a smaller total file is likely but "
+            "not guaranteed (see size_comparison)."
         ),
         "media": _V,
         "properties": {
@@ -396,8 +413,11 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "title": "Video Export",
         "description": (
             "Produce a delivery copy of one video for a named destination. Web, Social "
-            "and Preview are quality-targeted H.264/AAC MP4 that never upscale; output "
-            "size is not capped, so an already efficiently encoded source can come out "
+            "and Preview are quality-targeted H.264/AAC MP4. Web and Preview fit within "
+            "their maximum size and never upscale; Social scales the video to fit the "
+            "selected square or portrait canvas, enlarging smaller sources, and pads the "
+            "rest with black. Output size is not capped, so an already efficiently "
+            "encoded source can come out "
             "larger (reported in size_comparison). Archival is lossless FFV1/FLAC MKV "
             "and is usually much larger. Use video.transcode for explicit "
             "container/codec control and project.export for saved project compositions."
@@ -817,7 +837,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Adjust the soundtrack gain (gain_db). Audio input produces audio; "
             "video input preserves the video stream and produces video with processed audio. "
-            "The sound keeps its source sample rate, channels, codec and bitrate."
+            f"{_SOUND_FORMAT_NOTE}"
         ),
         "media": _VA,
         "properties": {
@@ -840,8 +860,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Normalize soundtrack loudness to a target integrated level (LUFS). Audio input "
             "produces audio; video input preserves the video stream and produces video with "
-            "normalized audio. The sound keeps its source sample rate, channels, codec and "
-            "bitrate."
+            f"normalized audio. {_SOUND_FORMAT_NOTE}"
         ),
         "media": _VA,
         "properties": {
@@ -863,7 +882,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Apply fade-in and/or fade-out (seconds) to a soundtrack. Audio input produces "
             "audio; video input preserves the video stream and produces video with faded audio. "
-            "The sound keeps its source sample rate, channels, codec and bitrate."
+            f"{_SOUND_FORMAT_NOTE}"
         ),
         "media": _VA,
         "properties": {
@@ -918,7 +937,7 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "description": (
             "Reduce soundtrack background noise with RNNoise. Audio input produces audio; "
             "video input preserves the video stream and produces video with denoised audio. "
-            "The sound keeps its source sample rate, channels, codec and bitrate."
+            f"{_SOUND_FORMAT_NOTE}"
         ),
         "media": _VA,
         "properties": {

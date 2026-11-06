@@ -114,7 +114,8 @@ EXPORT_PRESETS: dict[ExportPresetId, ExportPresetDefinition] = {
     ExportPresetId.SOCIAL: ExportPresetDefinition(
         ExportPresetId.SOCIAL,
         "Social",
-        "MP4/H.264 padded to the explicitly selected square or portrait canvas.",
+        "MP4/H.264 scaled to fit the explicitly selected square or portrait canvas "
+        "and padded; smaller videos are enlarged.",
         PresetResolutionKind.SOCIAL,
     ),
     ExportPresetId.PREVIEW: ExportPresetDefinition(

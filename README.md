@@ -396,7 +396,11 @@ Key boundaries:
   Selecting it requires an explicit supported `video_codec`. Omitting it keeps
   the previous FFmpeg command and encoder defaults. The codec-specific CRFs
   are respectively H.264 18/22/28, HEVC 22/28/34, and VP9 24/32/40; VP9 also
-  uses `-b:v 0` for unconstrained constant quality. These scales do not imply
+  uses `-b:v 0` for unconstrained constant quality. `compressed` additionally
+  caps the video bitrate at 75% of the probed source video bitrate when known
+  (`-maxrate`/`-bufsize` for H.264/HEVC, constrained `-b:v` for VP9) and reports
+  it as `max_video_bit_rate`; audio and container overhead are not capped, so
+  a smaller total file is likely but not guaranteed. These scales do not imply
   equivalent quality across codecs. Audio settings, dimensions and frame rate
   are unchanged. File size depends on the content; there is no target-filesize
   guarantee. Discovery and Agent grounding expose the same optional enum,
@@ -490,7 +494,8 @@ Key boundaries:
 - Export presets are defined once in `app/composition/export_presets.py`.
   Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
   Social requires `square` (1080×1080) or `portrait` (1080×1920) and
-  preserves aspect ratio with padding (CRF 21, AAC 128 kbps); Preview fits
+  preserves aspect ratio with padding, enlarging smaller sources to fit the
+  canvas (CRF 21, AAC 128 kbps); Preview fits
   without upscaling inside 1280×720 (CRF 28, AAC 96 kbps); Archival is locked
   lossless FFV1/FLAC; Advanced is constrained to MP4/MKV with H.264/AAC plus
   optional even maximum dimensions, CRF 18–35, and AAC bitrate 64–320 kbps.

@@ -74,8 +74,11 @@ USER_TEXT: dict[str, UserText] = {
                            "and a suitable choice is made for the file type.",
             "quality": "The balance between picture quality and file size. High "
                        "and Balanced aim at a level of quality, not a file size, so "
-                       "the copy can be larger than the original. Compressed always "
-                       "keeps the picture smaller than the original's. Needs a "
+                       "the copy can be larger than the original. Compressed also "
+                       "limits the picture's data rate to about three quarters of "
+                       "the original's when that rate is known. The sound is not "
+                       "limited, so the whole file is usually, but not always, "
+                       "smaller; the result shows how its size compares. Needs a "
                        "picture storage choice above.",
         },
     },
@@ -89,7 +92,9 @@ USER_TEXT: dict[str, UserText] = {
         ),
         "params": {
             "preset": "Web plays on any website; Social makes a square or upright "
-                      "video for social media; Preview is a small file for checking; "
+                      "video for social media, enlarging a smaller video to fill the "
+                      "frame and adding black bars where the shape differs; Web and "
+                      "Preview never enlarge; Preview is a small file for checking; "
                       "Archival keeps full quality for preservation.",
             "social_format": "Square for most feeds, or upright (portrait) for "
                              "phone-first platforms. Required for Social.",
@@ -251,8 +256,10 @@ USER_TEXT: dict[str, UserText] = {
         "summary": (
             "Bring the sound to a standard overall loudness, so recordings play at "
             "a similar volume. Works on audio files and on the sound of a video. "
-            "The file keeps its original sound quality settings, so its size stays "
-            "about the same."
+            "An audio file keeps its sound settings where possible, so its size "
+            "usually stays about the same. For a video, the picture is kept exactly "
+            "as it is, while the sound is saved again in a form that suits the video "
+            "file, which can differ from the original."
         ),
         "params": {
             "target_i": "How loud the result should be overall. -16 suits websites "
@@ -416,7 +423,9 @@ USER_TEXT: dict[str, UserText] = {
         "params": {
             "composition_revision_id": "The saved version of the project to export.",
             "preset": "Web plays on any website; Social makes a square or upright "
-                      "video for social media; Preview is a small file for checking; "
+                      "video for social media, enlarging a smaller video to fill the "
+                      "frame and adding black bars where the shape differs; Web and "
+                      "Preview never enlarge; Preview is a small file for checking; "
                       "Archival keeps full quality for preservation (very large "
                       "files); Advanced lets you set the details yourself.",
             "social_format": "Square for most feeds, or upright (portrait) for "

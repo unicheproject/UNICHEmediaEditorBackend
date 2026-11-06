@@ -82,6 +82,41 @@ def test_u5_resize_help_does_not_describe_encoder_tricks() -> None:
                 assert prop["minimum"] >= 1
 
 
+
+def _all_text(capability_id: str) -> str:
+    """Every description a client or the Agent can show for a capability."""
+    cap = next(c for c in CAPABILITIES if c.id == capability_id)
+    parts = [cap.description, cap.summary or ""]
+    for prop in cap.input_schema.get("properties", {}).values():
+        parts += [prop.get("description", ""), prop.get("x-help", "")]
+        parts += list(prop.get("x-enum-descriptions", {}).values())
+    return " ".join(parts)
+
+
+def test_c4_compressed_does_not_promise_a_smaller_file() -> None:
+    # The cap covers the video bitrate only, and only when it is known.
+    text = _all_text("video.transcode")
+    assert "compressed always" not in text.lower()
+    assert "kept below the source's bitrate" not in text
+    assert "not guaranteed" in text and "not always" in text
+
+
+def test_c6_video_soundtrack_codec_is_not_promised() -> None:
+    # A video's soundtrack is re-encoded for the container (AAC or Opus).
+    for capability_id in ("audio.gain", "audio.normalize", "audio.fade", "audio.denoise"):
+        text = _all_text(capability_id)
+        assert "keeps its source sample rate, channels, codec and bitrate" not in text
+        assert "re-encoded as AAC" in text, capability_id
+
+
+def test_d08_social_export_says_it_enlarges() -> None:
+    # Social fits and pads to 1080 px, so smaller sources are scaled up.
+    for capability_id in ("video.export", "project.export"):
+        text = _all_text(capability_id)
+        assert "and Preview are quality-targeted H.264/AAC MP4 that never upscale" not in text
+        assert "enlarg" in text, capability_id
+
+
 async def _upload(client: AsyncClient, pid: str, path: Path, mime: str) -> str:
     resp = await client.post(
         f"{API}/projects/{pid}/assets", files={"file": (path.name, path.read_bytes(), mime)}
