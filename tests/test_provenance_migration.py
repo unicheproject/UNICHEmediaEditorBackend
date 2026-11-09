@@ -77,7 +77,7 @@ def test_postgres_provenance_migration(monkeypatch, previous):
 
     async def verify(conn):
         assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == (
-            "0016_asset_display_size"
+            "0017_org_brand_kits"
         )
         if previous:
             rows = (
