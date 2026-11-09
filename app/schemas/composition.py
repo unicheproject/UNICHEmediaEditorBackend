@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 from app.capabilities.compose_contract import (
     COMPOSE_DEFAULT_AUDIO_MODE,
     COMPOSE_DEFAULT_MUSIC_VOLUME,
+    IMAGE_CLIP_MAX_DURATION_SECONDS,
+    IMAGE_CLIP_MIN_DURATION_SECONDS,
     ComposeAudioMode,
 )
 
@@ -36,8 +38,20 @@ def _is_none(value: object) -> bool:
     return value is None
 
 
+def _always(_value: object) -> bool:
+    return True
+
+
 class CompositionClip(_StrictDocumentModel):
+    """A video clip. Its canonical form has no `kind`, as before image clips."""
+
     id: uuid.UUID = Field(strict=False)
+    # Accepted for symmetry with image clips but never stored or returned, so a
+    # video clip has one canonical form (and hash) with or without it.
+    kind: Literal["video"] | None = Field(
+        default=None, exclude_if=_always,
+        description='Optional; "video" or omitted. Never returned.',
+    )
     asset_id: uuid.UUID = Field(strict=False)
     # Optional source in/out points (not timeline positions), with video.trim's
     # semantics: seconds in the source Asset; an omitted or past-the-end
@@ -65,10 +79,38 @@ class CompositionClip(_StrictDocumentModel):
         return self.source_start is not None or self.source_end is not None
 
 
+class CompositionImageClip(_StrictDocumentModel):
+    """A still image shown for `duration` seconds, scaled and padded to the canvas."""
+
+    id: uuid.UUID = Field(strict=False)
+    kind: Literal["image"]
+    asset_id: uuid.UUID = Field(strict=False)
+    duration: float = Field(
+        ge=IMAGE_CLIP_MIN_DURATION_SECONDS,
+        le=IMAGE_CLIP_MAX_DURATION_SECONDS,
+        allow_inf_nan=False,
+        description="Seconds the image is shown: at least one frame (1/30 s), at most 600.",
+    )
+
+
+def _clip_kind(value: Any) -> str | None:
+    """Clips without `kind` are video clips, as in every document saved so far."""
+    if isinstance(value, dict):
+        kind = value.get("kind", "video")
+        return kind if isinstance(kind, str) else None
+    return "image" if isinstance(value, CompositionImageClip) else "video"
+
+
+CompositionTrackClip = Annotated[
+    Annotated[CompositionClip, Tag("video")] | Annotated[CompositionImageClip, Tag("image")],
+    Discriminator(_clip_kind),
+]
+
+
 class CompositionVideoTrack(_StrictDocumentModel):
     id: uuid.UUID = Field(strict=False)
     kind: Literal["video"]
-    clips: Annotated[list[CompositionClip], Field(min_length=1)]
+    clips: Annotated[list[CompositionTrackClip], Field(min_length=1)]
 
 
 class CompositionAudioBed(_StrictDocumentModel):

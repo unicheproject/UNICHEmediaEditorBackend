@@ -16,7 +16,7 @@ from app.capabilities.context import JobContext
 from app.composition.document import canonical_document
 from app.core.errors import ValidationError
 from app.models.composition import ProjectCompositionRevision
-from app.schemas.composition import CompositionDocument
+from app.schemas.composition import CompositionClip, CompositionDocument, CompositionImageClip
 
 COMPOSITION_RENDER_COMPILER_VERSION = 1
 COMPOSE_DEFAULT_WIDTH = 1920
@@ -42,9 +42,14 @@ class ComposeRenderRequest:
     audio_mode: ComposeAudioMode = COMPOSE_DEFAULT_AUDIO_MODE
     music_volume: float = COMPOSE_DEFAULT_MUSIC_VOLUME
     subtitle_asset_id: uuid.UUID | None = None
-    # One window per video clip, in order; None when no clip sets in/out points,
-    # so untimed compositions render exactly as before.
+    # One window per clip, in order; None when no clip sets in/out points,
+    # so untimed compositions render exactly as before. Unused for image clips.
     clip_windows: tuple[ClipWindow, ...] | None = None
+    # One entry per clip, in order: a still image's duration, or None for a
+    # video clip. None when the composition has no image clips, so video-only
+    # compositions render exactly as before. `video_asset_ids` then lists every
+    # visual clip's Asset in order, images included.
+    still_durations: tuple[float | None, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -122,9 +127,22 @@ def compile_composition_revision(
         )
         video_ids = tuple(item.asset_id for item in occurrences)
         clips = [clip for track in document.tracks for clip in track.clips]
+        video_clips = [clip for clip in clips if isinstance(clip, CompositionClip)]
         clip_windows = (
-            tuple(ClipWindow(clip.source_start or 0.0, clip.source_end) for clip in clips)
-            if any(clip.has_timing for clip in clips)
+            tuple(
+                ClipWindow(clip.source_start or 0.0, clip.source_end)
+                if isinstance(clip, CompositionClip) else ClipWindow()
+                for clip in clips
+            )
+            if any(clip.has_timing for clip in video_clips)
+            else None
+        )
+        still_durations = (
+            tuple(
+                clip.duration if isinstance(clip, CompositionImageClip) else None
+                for clip in clips
+            )
+            if len(video_clips) != len(clips)
             else None
         )
         audio_id = document.audio_bed.asset_id if document.audio_bed else None
@@ -146,6 +164,7 @@ def compile_composition_revision(
                 else COMPOSE_DEFAULT_MUSIC_VOLUME
             ),
             clip_windows=clip_windows,
+            still_durations=still_durations,
         )
     except (PydanticValidationError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ValidationError(

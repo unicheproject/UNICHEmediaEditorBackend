@@ -19,7 +19,7 @@ from app.core.errors import (
 from app.models.asset import Asset
 from app.models.composition import ProjectComposition, ProjectCompositionRevision
 from app.models.enums import MediaType, TechnicalMetadataStatus
-from app.schemas.composition import CompositionDocument
+from app.schemas.composition import CompositionDocument, CompositionImageClip
 from app.services.assets import ensure_asset_binary_available
 
 _INVALID_ASSET_REFERENCE = (
@@ -52,7 +52,11 @@ async def _validate_asset_references(
     expected: dict[uuid.UUID, MediaType] = {}
     for track in document.tracks:
         for clip in track.clips:
-            expected[clip.asset_id] = MediaType.video
+            media_type = (
+                MediaType.image if isinstance(clip, CompositionImageClip) else MediaType.video
+            )
+            if expected.setdefault(clip.asset_id, media_type) != media_type:
+                raise ValidationError(_INVALID_ASSET_REFERENCE)
     if document.audio_bed is not None:
         aid = document.audio_bed.asset_id
         if aid in expected:
@@ -84,13 +88,15 @@ async def _validate_asset_references(
     # metadata when available; otherwise the render checks the source itself.
     from app.tools import ffmpeg
 
+    # Image clips: the same applies to the decoded-size limit.
     for track in document.tracks:
         for clip in track.clips:
             asset = assets[clip.asset_id]
-            if (
-                clip.has_timing
-                and asset.technical_metadata_status == TechnicalMetadataStatus.available.value
-            ):
+            if asset.technical_metadata_status != TechnicalMetadataStatus.available.value:
+                continue
+            if isinstance(clip, CompositionImageClip):
+                ffmpeg.check_still_image_pixels(asset.width, asset.height)
+            elif clip.has_timing:
                 ffmpeg.resolve_trim_window(
                     clip.source_start or 0.0, clip.source_end,
                     duration=asset.duration_seconds, frame_rate=asset.frame_rate,

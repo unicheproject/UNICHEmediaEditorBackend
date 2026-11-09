@@ -244,6 +244,34 @@ async def _run_probe(args: list[str]) -> bytes:
         raise MetadataProbeError("tool_unavailable") from exc
 
 
+@dataclass(frozen=True)
+class StillImageInfo:
+    width: int
+    height: int
+    orientation: str  # ImageMagick's name, e.g. "TopLeft", "RightTop", "Undefined"
+    has_alpha: bool
+
+
+async def probe_still_image(path: Path) -> StillImageInfo:
+    """Header-only (-ping) size, orientation and alpha of an image's first frame."""
+    output = await _run_probe(
+        ["identify", "-ping", "-format", "%w\t%h\t%[orientation]\t%A",
+         f"{path.absolute()}[0]"]
+    )
+    try:
+        raw_width, raw_height, orientation, alpha = (
+            output.decode("utf-8").strip("\r\n").split("\t")
+        )
+        width, height = int(raw_width), int(raw_height)
+        if width <= 0 or height <= 0:
+            raise ValueError("invalid dimensions")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise MetadataProbeError("invalid_image_metadata") from exc
+    return StillImageInfo(
+        width, height, orientation.strip(), alpha.strip().lower() in {"true", "blend"}
+    )
+
+
 def _unavailable() -> TechnicalMetadata:
     return TechnicalMetadata(status=TechnicalMetadataStatus.unavailable)
 

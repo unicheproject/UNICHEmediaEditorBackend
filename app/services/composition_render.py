@@ -53,9 +53,13 @@ async def resolve_composition_render(
     _composition, revision = row
     compiled = compile_composition_revision(revision)
 
-    expected: dict[uuid.UUID, MediaType] = dict.fromkeys(
-        compiled.request.video_asset_ids, MediaType.video
-    )
+    # Each visual clip's Asset must be a video, or an image for still clips.
+    stills = compiled.request.still_durations or (None,) * len(compiled.request.video_asset_ids)
+    expected: dict[uuid.UUID, MediaType] = {}
+    for asset_id, still in zip(compiled.request.video_asset_ids, stills, strict=True):
+        media_type = MediaType.video if still is None else MediaType.image
+        if expected.setdefault(asset_id, media_type) != media_type:
+            raise ValidationError(_UNAVAILABLE, code="composition_asset_unavailable")
     audio_id = compiled.request.audio_asset_id
     if audio_id is not None:
         if audio_id in expected:

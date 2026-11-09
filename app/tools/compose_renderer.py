@@ -45,6 +45,11 @@ async def render_compose(
             raise ValidationError("Compose render clip timing does not match its clips")
         # Passed only when set: untimed renders call FFmpeg exactly as before.
         timing["clip_windows"] = [(w.start, w.end) for w in request.clip_windows]
+    if request.still_durations is not None:
+        if len(request.still_durations) != len(sources.video_paths):
+            raise ValidationError("Compose render still durations do not match its clips")
+        # Passed only when set: compositions without images call FFmpeg as before.
+        timing["still_durations"] = list(request.still_durations)
     await ffmpeg.compose(
         list(sources.video_paths),
         dst,

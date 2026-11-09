@@ -94,7 +94,8 @@ def test_openapi_exposes_source_timing_fields() -> None:
     schemas = app.openapi()["components"]["schemas"]
     clip = schemas["CompositionClip"]
     assert clip["required"] == ["id", "asset_id"]
-    assert set(clip["properties"]) == {"id", "asset_id", "source_start", "source_end"}
+    # `kind` ("video" or omitted) was added with image clips; it is never stored.
+    assert set(clip["properties"]) == {"id", "kind", "asset_id", "source_start", "source_end"}
     start = clip["properties"]["source_start"]["anyOf"][0]
     end = clip["properties"]["source_end"]["anyOf"][0]
     assert (start["type"], start["minimum"]) == ("number", 0)

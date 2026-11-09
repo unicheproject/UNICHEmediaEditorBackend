@@ -12,6 +12,11 @@ import math
 from contextlib import suppress
 from pathlib import Path
 
+from app.capabilities.compose_contract import (
+    IMAGE_CLIP_MAX_DURATION_SECONDS,
+    IMAGE_CLIP_MAX_PIXELS,
+    IMAGE_CLIP_MIN_DURATION_SECONDS,
+)
 from app.capabilities.media_options import VIDEO_QUALITY_CRF, VIDEO_TRANSCODE_OPTIONS
 from app.core.errors import ToolError, ValidationError
 from app.models.enums import MediaType
@@ -19,6 +24,7 @@ from app.services.media_metadata import (
     MetadataProbeError,
     probe_first_video_frame,
     probe_media,
+    probe_still_image,
     probe_video_timeline,
 )
 from app.tools import progress, runner
@@ -1129,6 +1135,79 @@ async def _normalize_segment(
             raise ToolError("Composition clip range does not contain video frames") from exc
 
 
+# ImageMagick orientation name -> filters that display the image upright. Stills
+# are decoded with -noautorotate and oriented from this one source, the same
+# probe that records the Asset's displayed size: FFmpeg applies EXIF
+# orientation only to JPEG and ignores, e.g., the TIFF orientation tag.
+_STILL_ORIENTATION_FILTERS = {
+    "TopRight": "hflip",
+    "BottomRight": "hflip,vflip",
+    "BottomLeft": "vflip",
+    "LeftTop": "transpose=0",
+    "RightTop": "transpose=1",
+    "RightBottom": "transpose=3",
+    "LeftBottom": "transpose=2",
+}
+
+
+def check_still_image_pixels(width: int | None, height: int | None) -> None:
+    """Reject an image clip whose decoded size exceeds the composition limit."""
+    if width is not None and height is not None and width * height > IMAGE_CLIP_MAX_PIXELS:
+        raise ValidationError(
+            f"Image is too large for a composition ({width}×{height} pixels; "
+            f"the limit is {IMAGE_CLIP_MAX_PIXELS // 1_000_000} megapixels)"
+        )
+
+
+async def _normalize_still(
+    src: str,
+    dst: str,
+    width: int,
+    height: int,
+    policy: ComposeRenderPolicy,
+    duration: float,
+) -> None:
+    """A still image -> one normalized segment of `duration` with silent audio.
+
+    Same canvas, 30 fps, sample rate, channels and codecs as _normalize_segment,
+    in a single encode. The image is read at 1 fps and the fps filter repeats
+    frames, so a large image is decoded about once per second, not 30 times.
+    Transparency is composited onto black (the padding colour), deterministically.
+    """
+    if not (
+        math.isfinite(duration)
+        and IMAGE_CLIP_MIN_DURATION_SECONDS - 1e-9 <= duration <= IMAGE_CLIP_MAX_DURATION_SECONDS
+    ):
+        raise ValidationError("Image clip duration is outside the allowed range")
+    try:
+        info = await probe_still_image(Path(src))
+    except MetadataProbeError as exc:
+        raise ToolError("Composition image cannot be read") from exc
+    check_still_image_pixels(info.width, info.height)
+    filters = []
+    if info.has_alpha:
+        # 16-bit, so lossless (yuv444p16le) renders keep the source's depth.
+        filters.append("format=rgba64le,premultiply=inplace=1")
+    if orient := _STILL_ORIENTATION_FILTERS.get(info.orientation):
+        filters.append(orient)
+    filters.append(_scale_pad(width, height))
+    seconds = str(duration)
+    await runner.run(
+        [
+            *_BASE, "-noautorotate", "-loop", "1", "-framerate", "1", "-t", seconds,
+            "-i", src, *_ANULL,
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-vf", ",".join(filters),
+            "-ar", "44100", "-ac", "2",
+            *_compose_encode_args(policy), "-t", seconds, dst,
+        ]
+    )
+    try:
+        await probe_first_video_frame(Path(dst))
+    except MetadataProbeError as exc:
+        raise ToolError("Composition image clip does not contain video frames") from exc
+
+
 async def _compose_video_duration(src: str) -> float:
     """Use the first video's duration (Matroska stores it as a stream tag)."""
     out = await runner.run_stdout(
@@ -1170,6 +1249,7 @@ async def compose(
     subtitle_path: str | None = None,
     policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
     clip_windows: list[tuple[float, float | None]] | None = None,
+    still_durations: list[float | None] | None = None,
 ) -> None:
     """Timeline render with one trusted encoding policy for every media stage."""
     if Path(dst).suffix.lower() != policy.suffix:
@@ -1180,10 +1260,15 @@ async def compose(
     # 1. normalize each segment to identical codec/params
     if clip_windows is not None and len(clip_windows) != len(segments):
         raise ToolError("Composition clip timing does not match its clips")
+    if still_durations is not None and len(still_durations) != len(segments):
+        raise ToolError("Composition image durations do not match its clips")
     normalized: list[Path] = []
     for i, seg in enumerate(segments):
         out = work_dir / f"_norm_{i:03d}{policy.suffix}"
-        if clip_windows is None:
+        still = still_durations[i] if still_durations is not None else None
+        if still is not None:
+            await _normalize_still(seg, str(out), width, height, policy, still)
+        elif clip_windows is None:
             await _normalize_segment(seg, str(out), width, height, policy)
         else:
             await _normalize_segment(

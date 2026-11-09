@@ -471,6 +471,13 @@ Key boundaries:
   source metadata is known, and always again when the clip is normalized,
   which also trims it, so there is no extra encode. Unset values are not
   serialized, so untimed clips and existing revision hashes are unchanged.
+  Still images join the same ordered track as `{"kind": "image", "asset_id",
+  "duration"}` (1/30–600 s, at most 100 megapixels). A clip without `kind` is a
+  video clip; `kind: "video"` is accepted but never stored. Each image becomes
+  one normalized segment in a single encode (read at 1 fps; the fps filter
+  repeats frames), with silent audio, the render policy's codecs, orientation
+  from ImageMagick's header probe (FFmpeg ignores, e.g., the TIFF tag) and
+  transparency composited onto black.
   `app/composition/render.py` compiles one revision into a typed semantic
   render request; `app/services/composition_render.py` revalidates and resolves
   its project-owned Assets; `app/tools/compose_renderer.py` delegates to the
