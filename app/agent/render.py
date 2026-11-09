@@ -533,4 +533,32 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
         args += ["-an"]
     args.append(str(output))
     await runner.run(args)
+    await _check_rendered_video(output)
     return audio_present
+
+
+async def _check_rendered_video(output: Path) -> None:
+    """Reject a render FFmpeg reported as successful but that holds no video frame.
+
+    FFmpeg exits 0 when filters emit nothing (e.g. a trim past the last video
+    frame of a file whose audio runs longer), writing a container with no video
+    stream. Header probe plus a first-frame decode; no full-file scan, and no
+    dependence on source timing.
+    """
+    from app.core.errors import ToolError
+    from app.models.enums import MediaType
+    from app.services.media_metadata import (
+        MetadataProbeError,
+        probe_first_video_frame,
+        probe_media,
+    )
+
+    if not output.is_file() or output.stat().st_size == 0:
+        raise ToolError("Agent render output is missing or empty")
+    try:
+        metadata = await probe_media(output, MediaType.video)
+        if not metadata.has_video_stream:
+            raise ToolError("Agent render output does not contain video frames")
+        await probe_first_video_frame(output)
+    except MetadataProbeError as exc:
+        raise ToolError("Agent render output does not contain valid video frames") from exc

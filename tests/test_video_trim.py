@@ -29,6 +29,10 @@ HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 VID = "22222222-2222-2222-2222-222222222222"
 
 
+async def _no_output_check(_output) -> None:
+    """FFmpeg is mocked here and writes no file; skip the rendered-output check."""
+
+
 def _trim_cap():
     return registry.get("video.trim")
 
@@ -246,6 +250,7 @@ async def test_agent_render_trim_without_end_omits_end_bound(monkeypatch, tmp_pa
     monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
+    monkeypatch.setattr("app.agent.render._check_rendered_video", _no_output_check)
     plan = Plan.model_validate({"type": "plan", "steps": [
         {"id": "trim", "capability_id": "video.trim", "asset": VID, "params": {"start": 3}},
         {"id": "resize", "capability_id": "video.resize", "asset": "@trim",

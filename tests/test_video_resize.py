@@ -26,6 +26,10 @@ HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 VID = "22222222-2222-2222-2222-222222222222"
 
 
+async def _no_output_check(_output) -> None:
+    """FFmpeg is mocked here and writes no file; skip the rendered-output check."""
+
+
 def test_schema_needs_one_side_and_no_ffmpeg_sentinels() -> None:
     cap = registry.get("video.resize")
     for params in ({"height": 720}, {"width": 1280}, {"width": 1280, "height": 720}):
@@ -116,6 +120,7 @@ async def test_agent_render_resize_with_one_side(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
+    monkeypatch.setattr("app.agent.render._check_rendered_video", _no_output_check)
     plan = Plan.model_validate({"type": "plan", "steps": [
         {"id": "trim", "capability_id": "video.trim", "asset": VID,
          "params": {"start": 1, "end": 2}},

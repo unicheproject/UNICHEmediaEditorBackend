@@ -111,6 +111,10 @@ def _plan(steps: list[dict]) -> Plan:
     return Plan.model_validate({"type": "plan", "steps": steps})
 
 
+async def _no_output_check(_output) -> None:
+    """FFmpeg is mocked here and writes no file; skip the rendered-output check."""
+
+
 def test_valid_plan_passes() -> None:
     plan = _plan([
         {"id": "s1", "capability_id": "image.resize",
@@ -423,6 +427,7 @@ async def test_render_filtergraph_preserves_logical_order(monkeypatch, tmp_path)
     monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
+    monkeypatch.setattr("app.agent.render._check_rendered_video", _no_output_check)
     monkeypatch.setattr(imagemagick, "render_lowerthird", make_overlay)
     plan = _plan([
         {"id": "trim", "capability_id": "video.trim", "asset": VID,
@@ -721,6 +726,7 @@ async def _render_crop_group(
     monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
     monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
     monkeypatch.setattr(runner, "run", capture)
+    monkeypatch.setattr("app.agent.render._check_rendered_video", _no_output_check)
     group = compile_execution_plan(_plan(steps), _PENDING_VIDEO)["nodes"][0]
     assert group["kind"] == "render_group"
     await render_group(tmp_path / "in.mp4", tmp_path / "out.mp4", tmp_path, group)
@@ -970,6 +976,165 @@ async def test_invalid_fused_trim_fails_without_an_output_asset(
     assert len(jobs) == 1 and jobs[0].status.value == "failed"
     assert "Trim start must be before the end of the video" in (jobs[0].error or "")
     assert len(assets) == 1
+
+
+# --- fused render output validation (FFmpeg exit 0 is not proof of frames) ---
+
+HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def _ffmpeg(*args: str) -> None:
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True, timeout=30)
+
+
+def _video(path: Path, *, frames: int, ext_args: tuple[str, ...] = ()) -> Path:
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=size=64x48:rate=10", "-frames:v", str(frames),
+            *(ext_args or ("-c:v", "libx264", "-pix_fmt", "yuv420p")), str(path))
+    return path
+
+
+def _audio_longer_than_video(path: Path) -> Path:
+    """1 s of video, 3 s of audio: the container reports 3 s."""
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=size=64x48:rate=10:duration=1",
+            "-f", "lavfi", "-i", "sine=duration=3",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path))
+    return path
+
+
+def _fused_trim_group(start: float, end: float | None) -> dict:
+    return compile_execution_plan(_plan([_trim(VID, start, end)]), _PENDING_VIDEO)["nodes"][0]
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="needs ffmpeg + ffprobe")
+@pytest.mark.parametrize(("frames", "ext", "codec"), [
+    (10, "mp4", ("-c:v", "libx264", "-pix_fmt", "yuv420p")),
+    (1, "mp4", ("-c:v", "libx264", "-pix_fmt", "yuv420p")),  # a single frame stays valid
+    (1, "webm", ("-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p")),
+    (1, "avi", ("-c:v", "mpeg4")),
+])
+async def test_rendered_output_check_accepts_frame_bearing_video(
+    tmp_path, frames: int, ext: str, codec: tuple[str, ...]
+) -> None:
+    from app.agent.render import _check_rendered_video
+
+    await _check_rendered_video(_video(tmp_path / f"out.{ext}", frames=frames, ext_args=codec))
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="needs ffmpeg + ffprobe")
+@pytest.mark.parametrize("content", [None, b"", b"not a video", "audio-only", "zero-frame"])
+async def test_rendered_output_check_rejects_missing_corrupt_or_frameless_output(
+    tmp_path, content
+) -> None:
+    from app.agent.render import _check_rendered_video
+    from app.core.errors import ToolError
+
+    output = tmp_path / "out.mp4"
+    if content == "audio-only":
+        _ffmpeg("-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", str(output))
+    elif content == "zero-frame":
+        # Exactly what the fused trim filtergraph writes when the window lies
+        # past the last video frame: FFmpeg exits 0 with no video stream.
+        source = _audio_longer_than_video(tmp_path / "in.mp4")
+        _ffmpeg("-i", str(source), "-filter_complex",
+                "[0:v:0]trim=start=2:end=2.5,setpts=PTS-STARTPTS[v1];"
+                "[0:a:0]atrim=start=2:end=2.5,asetpts=PTS-STARTPTS[a1]",
+                "-map", "[v1]", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-map", "[a1]", "-c:a", "aac", str(output))
+        assert output.stat().st_size > 0
+    elif content is not None:
+        output.write_bytes(content)
+    with pytest.raises(ToolError, match="Agent render output"):
+        await _check_rendered_video(output)
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="needs ffmpeg + ffprobe")
+async def test_fused_trim_past_the_last_video_frame_fails_after_ffmpeg_exit_0(
+    tmp_path,
+) -> None:
+    """The container (3 s) passes the trim window check; the video (1 s) has no frames there."""
+    from app.core.errors import ToolError
+
+    source = _audio_longer_than_video(tmp_path / "in.mp4")
+    with pytest.raises(ToolError, match="does not contain video frames"):
+        await render_group(source, tmp_path / "out.mp4", tmp_path, _fused_trim_group(2, 2.5))
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="needs ffmpeg + ffprobe")
+async def test_fused_render_succeeds_without_source_timing(monkeypatch, tmp_path) -> None:
+    from app.models.enums import TechnicalMetadataStatus
+    from app.services.media_metadata import TechnicalMetadata
+    from app.tools import ffmpeg
+
+    async def no_timing(_path, _media_type):
+        return TechnicalMetadata(TechnicalMetadataStatus.available, has_video_stream=True)
+
+    monkeypatch.setattr(ffmpeg, "probe_media", no_timing)
+    source = _video(tmp_path / "in.mp4", frames=10)
+    output = tmp_path / "out.mp4"
+    await render_group(source, output, tmp_path, _fused_trim_group(0.2, 0.6))
+    assert output.stat().st_size > 0
+
+
+@pytest.mark.parametrize("output_bytes", [None, b""])
+async def test_frameless_fused_render_fails_job_and_plan_without_an_asset(
+    client: AsyncClient, make_project, monkeypatch, output_bytes: bytes | None
+) -> None:
+    from app.models.enums import TechnicalMetadataStatus
+    from app.services.media_metadata import TechnicalMetadata
+    from app.tools import ffmpeg, runner
+
+    pid = await make_project(f"agent-render-frameless-{output_bytes is None}")
+    upload = await client.post(
+        f"{API}/projects/{pid}/assets",
+        files={"file": ("source.mp4", b"fixture", "video/mp4")},
+    )
+    asset_id = upload.json()["id"]
+    session_id = (await client.post(
+        f"{API}/agent/sessions", json={"project_id": pid, "asset_ids": [asset_id]}
+    )).json()["id"]
+    plan = _plan([_trim(asset_id, 1, 2)])
+
+    async def fake_propose(*_args, **_kwargs):
+        return plan, []
+
+    async def source_timing(_path, _media_type):
+        return TechnicalMetadata(
+            TechnicalMetadataStatus.available, duration_seconds=4.0, frame_rate=10.0,
+            has_video_stream=True,
+        )
+
+    async def no_audio(_path: str) -> bool:
+        return False
+
+    async def ffmpeg_exit_0(args: list[str], **_kwargs) -> str:
+        if output_bytes is not None:
+            Path(args[-1]).write_bytes(output_bytes)
+        return ""
+
+    monkeypatch.setattr("app.services.agent.llm.propose", fake_propose)
+    monkeypatch.setattr(ffmpeg, "probe_media", source_timing)
+    monkeypatch.setattr(ffmpeg, "_has_audio", no_audio)
+    monkeypatch.setattr(runner, "run", ffmpeg_exit_0)
+    plan_id = (await client.post(
+        f"{API}/agent/sessions/{session_id}/messages", json={"content": "Trim"}
+    )).json()["plan"]["id"]
+    await client.post(f"{API}/agent/plans/{plan_id}/approve")
+    final = (await client.get(f"{API}/agent/plans/{plan_id}")).json()
+    assert final["status"] == "failed"
+    assert final["result_asset_ids"] in (None, [])
+    assert final["step_runs"][0]["status"] == "failed"
+    assert final["step_runs"][0].get("output_asset_id") is None
+    async with async_session_factory() as db:
+        jobs = list(
+            (await db.execute(select(Job).where(Job.project_id == uuid.UUID(pid)))).scalars()
+        )
+        assets = list(
+            (await db.execute(select(Asset).where(Asset.project_id == uuid.UUID(pid)))).scalars()
+        )
+    assert len(jobs) == 1 and jobs[0].capability_id == "agent.render_group"
+    assert jobs[0].status.value == "failed" and jobs[0].output is None
+    assert "Agent render output is missing or empty" in (jobs[0].error or "")
+    assert len(assets) == 1  # only the uploaded source
 
 
 @pytest.mark.skipif(not NEED_ALL, reason="needs ffmpeg + convert + font")

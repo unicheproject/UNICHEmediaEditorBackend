@@ -162,6 +162,21 @@ async def probe_video_timeline(
         raise MetadataProbeError("tool_unavailable") from exc
 
 
+async def probe_first_video_frame(path: Path) -> None:
+    """Prove the first video stream yields a decoded frame, reading only one packet.
+
+    Unlike probe_video_timeline this does not scan the file: -read_intervals
+    stops after the first video packet. Raises MetadataProbeError otherwise.
+    """
+    output = await _run_probe([
+        "ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
+        "-show_entries", "frame=best_effort_timestamp_time", "-of", "csv=p=0",
+        str(path.absolute()),
+    ])
+    if not output.strip():
+        raise MetadataProbeError("no_video_frames")
+
+
 def _text(value: Any) -> str | None:
     if value is None:
         return None
