@@ -1,0 +1,85 @@
+{
+  "template_schema": 1,
+  "template_id": "artefact-spotlight",
+  "version": 1,
+  "name": "Artefact spotlight",
+  "description": "An optional title card, photographs of an artefact and an optional video, with optional narration and music.",
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "slots": {
+    "title_card": {
+      "media_type": "video",
+      "required": false,
+      "label": "Title card",
+      "help": "An opening title video, for example one made with Title Card.",
+      "suggestion": {
+        "capability_id": "media.titlecard",
+        "params": {
+          "duration": 4
+        }
+      }
+    },
+    "photos": {
+      "media_type": "image",
+      "required": true,
+      "multiple": true,
+      "max": 12,
+      "label": "Artefact photographs",
+      "help": "1 to 12 photographs, shown in order for 5 seconds each."
+    },
+    "main_video": {
+      "media_type": "video",
+      "required": false,
+      "label": "Main video",
+      "help": "An optional video shown after the photographs."
+    },
+    "narration": {
+      "media_type": "audio",
+      "required": false,
+      "label": "Narration",
+      "help": "Spoken narration, starting with the composition."
+    },
+    "music": {
+      "media_type": "audio",
+      "required": false,
+      "label": "Background music",
+      "help": "Music played under the whole composition, lowered behind other sound."
+    }
+  },
+  "tracks": [
+    {
+      "kind": "video",
+      "clips": [
+        {
+          "slot": "title_card"
+        },
+        {
+          "slot": "photos",
+          "kind": "image",
+          "duration": 5
+        },
+        {
+          "slot": "main_video"
+        }
+      ]
+    },
+    {
+      "kind": "audio",
+      "clips": [
+        {
+          "slot": "narration",
+          "timeline_start": 0,
+          "volume": 1
+        }
+      ]
+    }
+  ],
+  "audio_bed": {
+    "slot": "music",
+    "mode": "duck",
+    "volume": 0.3
+  },
+  "suggested_export_preset": "web"
+}

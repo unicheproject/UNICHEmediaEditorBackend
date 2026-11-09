@@ -1,0 +1,74 @@
+{
+  "template_schema": 1,
+  "template_id": "exhibit-intro",
+  "version": 1,
+  "name": "Exhibit intro",
+  "description": "An optional title card followed by one hero image, with optional narration and music.",
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "slots": {
+    "title_card": {
+      "media_type": "video",
+      "required": false,
+      "label": "Title card",
+      "help": "An opening title video, for example one made with Title Card.",
+      "suggestion": {
+        "capability_id": "media.titlecard",
+        "params": {
+          "duration": 4
+        }
+      }
+    },
+    "hero_image": {
+      "media_type": "image",
+      "required": true,
+      "label": "Hero image",
+      "help": "The main image of the exhibit, shown for 5 seconds."
+    },
+    "narration": {
+      "media_type": "audio",
+      "required": false,
+      "label": "Narration",
+      "help": "Spoken narration, starting with the composition."
+    },
+    "music": {
+      "media_type": "audio",
+      "required": false,
+      "label": "Background music",
+      "help": "Music played under the whole composition, lowered behind other sound."
+    }
+  },
+  "tracks": [
+    {
+      "kind": "video",
+      "clips": [
+        {
+          "slot": "title_card"
+        },
+        {
+          "slot": "hero_image",
+          "kind": "image",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "kind": "audio",
+      "clips": [
+        {
+          "slot": "narration",
+          "timeline_start": 0,
+          "volume": 1
+        }
+      ]
+    }
+  ],
+  "audio_bed": {
+    "slot": "music",
+    "mode": "duck",
+    "volume": 0.3
+  },
+  "suggested_export_preset": "web"
+}

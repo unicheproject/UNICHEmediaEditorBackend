@@ -1,0 +1,69 @@
+{
+  "template_schema": 1,
+  "template_id": "event-recap",
+  "version": 1,
+  "name": "Event recap",
+  "description": "An optional title card and the event video, followed by optional photographs, with optional music.",
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "slots": {
+    "title_card": {
+      "media_type": "video",
+      "required": false,
+      "label": "Title card",
+      "help": "An opening title video, for example one made with Title Card.",
+      "suggestion": {
+        "capability_id": "media.titlecard",
+        "params": {
+          "duration": 4
+        }
+      }
+    },
+    "main_video": {
+      "media_type": "video",
+      "required": true,
+      "label": "Event video",
+      "help": "The main video of the event."
+    },
+    "photos": {
+      "media_type": "image",
+      "required": false,
+      "multiple": true,
+      "max": 12,
+      "label": "Event photographs",
+      "help": "Up to 12 photographs, shown in order for 4 seconds each after the video."
+    },
+    "music": {
+      "media_type": "audio",
+      "required": false,
+      "label": "Background music",
+      "help": "Music played under the whole composition, lowered behind other sound."
+    }
+  },
+  "tracks": [
+    {
+      "kind": "video",
+      "clips": [
+        {
+          "slot": "title_card"
+        },
+        {
+          "slot": "main_video"
+        },
+        {
+          "slot": "photos",
+          "kind": "image",
+          "duration": 4
+        }
+      ]
+    }
+  ],
+  "audio_bed": {
+    "slot": "music",
+    "mode": "duck",
+    "volume": 0.3
+  },
+  "suggested_export_preset": "web"
+}

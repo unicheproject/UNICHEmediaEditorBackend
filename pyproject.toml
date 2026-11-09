@@ -48,6 +48,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# Bundled composition templates (MED/028) are JSON data files of the package.
+[tool.setuptools.package-data]
+"app.composition.templates" = ["*/*.json"]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
 torchvision = { index = "pytorch-cu121" }

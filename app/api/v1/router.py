@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import agent, assets, capabilities, compositions, jobs, projects
+from app.api.v1 import (
+    agent,
+    assets,
+    capabilities,
+    composition_templates,
+    compositions,
+    jobs,
+    projects,
+)
 from app.core.security import get_current_principal
 
 # Every /api/v1 route requires a valid Keycloak token. Project-level
@@ -12,6 +20,7 @@ from app.core.security import get_current_principal
 api_router = APIRouter(dependencies=[Depends(get_current_principal)])
 api_router.include_router(projects.router)
 api_router.include_router(compositions.router)
+api_router.include_router(composition_templates.router)
 api_router.include_router(assets.router)
 api_router.include_router(capabilities.router)
 api_router.include_router(jobs.router)

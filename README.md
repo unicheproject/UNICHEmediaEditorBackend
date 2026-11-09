@@ -515,6 +515,22 @@ Key boundaries:
   renders directly to MKV/FFV1/FLAC with no lossy composition intermediate.
   The final result is one ordinary visible derived Asset; renderer-local files
   remain inside the Job work directory.
+- Project templates (MED/028) are built-in, versioned JSON files in
+  `app/composition/templates/<id>/vN.json`, listed explicitly in
+  `TEMPLATE_FILES` and validated at startup. A template is a composition whose
+  clips name a *slot* (image, video or audio; optional; `multiple` up to 12)
+  instead of an Asset. `GET /composition-templates[/{id}[/versions/{n}]]`
+  lists and reads them. `POST /projects/{id}/composition/template` takes
+  `{template_id, version, bindings}`, compiles an ordinary composition (clip
+  and track IDs are UUIDv5 names, so the same bindings give the same
+  document) and saves it through the normal PUT path, with the same
+  preconditions, statuses and response. Applying runs no Jobs and creates no
+  Assets or projects; the template is not recorded in the revision.
+  Starting a project from a template therefore takes three steps: create the
+  project, upload or create its Assets, then apply. There is no single
+  create-from-template call.
+  Published versions are immutable (their hashes are pinned in tests):
+  changes go in a new version file.
 - Export presets are defined once in `app/composition/export_presets.py`.
   Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
   Social requires `square` (1080×1080) or `portrait` (1080×1920) and

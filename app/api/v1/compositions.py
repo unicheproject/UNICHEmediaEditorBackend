@@ -12,7 +12,9 @@ from app.core.database import get_session
 from app.core.security import Principal, get_current_principal
 from app.models.project import Project
 from app.schemas.composition import CompositionDocument, CompositionRevisionRead
+from app.schemas.composition_template import ApplyTemplateRequest
 from app.services import compositions as svc
+from app.services.composition_templates import apply_template
 
 router = APIRouter(
     prefix="/projects/{project_id}/composition",
@@ -54,6 +56,36 @@ async def save_composition(
         author_subject=principal.subject,
         if_match=if_match,
         if_none_match=if_none_match,
+    )
+    response.headers["ETag"] = etag
+    if created and saved["revision_number"] == 1:
+        response.status_code = status.HTTP_201_CREATED
+    return saved
+
+
+@router.post(
+    "/template",
+    response_model=CompositionRevisionRead,
+    status_code=status.HTTP_200_OK,
+)
+async def apply_composition_template(
+    data: ApplyTemplateRequest,
+    response: Response,
+    project_id: uuid.UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    _project: Project = Depends(require_project),
+) -> dict:
+    """Save a built-in template, bound to this project's Assets, as a new revision.
+
+    Same preconditions, statuses and response as PUT: If-None-Match: * for the
+    first composition (201), If-Match with the current ETag otherwise (200).
+    """
+    saved, etag, created = await apply_template(
+        session, project_id, data,
+        author_subject=principal.subject, if_match=if_match, if_none_match=if_none_match,
     )
     response.headers["ETag"] = etag
     if created and saved["revision_number"] == 1:
