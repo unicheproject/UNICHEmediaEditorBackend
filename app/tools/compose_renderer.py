@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.composition.render import ComposeRenderRequest
 from app.core.errors import ValidationError
@@ -38,6 +39,12 @@ async def render_compose(
         raise ValidationError("Compose render audio source does not match its Asset reference")
     if (request.subtitle_asset_id is None) != (sources.subtitle_path is None):
         raise ValidationError("Compose render subtitle source does not match its Asset reference")
+    timing: dict[str, Any] = {}
+    if request.clip_windows is not None:
+        if len(request.clip_windows) != len(sources.video_paths):
+            raise ValidationError("Compose render clip timing does not match its clips")
+        # Passed only when set: untimed renders call FFmpeg exactly as before.
+        timing["clip_windows"] = [(w.start, w.end) for w in request.clip_windows]
     await ffmpeg.compose(
         list(sources.video_paths),
         dst,
@@ -49,4 +56,5 @@ async def render_compose(
         music_volume=request.music_volume,
         subtitle_path=sources.subtitle_path,
         policy=policy,
+        **timing,
     )

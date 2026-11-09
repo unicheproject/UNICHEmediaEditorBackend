@@ -32,9 +32,37 @@ class CompositionCanvas(_StrictDocumentModel):
         return self
 
 
+def _is_none(value: object) -> bool:
+    return value is None
+
+
 class CompositionClip(_StrictDocumentModel):
     id: uuid.UUID = Field(strict=False)
     asset_id: uuid.UUID = Field(strict=False)
+    # Optional source in/out points (not timeline positions), with video.trim's
+    # semantics: seconds in the source Asset; an omitted or past-the-end
+    # `source_end` keeps the rest of the clip.
+    # Unset values are not serialized, so untimed clips (and the hashes of
+    # revisions saved before these fields existed) are unchanged.
+    source_start: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, exclude_if=_is_none,
+        description="Optional in point: seconds into the source video (default 0).",
+    )
+    source_end: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, exclude_if=_is_none,
+        description="Optional out point: seconds into the source video "
+                    "(default: the end of the source).",
+    )
+
+    @model_validator(mode="after")
+    def require_ordered_timing(self) -> CompositionClip:
+        if self.source_end is not None and self.source_end <= (self.source_start or 0):
+            raise ValueError("clip source_end must be after its source_start")
+        return self
+
+    @property
+    def has_timing(self) -> bool:
+        return self.source_start is not None or self.source_end is not None
 
 
 class CompositionVideoTrack(_StrictDocumentModel):

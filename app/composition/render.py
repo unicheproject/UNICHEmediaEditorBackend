@@ -24,6 +24,14 @@ COMPOSE_DEFAULT_HEIGHT = 1080
 
 
 @dataclass(frozen=True)
+class ClipWindow:
+    """Source in/out points of one clip; ``end=None`` keeps the rest of the clip."""
+
+    start: float = 0.0
+    end: float | None = None
+
+
+@dataclass(frozen=True)
 class ComposeRenderRequest:
     """Semantic inputs to the existing compose renderer; contains no paths."""
 
@@ -34,6 +42,9 @@ class ComposeRenderRequest:
     audio_mode: ComposeAudioMode = COMPOSE_DEFAULT_AUDIO_MODE
     music_volume: float = COMPOSE_DEFAULT_MUSIC_VOLUME
     subtitle_asset_id: uuid.UUID | None = None
+    # One window per video clip, in order; None when no clip sets in/out points,
+    # so untimed compositions render exactly as before.
+    clip_windows: tuple[ClipWindow, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +121,12 @@ def compile_composition_revision(
             for clip in track.clips
         )
         video_ids = tuple(item.asset_id for item in occurrences)
+        clips = [clip for track in document.tracks for clip in track.clips]
+        clip_windows = (
+            tuple(ClipWindow(clip.source_start or 0.0, clip.source_end) for clip in clips)
+            if any(clip.has_timing for clip in clips)
+            else None
+        )
         audio_id = document.audio_bed.asset_id if document.audio_bed else None
         if audio_id is not None and audio_id in video_ids:
             raise ValueError("An audio-bed Asset cannot also be a video clip")
@@ -128,6 +145,7 @@ def compile_composition_revision(
                 if document.audio_bed
                 else COMPOSE_DEFAULT_MUSIC_VOLUME
             ),
+            clip_windows=clip_windows,
         )
     except (PydanticValidationError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ValidationError(

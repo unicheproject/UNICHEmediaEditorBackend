@@ -465,6 +465,12 @@ Key boundaries:
   There is no CPU fallback. `video.upscale` remains implementation-unavailable
   with `not_implemented`.
 - Saved project compositions use immutable `CompositionRevision` documents.
+  Video clips may carry optional source in/out points (`source_start`,
+  `source_end`: seconds in the source Asset, not timeline positions), with
+  `video.trim`'s rules. They are checked on save when the
+  source metadata is known, and always again when the clip is normalized,
+  which also trims it, so there is no extra encode. Unset values are not
+  serialized, so untimed clips and existing revision hashes are unchanged.
   `app/composition/render.py` compiles one revision into a typed semantic
   render request; `app/services/composition_render.py` revalidates and resolves
   its project-owned Assets; `app/tools/compose_renderer.py` delegates to the

@@ -18,7 +18,7 @@ from app.core.errors import (
 )
 from app.models.asset import Asset
 from app.models.composition import ProjectComposition, ProjectCompositionRevision
-from app.models.enums import MediaType
+from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.schemas.composition import CompositionDocument
 from app.services.assets import ensure_asset_binary_available
 
@@ -79,6 +79,22 @@ async def _validate_asset_references(
             ensure_asset_binary_available(asset)
         except (NotFoundError, ValidationError) as exc:
             raise ValidationError(_INVALID_ASSET_REFERENCE) from exc
+
+    # Clip in/out points: like video.trim admission, check against already-probed
+    # metadata when available; otherwise the render checks the source itself.
+    from app.tools import ffmpeg
+
+    for track in document.tracks:
+        for clip in track.clips:
+            asset = assets[clip.asset_id]
+            if (
+                clip.has_timing
+                and asset.technical_metadata_status == TechnicalMetadataStatus.available.value
+            ):
+                ffmpeg.resolve_trim_window(
+                    clip.source_start or 0.0, clip.source_end,
+                    duration=asset.duration_seconds, frame_rate=asset.frame_rate,
+                )
 
 
 def _revision_read(

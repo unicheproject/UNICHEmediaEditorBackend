@@ -15,7 +15,12 @@ from pathlib import Path
 from app.capabilities.media_options import VIDEO_QUALITY_CRF, VIDEO_TRANSCODE_OPTIONS
 from app.core.errors import ToolError, ValidationError
 from app.models.enums import MediaType
-from app.services.media_metadata import MetadataProbeError, probe_media, probe_video_timeline
+from app.services.media_metadata import (
+    MetadataProbeError,
+    probe_first_video_frame,
+    probe_media,
+    probe_video_timeline,
+)
 from app.tools import progress, runner
 from app.tools.compose_policy import (
     DEFAULT_COMPOSE_RENDER_POLICY,
@@ -1079,15 +1084,34 @@ async def _normalize_segment(
     width: int,
     height: int,
     policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
+    window: tuple[float, float | None] | None = None,
 ) -> None:
-    """Normalize first video/soundtrack; synthesize silence only if absent."""
+    """Normalize first video/soundtrack; synthesize silence only if absent.
+
+    A ``window`` (source in/out points) trims the clip in this same encode,
+    with video.trim's rules; untimed clips keep the original command.
+    """
     duration = await _compose_video_duration(src)
+    seek: list[str] = []
+    if window is not None:
+        start, end = window
+        try:
+            frame_rate = (await probe_media(Path(src), MediaType.video)).frame_rate
+        except MetadataProbeError:
+            frame_rate = None
+        # The video stream's own duration, not the container's, bounds the clip.
+        effective_end = resolve_trim_window(
+            start, end, duration=duration, frame_rate=frame_rate
+        )
+        duration = (effective_end if effective_end is not None else duration) - start
+        if start > 0:
+            seek = ["-ss", str(start)]
     has_audio = await _has_audio(src)
     audio_input = [] if has_audio else _ANULL
     audio_stream = "0:a:0" if has_audio else "1:a:0"
     await runner.run(
         [
-            *_BASE, "-i", src, *audio_input,
+            *_BASE, *seek, "-i", src, *audio_input,
             "-map", "0:v:0", "-map", audio_stream,
             "-vf", _scale_pad(width, height),
             # Pad short soundtracks and retain timestamp gaps. Bound both real
@@ -1098,6 +1122,11 @@ async def _normalize_segment(
             *_compose_encode_args(policy), "-t", str(duration), dst,
         ]
     )
+    if window is not None:
+        try:
+            await probe_first_video_frame(Path(dst))
+        except MetadataProbeError as exc:
+            raise ToolError("Composition clip range does not contain video frames") from exc
 
 
 async def _compose_video_duration(src: str) -> float:
@@ -1140,6 +1169,7 @@ async def compose(
     music_volume: float = 0.3,
     subtitle_path: str | None = None,
     policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
+    clip_windows: list[tuple[float, float | None]] | None = None,
 ) -> None:
     """Timeline render with one trusted encoding policy for every media stage."""
     if Path(dst).suffix.lower() != policy.suffix:
@@ -1148,10 +1178,17 @@ async def compose(
         )
 
     # 1. normalize each segment to identical codec/params
+    if clip_windows is not None and len(clip_windows) != len(segments):
+        raise ToolError("Composition clip timing does not match its clips")
     normalized: list[Path] = []
     for i, seg in enumerate(segments):
         out = work_dir / f"_norm_{i:03d}{policy.suffix}"
-        await _normalize_segment(seg, str(out), width, height, policy)
+        if clip_windows is None:
+            await _normalize_segment(seg, str(out), width, height, policy)
+        else:
+            await _normalize_segment(
+                seg, str(out), width, height, policy, window=clip_windows[i]
+            )
         normalized.append(out)
 
     # 2. concat via the demuxer (copy; params already identical)
