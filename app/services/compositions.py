@@ -50,18 +50,21 @@ async def _validate_asset_references(
     session: AsyncSession, project_id: uuid.UUID, document: CompositionDocument
 ) -> None:
     expected: dict[uuid.UUID, MediaType] = {}
-    for track in document.tracks:
-        for clip in track.clips:
-            media_type = (
-                MediaType.image if isinstance(clip, CompositionImageClip) else MediaType.video
-            )
-            if expected.setdefault(clip.asset_id, media_type) != media_type:
-                raise ValidationError(_INVALID_ASSET_REFERENCE)
+    for clip in document.video_track.clips:
+        media_type = (
+            MediaType.image if isinstance(clip, CompositionImageClip) else MediaType.video
+        )
+        if expected.setdefault(clip.asset_id, media_type) != media_type:
+            raise ValidationError(_INVALID_ASSET_REFERENCE)
     if document.audio_bed is not None:
         aid = document.audio_bed.asset_id
         if aid in expected:
             raise ValidationError("An Asset cannot be used as both a video clip and audio bed")
         expected[aid] = MediaType.audio
+    audio_track = document.audio_track
+    for audio_clip in audio_track.clips if audio_track is not None else ():
+        if expected.setdefault(audio_clip.asset_id, MediaType.audio) != MediaType.audio:
+            raise ValidationError(_INVALID_ASSET_REFERENCE)
 
     result = await session.scalars(
         select(Asset).where(Asset.id.in_(expected)).with_for_update()
@@ -89,18 +92,40 @@ async def _validate_asset_references(
     from app.tools import ffmpeg
 
     # Image clips: the same applies to the decoded-size limit.
-    for track in document.tracks:
-        for clip in track.clips:
-            asset = assets[clip.asset_id]
-            if asset.technical_metadata_status != TechnicalMetadataStatus.available.value:
-                continue
-            if isinstance(clip, CompositionImageClip):
+    # The video track's length is estimated only when every clip's length is
+    # known. Container durations can only overstate a video stream, so this
+    # estimate never rejects an audio clip that the render would accept.
+    visual_seconds: float | None = 0.0
+    for clip in document.video_track.clips:
+        asset = assets[clip.asset_id]
+        known = asset.technical_metadata_status == TechnicalMetadataStatus.available.value
+        if isinstance(clip, CompositionImageClip):
+            if known:
                 ffmpeg.check_still_image_pixels(asset.width, asset.height)
-            elif clip.has_timing:
-                ffmpeg.resolve_trim_window(
-                    clip.source_start or 0.0, clip.source_end,
-                    duration=asset.duration_seconds, frame_rate=asset.frame_rate,
-                )
+            if visual_seconds is not None:
+                visual_seconds += clip.duration
+            continue
+        if known and clip.has_timing:
+            ffmpeg.resolve_trim_window(
+                clip.source_start or 0.0, clip.source_end,
+                duration=asset.duration_seconds, frame_rate=asset.frame_rate,
+            )
+        if not known or not asset.duration_seconds or visual_seconds is None:
+            visual_seconds = None
+            continue
+        end = asset.duration_seconds
+        if clip.source_end is not None:
+            end = min(end, clip.source_end)
+        visual_seconds += end - (clip.source_start or 0.0)
+
+    for audio_clip in audio_track.clips if audio_track is not None else ():
+        asset = assets[audio_clip.asset_id]
+        if asset.technical_metadata_status == TechnicalMetadataStatus.available.value:
+            ffmpeg.resolve_trim_window(
+                audio_clip.source_start or 0.0, audio_clip.source_end,
+                duration=asset.duration_seconds, frame_rate=None, media="audio",
+            )
+        ffmpeg.check_audio_clip_start(audio_clip.timeline_start, visual_seconds)
 
 
 def _revision_read(

@@ -449,6 +449,10 @@ async def _build_job_context(
         contributing_ids = [item.asset_id for item in execution.snapshot.ordered_video_sources]
         if execution.snapshot.audio_source is not None:
             contributing_ids.append(execution.snapshot.audio_source.asset_id)
+        # Positioned audio clips (e.g. TTS narration) contribute to provenance too.
+        contributing_ids.extend(
+            item.asset_id for item in execution.snapshot.ordered_audio_clip_sources
+        )
         return JobContext(
             capability_id=job.capability_id,
             params=request_input,

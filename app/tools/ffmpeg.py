@@ -1208,6 +1208,98 @@ async def _normalize_still(
         raise ToolError("Composition image clip does not contain video frames") from exc
 
 
+@dataclasses.dataclass(frozen=True)
+class PositionedAudio:
+    """An audio-track clip: source path and window, output position and gain."""
+
+    path: str
+    timeline_start: float
+    source_start: float = 0.0
+    source_end: float | None = None
+    volume: float = 1.0
+
+
+def check_audio_clip_start(timeline_start: float, visual_seconds: float | None) -> None:
+    """An audio clip must start before the end of the video track, when known."""
+    if visual_seconds is not None and timeline_start >= visual_seconds:
+        raise ValidationError(
+            f"Audio clip must start before the end of the video track "
+            f"({visual_seconds:.3f} s); it starts at {timeline_start:.3f} s"
+        )
+
+
+_MIX_RATE = 44100  # the sample rate _normalize_segment gives every soundtrack
+
+
+async def _mix_timeline_audio(
+    media: str,
+    dst: str,
+    clips: list[PositionedAudio],
+    *,
+    bed_path: str | None,
+    bed_mode: str,
+    bed_volume: float,
+    policy: ComposeRenderPolicy,
+) -> None:
+    """Mix positioned audio clips over the soundtrack (and bed) in one audio pass.
+
+    The programme is built exactly as audio_mix builds it for mix/duck. For
+    replace, the bed is padded with silence to the video's length instead of
+    shortening the output, so clips stay audible and the video keeps its length.
+    Clips are trimmed, resampled to 44.1 kHz stereo, scaled and delayed
+    (sample-exact), then summed onto the programme without normalisation, so
+    the programme's level is unchanged where no clip plays. Audio is trimmed to
+    the video's length; the video stream is copied.
+    """
+    visual = await _compose_video_duration(media)
+    for clip in clips:
+        check_audio_clip_start(clip.timeline_start, visual)
+    args = [*_BASE, "-i", media]
+    graph: list[str] = []
+    programme = "0:a"
+    first_clip_input = 1
+    if bed_path is not None:
+        args += ["-i", bed_path]
+        first_clip_input = 2
+        if bed_mode == "replace":
+            # Unscaled, as composition replacement beds always were.
+            graph.append(
+                f"[1:a]aresample={_MIX_RATE},aformat=channel_layouts=stereo,"
+                f"apad=whole_dur={visual},atrim=duration={visual}[prog]"
+            )
+        else:
+            vol = bed_volume if bed_mode != "duck" else min(bed_volume, 0.2)
+            graph.append(f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[prog]")
+        programme = "prog"
+    labels = []
+    for index, clip in enumerate(clips):
+        source_seconds = await probe_audio_duration(clip.path)
+        if not source_seconds or source_seconds <= 0:
+            raise ToolError("Composition audio clip cannot be read")
+        end = resolve_trim_window(
+            clip.source_start, clip.source_end,
+            duration=source_seconds, frame_rate=None, media="audio",
+        )
+        window = f"start={clip.source_start}" + (f":end={end}" if end is not None else "")
+        delay = round(clip.timeline_start * _MIX_RATE)
+        args += ["-i", clip.path]
+        graph.append(
+            f"[{first_clip_input + index}:a]atrim={window},asetpts=PTS-STARTPTS,"
+            f"aresample={_MIX_RATE},aformat=channel_layouts=stereo,"
+            f"volume={clip.volume},adelay=delays={delay}S:all=1[c{index}]"
+        )
+        labels.append(f"[c{index}]")
+    graph.append(
+        f"[{programme}]{''.join(labels)}amix=inputs={len(labels) + 1}:duration=first:"
+        f"normalize=0,atrim=duration={visual}[a]"
+    )
+    await runner.run(
+        [*args, "-filter_complex", ";".join(graph),
+         "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+         *_compose_audio_encode_args(policy), dst]
+    )
+
+
 async def _compose_video_duration(src: str) -> float:
     """Use the first video's duration (Matroska stores it as a stream tag)."""
     out = await runner.run_stdout(
@@ -1250,6 +1342,7 @@ async def compose(
     policy: ComposeRenderPolicy = DEFAULT_COMPOSE_RENDER_POLICY,
     clip_windows: list[tuple[float, float | None]] | None = None,
     still_durations: list[float | None] | None = None,
+    audio_clips: list[PositionedAudio] | None = None,
 ) -> None:
     """Timeline render with one trusted encoding policy for every media stage."""
     if Path(dst).suffix.lower() != policy.suffix:
@@ -1285,8 +1378,17 @@ async def compose(
     )
 
     current = concat
-    # 3. optional audio bed over the whole timeline
-    if audio_path:
+    # 3. optional audio bed over the whole timeline, plus positioned audio
+    # clips when the composition has an audio track (one audio-only pass).
+    if audio_clips is not None:
+        with_audio = work_dir / f"_audio{policy.suffix}"
+        await _mix_timeline_audio(
+            str(current), str(with_audio), audio_clips,
+            bed_path=audio_path, bed_mode=audio_mode, bed_volume=music_volume,
+            policy=policy,
+        )
+        current = with_audio
+    elif audio_path:
         with_audio = work_dir / f"_audio{policy.suffix}"
         await audio_mix(str(current), audio_path, str(with_audio),
                         music_volume=music_volume, mode=audio_mode,

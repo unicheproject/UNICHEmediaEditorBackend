@@ -22,6 +22,8 @@ class ComposeRenderSources:
     video_paths: tuple[str, ...]
     audio_path: str | None = None
     subtitle_path: str | None = None
+    # One path per audio-track clip, in the request's `audio_clips` order.
+    audio_clip_paths: tuple[str, ...] = ()
 
 
 async def render_compose(
@@ -50,6 +52,17 @@ async def render_compose(
             raise ValidationError("Compose render still durations do not match its clips")
         # Passed only when set: compositions without images call FFmpeg as before.
         timing["still_durations"] = list(request.still_durations)
+    clips = request.audio_clips or ()
+    if len(clips) != len(sources.audio_clip_paths):
+        raise ValidationError("Compose render audio clips do not match their sources")
+    if request.audio_clips is not None:
+        # Passed only when set: compositions without an audio track are unchanged.
+        timing["audio_clips"] = [
+            ffmpeg.PositionedAudio(
+                path, clip.timeline_start, clip.source_start, clip.source_end, clip.volume
+            )
+            for path, clip in zip(sources.audio_clip_paths, clips, strict=True)
+        ]
     await ffmpeg.compose(
         list(sources.video_paths),
         dst,

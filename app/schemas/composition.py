@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 from app.capabilities.compose_contract import (
+    AUDIO_TRACK_MAX_CLIPS,
     COMPOSE_DEFAULT_AUDIO_MODE,
     COMPOSE_DEFAULT_MUSIC_VOLUME,
     IMAGE_CLIP_MAX_DURATION_SECONDS,
@@ -113,6 +114,52 @@ class CompositionVideoTrack(_StrictDocumentModel):
     clips: Annotated[list[CompositionTrackClip], Field(min_length=1)]
 
 
+class CompositionAudioClip(_StrictDocumentModel):
+    """Audio placed at `timeline_start` on the output; mixed over the soundtrack."""
+
+    id: uuid.UUID = Field(strict=False)
+    asset_id: uuid.UUID = Field(strict=False)
+    timeline_start: float = Field(
+        ge=0, allow_inf_nan=False,
+        description="Seconds on the output timeline where the clip starts; must be "
+                    "before the end of the video track.",
+    )
+    # In/out points in the source audio, as for video clips (video.trim's rules).
+    source_start: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, exclude_if=_is_none,
+        description="Optional in point: seconds into the source audio (default 0).",
+    )
+    source_end: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, exclude_if=_is_none,
+        description="Optional out point: seconds into the source audio "
+                    "(default: the end of the source).",
+    )
+    volume: float = Field(
+        default=1.0, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Linear gain in the inclusive range 0..1 (default 1).",
+    )
+
+    @model_validator(mode="after")
+    def require_ordered_timing(self) -> CompositionAudioClip:
+        if self.source_end is not None and self.source_end <= (self.source_start or 0):
+            raise ValueError("clip source_end must be after its source_start")
+        return self
+
+
+class CompositionAudioTrack(_StrictDocumentModel):
+    id: uuid.UUID = Field(strict=False)
+    kind: Literal["audio"]
+    clips: Annotated[
+        list[CompositionAudioClip],
+        Field(min_length=1, max_length=AUDIO_TRACK_MAX_CLIPS),
+    ]
+
+
+CompositionTrack = Annotated[
+    CompositionVideoTrack | CompositionAudioTrack, Field(discriminator="kind")
+]
+
+
 class CompositionAudioBed(_StrictDocumentModel):
     asset_id: uuid.UUID = Field(strict=False)
     mode: ComposeAudioMode = Field(default=COMPOSE_DEFAULT_AUDIO_MODE, strict=False)
@@ -127,8 +174,19 @@ class CompositionAudioBed(_StrictDocumentModel):
 class CompositionDocument(_StrictDocumentModel):
     schema_version: Literal[1]
     canvas: CompositionCanvas
-    tracks: Annotated[list[CompositionVideoTrack], Field(min_length=1, max_length=1)]
+    # One video track, optionally followed by one audio track.
+    tracks: Annotated[list[CompositionTrack], Field(min_length=1, max_length=2)]
     audio_bed: CompositionAudioBed | None
+
+    @model_validator(mode="after")
+    def require_video_then_audio_track(self) -> CompositionDocument:
+        kinds = [track.kind for track in self.tracks]
+        if kinds not in (["video"], ["video", "audio"]):
+            raise ValueError("tracks must be one video track, optionally followed by "
+                             "one audio track")
+        if len({track.id for track in self.tracks}) != len(self.tracks):
+            raise ValueError("track IDs must be unique within the composition")
+        return self
 
     @model_validator(mode="after")
     def require_unique_clip_ids(self) -> CompositionDocument:
@@ -136,6 +194,17 @@ class CompositionDocument(_StrictDocumentModel):
         if len(clip_ids) != len(set(clip_ids)):
             raise ValueError("clip IDs must be unique within the composition")
         return self
+
+    @property
+    def video_track(self) -> CompositionVideoTrack:
+        track = self.tracks[0]
+        assert isinstance(track, CompositionVideoTrack)  # enforced above
+        return track
+
+    @property
+    def audio_track(self) -> CompositionAudioTrack | None:
+        track = self.tracks[1] if len(self.tracks) > 1 else None
+        return track if isinstance(track, CompositionAudioTrack) else None
 
 
 class CompositionRevisionRead(BaseModel):

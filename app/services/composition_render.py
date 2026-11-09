@@ -27,6 +27,8 @@ class ResolvedCompositionRender:
     sources: ComposeRenderSources
     ordered_video_checksums: tuple[str, ...]
     audio_checksum: str | None
+    # Audio-track clips' checksums in document order; empty without an audio track.
+    ordered_audio_clip_checksums: tuple[str, ...] = ()
 
 
 async def resolve_composition_render(
@@ -65,6 +67,10 @@ async def resolve_composition_render(
         if audio_id in expected:
             raise ValidationError(_UNAVAILABLE, code="composition_asset_unavailable")
         expected[audio_id] = MediaType.audio
+    audio_clip_ids = tuple(clip.asset_id for clip in compiled.request.audio_clips or ())
+    for asset_id in audio_clip_ids:
+        if expected.setdefault(asset_id, MediaType.audio) != MediaType.audio:
+            raise ValidationError(_UNAVAILABLE, code="composition_asset_unavailable")
 
     result_assets = await session.scalars(
         select(Asset).where(Asset.id.in_(expected)).with_for_update()
@@ -101,9 +107,11 @@ async def resolve_composition_render(
         sources=ComposeRenderSources(
             video_paths=tuple(paths[asset_id] for asset_id in compiled.request.video_asset_ids),
             audio_path=audio_path,
+            audio_clip_paths=tuple(paths[asset_id] for asset_id in audio_clip_ids),
         ),
         ordered_video_checksums=tuple(
             checksums[asset_id] for asset_id in compiled.request.video_asset_ids
         ),
         audio_checksum=checksums[audio_id] if audio_id is not None else None,
+        ordered_audio_clip_checksums=tuple(checksums[asset_id] for asset_id in audio_clip_ids),
     )

@@ -478,6 +478,15 @@ Key boundaries:
   repeats frames), with silent audio, the render policy's codecs, orientation
   from ImageMagick's header probe (FFmpeg ignores, e.g., the TIFF tag) and
   transparency composited onto black.
+  An optional second track `{"kind": "audio", "clips": [...]}` (1–64 clips)
+  places audio Assets at `timeline_start` seconds on the output, with optional
+  `source_start`/`source_end` and `volume` 0..1 (default 1). One audio-only
+  pass mixes them over the programme: the bed's mix/duck rules are unchanged.
+  For replace, the bed is padded to the video's length rather than shortening
+  it. Clips are summed (overlaps allowed, no normalisation), trimmed at the
+  video's end, and a clip starting at or after the end fails the render (or
+  the save, when every length is known). Without an audio track nothing
+  changes. Export snapshots add `ordered_audio_clip_sources` only when present.
   `app/composition/render.py` compiles one revision into a typed semantic
   render request; `app/services/composition_render.py` revalidates and resolves
   its project-owned Assets; `app/tools/compose_renderer.py` delegates to the

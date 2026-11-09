@@ -37,6 +37,23 @@ class AssetContentIdentity(BaseModel):
     checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+def _is_empty(value: tuple[Any, ...]) -> bool:
+    return not value
+
+
+def _audio_clip_identities(
+    resolved: ResolvedCompositionRender,
+) -> tuple[AssetContentIdentity, ...]:
+    return tuple(
+        AssetContentIdentity(asset_id=clip.asset_id, checksum_sha256=checksum)
+        for clip, checksum in zip(
+            resolved.compiled.request.audio_clips or (),
+            resolved.ordered_audio_clip_checksums,
+            strict=True,
+        )
+    )
+
+
 class ExportExecutionSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -50,6 +67,11 @@ class ExportExecutionSnapshot(BaseModel):
     ordered_video_sources: tuple[AssetContentIdentity, ...]
     audio_source: AssetContentIdentity | None
     effective_settings: EffectiveExportSettings
+    # Audio-track clips in document order. Absent (and omitted) without an audio
+    # track, so snapshots of other compositions keep their exact form.
+    ordered_audio_clip_sources: tuple[AssetContentIdentity, ...] = Field(
+        default=(), exclude_if=_is_empty
+    )
 
 
 @dataclass(frozen=True)
@@ -122,6 +144,7 @@ async def create_export_execution_snapshot(
                 else None
             ),
             effective_settings=settings,
+            ordered_audio_clip_sources=_audio_clip_identities(resolved),
         )
     except (KeyError, ValueError, TypeError, PydanticValidationError) as exc:
         raise ValidationError(f"Invalid project.export request: {exc}") from exc
@@ -183,6 +206,7 @@ async def resolve_project_export_execution(
     if (
         current_video_sources != snapshot.ordered_video_sources
         or current_audio_source != snapshot.audio_source
+        or _audio_clip_identities(resolved) != snapshot.ordered_audio_clip_sources
     ):
         raise ValidationError("Composition source content does not match the export snapshot")
 

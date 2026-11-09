@@ -32,6 +32,17 @@ class ClipWindow:
 
 
 @dataclass(frozen=True)
+class AudioClipSpec:
+    """One positioned audio clip: source window, output position and gain."""
+
+    asset_id: uuid.UUID
+    timeline_start: float
+    source_start: float = 0.0
+    source_end: float | None = None  # None keeps the rest of the source
+    volume: float = 1.0
+
+
+@dataclass(frozen=True)
 class ComposeRenderRequest:
     """Semantic inputs to the existing compose renderer; contains no paths."""
 
@@ -50,6 +61,9 @@ class ComposeRenderRequest:
     # compositions render exactly as before. `video_asset_ids` then lists every
     # visual clip's Asset in order, images included.
     still_durations: tuple[float | None, ...] | None = None
+    # Positioned audio-track clips, in document order; None without an audio
+    # track, so compositions without one render exactly as before.
+    audio_clips: tuple[AudioClipSpec, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,13 +134,27 @@ def compile_composition_revision(
     """Compile one immutable persisted revision without consulting its head."""
     try:
         document = CompositionDocument.model_validate(revision.document)
+        # Visual clips only: audio-track clips are compiled into `audio_clips`.
+        clips = list(document.video_track.clips)
         occurrences = tuple(
-            ClipOccurrence(clip_id=clip.id, asset_id=clip.asset_id)
-            for track in document.tracks
-            for clip in track.clips
+            ClipOccurrence(clip_id=clip.id, asset_id=clip.asset_id) for clip in clips
         )
         video_ids = tuple(item.asset_id for item in occurrences)
-        clips = [clip for track in document.tracks for clip in track.clips]
+        audio_track = document.audio_track
+        audio_clips = (
+            tuple(
+                AudioClipSpec(
+                    asset_id=clip.asset_id,
+                    timeline_start=clip.timeline_start,
+                    source_start=clip.source_start or 0.0,
+                    source_end=clip.source_end,
+                    volume=clip.volume,
+                )
+                for clip in audio_track.clips
+            )
+            if audio_track is not None
+            else None
+        )
         video_clips = [clip for clip in clips if isinstance(clip, CompositionClip)]
         clip_windows = (
             tuple(
@@ -165,6 +193,7 @@ def compile_composition_revision(
             ),
             clip_windows=clip_windows,
             still_durations=still_durations,
+            audio_clips=audio_clips,
         )
     except (PydanticValidationError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ValidationError(
