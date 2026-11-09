@@ -1311,6 +1311,20 @@ CAPABILITIES: list[CapabilityDef] = [
         description="Transcribe speech in an audio asset to text.",
         media=[MediaType.audio, MediaType.video],
         cost_class=CostClass.hosted_ai,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": _string(
+                    "Input asset", "Audio or video whose speech is transcribed.", format="uuid"
+                ),
+                "language": _string(
+                    "Spoken language",
+                    "Optional ISO-639-1 code of the spoken language (e.g. en, el); "
+                    "omit to detect it automatically.",
+                    pattern="^[a-z]{2}$",
+                ),
+            },
+        },
         output_schema={
             "type": "object",
             "properties": {"text": {"type": "string"}, "language": {"type": "string"}},

@@ -250,6 +250,8 @@ curl -N $BASE/jobs/$JOB_ID/events
 curl -s -X POST $BASE/jobs \
   -H 'Content-Type: application/json' \
   -d "{\"capability_id\":\"audio.transcribe\",\"asset_id\":\"<AUDIO_ASSET_ID>\"}"
+# Optional spoken-language hint (ISO-639-1, as for subtitle.autogenerate); omit to auto-detect
+#   ... ,\"input\":{\"language\":\"el\"}
 ```
 
 ## API surface

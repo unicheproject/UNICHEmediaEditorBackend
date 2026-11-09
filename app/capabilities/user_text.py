@@ -454,6 +454,8 @@ USER_TEXT: dict[str, UserText] = {
         ),
         "params": {
             "asset_id": "The recording or video whose speech should be written out.",
+            "language": "The language spoken, as a two-letter code such as en or el. "
+                        "Leave empty to detect it automatically.",
         },
     },
     "subtitle.autogenerate": {
