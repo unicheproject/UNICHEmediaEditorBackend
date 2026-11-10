@@ -179,12 +179,18 @@ async def test_lossless_invocations_never_select_a_lossy_encoder(
         # Duration probes select "v:0" (compositions) or "V:0" (replace beds).
         if "v:0" in args or "V:0" in args:
             return '{"streams":[{"duration":"1"}]}'
+        if "-count_packets" in args:  # Task #17C subtitle check
+            return '{"streams":[{"codec_type":"subtitle","nb_read_packets":"1"}]}'
         return "0\n"
 
     monkeypatch.setattr(ffmpeg.runner, "run", fake_run)
     monkeypatch.setattr(ffmpeg.runner, "run_stdout", fake_run_stdout)
     bed = "bed.wav" if mode is not None else None
-    subtitle_path = "captions.srt" if subtitle else None
+    subtitle_path = None
+    if subtitle:
+        captions = tmp_path / "captions.srt"
+        captions.write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")
+        subtitle_path = str(captions)
     suffix = LOSSLESS_COMPOSE_RENDER_POLICY.suffix
 
     await ffmpeg.compose(

@@ -70,7 +70,9 @@ REUSE_VERSIONS: dict[str, str] = {
     "video.lowerthird": "1",
     # 2: burn mode takes optional styling fields; an older Job could have
     # carried such keys and ignored them, so its output must not be reused.
-    "video.subtitle.embed": "2",
+    # 3: subtitle content is validated first; older versions could turn
+    # invalid files into misleadingly successful output, never reused.
+    "video.subtitle.embed": "3",
 }
 
 

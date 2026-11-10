@@ -559,6 +559,33 @@ Key boundaries:
   20}`. Saved compositions and `project.export` do not render subtitles; burn
   them into a clip, or into the exported video. A burn always produces
   MP4/H.264, also after an Archival (FFV1) export.
+- Subtitle files are checked when a Job uses them (`video.subtitle.embed` in
+  both modes, and `video.compose` before any rendering), so Assets uploaded
+  earlier are covered too; uploads themselves are unchanged
+  (`app/tools/subtitles.py`). A file must be UTF-8 text (BOM allowed), at
+  most 10 MiB, and SRT or WebVTT by its content, whatever its extension: SRT
+  starts with a cue number and a timing line; WebVTT starts with `WEBVTT`.
+  It needs at least one cue with text whose end is after its start;
+  zero-length cues are allowed but do not count, and cues after the end of the
+  video are allowed. Rejected: empty, binary or non-UTF-8 files (re-save
+  UTF-16 or Windows-1253 files as UTF-8), plain text, ASS/SSA, WebVTT `STYLE`
+  and `REGION` blocks (FFmpeg 5.1 drops the cues after them), invalid
+  timestamps, cues that end before they start, and cues without text. In
+  WebVTT, every block after the header must be a cue or a `NOTE`; any other
+  block is rejected wherever it is, and a cue must not sit inside the header
+  block. A `region:` cue setting is fine. The `-->` arrow may have no
+  spaces around it, but fractions need three digits (`00:00:01.500`), because
+  FFmpeg 5.1 reads `.5` as 5 ms. In SRT, a timing pair with a broken arrow
+  (`->`, `–>`, a missing arrow) where a timing line belongs (the first line
+  of a block, or the line after a cue number) is rejected: FFmpeg would show
+  it as text of the previous cue. Times inside cue text are fine. SRT keeps
+  1–3 millisecond digits, read as whole milliseconds as FFmpeg does (`,5` is
+  5 ms). Parsing is linear in the file size. FFprobe
+  then reads the file with that format forced (30 s limit) and must find at
+  least one cue; soft mode also forces it. FFmpeg never guesses the format of
+  an unchecked file: binary data could be taken for MPEG-TS and keep libass
+  busy until the 600 s runner timeout. An invalid file fails the Job with a
+  plain message and no Asset (not a 422 at submission).
 - Export presets are defined once in `app/composition/export_presets.py`.
   Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
   Social requires `square` (1080×1080) or `portrait` (1080×1920) and

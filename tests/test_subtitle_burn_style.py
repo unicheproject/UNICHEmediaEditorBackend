@@ -155,29 +155,37 @@ def test_force_style_mapping_and_colour_order() -> None:
         ffmpeg.subtitle_force_style({"text_colour": "#FF0000'"})
 
 
-async def test_unstyled_commands_are_unchanged(monkeypatch) -> None:
+async def test_unstyled_commands_are_unchanged(monkeypatch, tmp_path: Path) -> None:
     commands: list[list[str]] = []
+    subs = str(_srt(tmp_path / "a.srt"))
 
     async def capture(args: list[str], **_kwargs) -> str:
         commands.append(args)
         return ""
 
+    async def probe(_args: list[str], **_kwargs) -> str:
+        # The Task #17C subtitle check (forced-format FFprobe packet count).
+        return '{"streams":[{"codec_type":"subtitle","nb_read_packets":"1"}]}'
+
     monkeypatch.setattr(ffmpeg.runner, "run", capture)
-    await ffmpeg.subtitle_embed("/v.mp4", "/s/a.srt", "/o.mp4", mode="burn")
-    await ffmpeg.subtitle_embed("/v.mp4", "/s/a.srt", "/o.mp4", mode="burn", style={})
-    await ffmpeg.subtitle_embed("/v.mp4", "/s/a.srt", "/o.mp4", mode="soft")
-    burn = [*ffmpeg._BASE, "-i", "/v.mp4", "-vf", "subtitles='/s/a.srt'",
+    monkeypatch.setattr(ffmpeg.runner, "run_stdout", probe)
+    await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="burn")
+    await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="burn", style={})
+    await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="soft")
+    burn = [*ffmpeg._BASE, "-i", "/v.mp4", "-vf", f"subtitles='{ffmpeg._escape_subs(subs)}'",
             "-pix_fmt", "yuv420p", "/o.mp4"]
     assert commands[0] == burn and commands[1] == burn
-    assert commands[2] == [*ffmpeg._BASE, "-i", "/v.mp4", "-i", "/s/a.srt", "-c", "copy",
-                           "-c:s", "mov_text", "/o.mp4"]
+    # Soft mode now forces the validated demuxer (Task #17C); otherwise unchanged.
+    assert commands[2] == [*ffmpeg._BASE, "-i", "/v.mp4", "-f", "srt", "-i", subs,
+                           "-c", "copy", "-c:s", "mov_text", "/o.mp4"]
     with pytest.raises(ValidationError, match="burn mode"):
-        await ffmpeg.subtitle_embed("/v.mp4", "/s/a.srt", "/o.mp4", mode="soft",
+        await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="soft",
                                     style={"font": "dejavu-sans"})
 
 
 def test_reuse_version_is_bumped() -> None:
-    assert reuse.REUSE_VERSIONS["video.subtitle.embed"] == "2"
+    # 3 since Task #17C: subtitle content is validated before rendering.
+    assert reuse.REUSE_VERSIONS["video.subtitle.embed"] == "3"
 
 
 # --- visible rendering (tiny fixtures) -----------------------------------------------

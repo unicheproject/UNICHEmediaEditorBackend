@@ -50,6 +50,7 @@ from app.tools.export_policy import (
     FitPolicy,
 )
 from app.tools.geometry import check_crop_rectangle, is_quarter_turn
+from app.tools.subtitles import SubtitleFormat, validate_subtitle_file
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -1112,9 +1113,16 @@ async def subtitle_embed(
     *,
     compose_policy: ComposeRenderPolicy | None = None,
     style: Mapping[str, Any] | None = None,
+    subtitle_format: SubtitleFormat | None = None,
 ) -> None:
+    """Soft-mux or burn a subtitle file; its content is validated first.
+
+    Callers that already validated the file (compose) pass its format.
+    """
     if style and mode != "burn":
         raise ValidationError("Subtitle styling requires burn mode")
+    if subtitle_format is None:
+        subtitle_format = await validate_subtitle_file(subtitle)
     if mode == "burn":
         args = [*_BASE, "-i", video, "-vf", subtitle_burn_filter(subtitle, style)]
         if compose_policy is None:
@@ -1126,7 +1134,8 @@ async def subtitle_embed(
         await runner.run(args)
     else:  # soft mux
         await runner.run(
-            [*_BASE, "-i", video, "-i", subtitle, "-c", "copy", "-c:s", "mov_text", dst]
+            [*_BASE, "-i", video, "-f", subtitle_format.value, "-i", subtitle,
+             "-c", "copy", "-c:s", "mov_text", dst]
         )
 
 
@@ -1470,6 +1479,9 @@ async def compose(
             f"Compose output suffix must be '{policy.suffix}' for this render policy"
         )
 
+    # 0. reject an unusable subtitle file before any expensive rendering
+    subtitle_format = await validate_subtitle_file(subtitle_path) if subtitle_path else None
+
     # 1. normalize each segment to identical codec/params
     if clip_windows is not None and len(clip_windows) != len(segments):
         raise ToolError("Composition clip timing does not match its clips")
@@ -1522,7 +1534,7 @@ async def compose(
         burned = work_dir / f"_subs{policy.suffix}"
         await subtitle_embed(
             str(current), subtitle_path, str(burned), mode="burn",
-            compose_policy=policy,
+            compose_policy=policy, subtitle_format=subtitle_format,
         )
         current = burned
 

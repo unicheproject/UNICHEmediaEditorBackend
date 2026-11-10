@@ -793,5 +793,5 @@ def test_reuse_versions_change_only_where_output_semantics_changed() -> None:
         "audio.concat": "1", "audio.gain": "2", "audio.normalize": "2",
         "audio.fade": "2", "audio.transcode": "1", "audio.denoise": "2",
         "video.audio.extract": "1", "audio.mix": "2", "video.lowerthird": "1",
-        "video.subtitle.embed": "2",
+        "video.subtitle.embed": "3",
     }
