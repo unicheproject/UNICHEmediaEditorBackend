@@ -1102,18 +1102,32 @@ async def audio_mix(
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
+    # mix/duck. `V` is real video only: an attached cover picture, if copied,
+    # ended the output after about 0.1 s, so it is never mapped.
+    if not has_audio and await _has_video(media):
+        # A video without sound keeps its full length: the music (at its mix or
+        # duck volume) is padded with silence, or trimmed, to the real video,
+        # instead of -shortest cutting the video where the music ends.
+        duration = await _compose_video_duration(media, stream="V:0")
+        await runner.run(
+            [*_BASE, "-i", media, "-i", music,
+             "-filter_complex", f"[1:a]volume={vol},{_fit_audio_to(duration)}[a]",
+             "-map", "0:V", "-map", "[a]", "-c:v", "copy",
+             *_compose_audio_encode_args(compose_policy), dst]
+        )
+        return
     if not has_audio:
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
              "-filter_complex", f"[1:a]volume={vol}[a]",
-             "-map", "0:v?", "-map", "[a]", "-c:v", "copy",
+             "-map", "0:V?", "-map", "[a]", "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
     filt = f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[a]"
     await runner.run(
         [*_BASE, "-i", media, "-i", music,
-         "-filter_complex", filt, "-map", "0:v?", "-map", "[a]",
+         "-filter_complex", filt, "-map", "0:V?", "-map", "[a]",
          "-c:v", "copy", *_compose_audio_encode_args(compose_policy), dst]
     )
 

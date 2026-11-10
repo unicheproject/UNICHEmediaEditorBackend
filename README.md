@@ -509,7 +509,11 @@ Key boundaries:
   replacement is the whole result, as before. Embedded cover art (an
   attached picture in an MP3/M4A, or in a video file) is not treated as
   video: it is neither measured nor copied, so a song with a cover gets the
-  full replacement and a video keeps all its real frames.
+  full replacement and a video keeps all its real frames. The same holds for
+  `mix` and `duck`: a cover is never copied (it used to end the result after
+  about 0.1 s), and a video without its own sound keeps its full length, with
+  the music (at its mix or duck volume) padded with silence or trimmed to the
+  video instead of cutting it.
   Lossless policy uses FLAC rather than a lossy audio intermediate; channel/rate
   normalization is still applied, not bit-identical source stream copying.
   Archival
