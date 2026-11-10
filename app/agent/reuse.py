@@ -63,7 +63,10 @@ REUSE_VERSIONS: dict[str, str] = {
     "audio.transcode": "1",
     "audio.denoise": "2",
     "video.audio.extract": "1",
-    "audio.mix": "1",
+    # 2: replace keeps the video's duration (Task #14) and mix/duck keep a silent
+    # video's duration (Task #15B); attached cover art is no longer treated as
+    # video. Outputs made before these fixes must not be reused as equivalent.
+    "audio.mix": "2",
     "video.lowerthird": "1",
     # 2: burn mode takes optional styling fields; an older Job could have
     # carried such keys and ignored them, so its output must not be reused.

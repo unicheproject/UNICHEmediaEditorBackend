@@ -676,3 +676,122 @@ def test_render_group_identity_includes_operation_order_and_compiler_version() -
     )
     assert key_one != key_two
     assert key_one != key_new_version
+
+
+async def test_audio_mix_outputs_from_reuse_version_1_are_not_reused(
+    client: AsyncClient, make_project, monkeypatch
+) -> None:
+    """Pre-#14/#15B audio.mix outputs (version 1) must miss; version 2 still hits."""
+    from app.agent import reuse
+
+    project_id = uuid.UUID(await make_project("audio.mix reuse version"))
+
+    async def upload(name: str, body: bytes, mime: str) -> uuid.UUID:
+        response = await client.post(
+            f"{API}/projects/{project_id}/assets", files={"file": (name, body, mime)},
+        )
+        assert response.status_code == 201, response.text
+        return uuid.UUID(response.json()["id"])
+
+    video_id = await upload("source.mp4", b"video-content", "video/mp4")
+    music_id = await upload("music.wav", b"music-content", "audio/wav")
+    old_output_id = await upload("old-mix.mp4", b"old-mix-output", "video/mp4")
+    new_output_id = await upload("new-mix.mp4", b"new-mix-output", "video/mp4")
+    params = {"music_asset_id": str(music_id), "mode": "replace"}
+
+    async with async_session_factory() as session:
+        current = await reuse.build_execution_identity(
+            session, project_id=project_id, capability_id="audio.mix",
+            asset_id=video_id, params=params,
+        )
+        with monkeypatch.context() as patch:
+            patch.setitem(reuse.REUSE_VERSIONS, "audio.mix", "1")
+            stale = await reuse.build_execution_identity(
+                session, project_id=project_id, capability_id="audio.mix",
+                asset_id=video_id, params=params,
+            )
+        assert reuse.REUSE_VERSIONS["audio.mix"] == "2"
+        assert current is not None and stale is not None and current != stale
+
+        for output_id in (old_output_id, new_output_id):
+            asset = await session.get(Asset, output_id)
+            assert asset is not None
+            asset.technical_metadata_status = TechnicalMetadataStatus.available.value
+        agent_session = AgentSession(project_id=project_id, asset_ids=[])
+        session.add(agent_session)
+        await session.flush()
+        plan = AgentPlan(
+            session_id=agent_session.id, status=AgentPlanStatus.failed,
+            steps=[], step_runs=[], result_asset_ids=[],
+        )
+        session.add(plan)
+        await session.flush()
+        source_attempt = AgentPlanAttempt(
+            plan_id=plan.id, attempt_number=1, status="failed", job_ids=[],
+            result_asset_ids=[], step_runs=[],
+        )
+        current_attempt = AgentPlanAttempt(
+            plan_id=plan.id, attempt_number=2, status="running", job_ids=[],
+            result_asset_ids=[], step_runs=[],
+        )
+        session.add_all([source_attempt, current_attempt])
+        await session.flush()
+
+        def mix_job(identity: str, output_id: uuid.UUID, finished: datetime) -> Job:
+            return Job(
+                project_id=project_id, capability_id="audio.mix",
+                status=JobStatus.succeeded, input={"asset_id": str(video_id), **params},
+                output={"outputs": [{
+                    "asset_id": str(output_id), "media_type": "video",
+                    "filename": "mix.mp4",
+                }]},
+                progress=100, finished_at=finished, agent_plan_id=plan.id,
+                agent_attempt_id=source_attempt.id, execution_identity=identity,
+            )
+
+        now = datetime.now(UTC)
+        stale_job = mix_job(stale, old_output_id, now)
+        session.add(stale_job)
+        await session.commit()
+        stale_job_id = stale_job.id
+
+        assert await reuse.find_reusable_output(
+            session, plan_id=plan.id, current_attempt=current_attempt,
+            project_id=project_id, identity=current,
+        ) is None
+
+        session.add(mix_job(current, new_output_id, now - timedelta(seconds=1)))
+        await session.commit()
+        found = await reuse.find_reusable_output(
+            session, plan_id=plan.id, current_attempt=current_attempt,
+            project_id=project_id, identity=current,
+        )
+        assert found is not None
+        assert found.asset.id == new_output_id
+        assert found.job.id != stale_job_id
+
+    # The version-1 Job and its Asset are untouched and still downloadable.
+    async with async_session_factory() as session:
+        old_job = await session.get(Job, stale_job_id)
+        assert old_job is not None and old_job.status == JobStatus.succeeded
+        assert old_job.execution_identity == stale
+        old_asset = await session.get(Asset, old_output_id)
+        assert old_asset is not None and old_asset.deleted_at is None
+    download = await client.get(f"{API}/assets/{old_output_id}/download")
+    assert download.status_code == 200
+    assert download.content == b"old-mix-output"
+
+
+def test_reuse_versions_change_only_where_output_semantics_changed() -> None:
+    from app.agent.reuse import REUSE_VERSIONS
+
+    assert REUSE_VERSIONS == {
+        "video.trim": "2", "video.concat": "1", "video.transcode": "3",
+        "video.mute": "1", "video.crop": "2", "video.resize": "2",
+        "video.thumbnail": "1", "image.resize": "2", "image.crop": "2",
+        "image.format": "2", "image.colour.adjust": "1", "audio.trim": "2",
+        "audio.concat": "1", "audio.gain": "2", "audio.normalize": "2",
+        "audio.fade": "2", "audio.transcode": "1", "audio.denoise": "2",
+        "video.audio.extract": "1", "audio.mix": "2", "video.lowerthird": "1",
+        "video.subtitle.embed": "2",
+    }
