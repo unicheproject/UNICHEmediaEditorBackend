@@ -257,6 +257,23 @@ async def probe_video_size(path: str) -> tuple[int, int]:
         return 0, 0
 
 
+async def _has_video(path: str) -> bool:
+    """True for a real video stream; attached pictures (cover art) do not count."""
+    out = await runner.run_stdout(
+        [
+            FFPROBE, "-v", "error", "-select_streams", "V",
+            "-show_entries", "stream=index", "-of", "csv=p=0", path,
+        ],
+        timeout=60,
+    )
+    return bool(out.strip())
+
+
+def _fit_audio_to(seconds: float) -> str:
+    """Filters that pad audio with silence, or trim it, to exactly `seconds`."""
+    return f"apad=whole_dur={seconds},atrim=duration={seconds}"
+
+
 async def _has_audio(path: str) -> bool:
     out = await runner.run_stdout(
         [
@@ -1056,15 +1073,32 @@ async def audio_mix(
 ) -> None:
     """Mix/duck/replace audio; callers explicitly choose replacement gain semantics."""
     vol = music_volume if mode != "duck" else min(music_volume, 0.2)
+    if mode == "replace" and await _has_video(media):
+        # The video sets the length: a shorter replacement is padded with
+        # silence and a longer one trimmed, instead of -shortest cutting the
+        # (stream-copied) video at the end of the replacement audio.
+        # `V` is real video only: cover art is neither measured nor copied.
+        duration = await _compose_video_duration(media, stream="V:0")
+        gain = f"volume={vol}," if apply_replace_gain else ""
+        await runner.run(
+            [*_BASE, "-i", media, "-i", music,
+             "-filter_complex", f"[1:a]{gain}{_fit_audio_to(duration)}[a]",
+             "-map", "0:V", "-map", "[a]", "-c:v", "copy",
+             *_compose_audio_encode_args(compose_policy), dst]
+        )
+        return
     has_audio = await _has_audio(media)
     if mode == "replace":
+        # Audio-only media: the replacement is the whole result, as before.
+        # `0:V?` keeps embedded cover art out: as a one-frame stream it used to
+        # end the output almost at once under -shortest.
         replacement = (
             ["-filter_complex", f"[1:a]volume={vol}[a]", "-map", "[a]"]
             if apply_replace_gain else ["-map", "1:a"]
         )
         await runner.run(
             [*_BASE, "-i", media, "-i", music,
-             "-map", "0:v?", *replacement, "-c:v", "copy",
+             "-map", "0:V?", *replacement, "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
         return
@@ -1265,7 +1299,7 @@ async def _mix_timeline_audio(
             # Unscaled, as composition replacement beds always were.
             graph.append(
                 f"[1:a]aresample={_MIX_RATE},aformat=channel_layouts=stereo,"
-                f"apad=whole_dur={visual},atrim=duration={visual}[prog]"
+                f"{_fit_audio_to(visual)}[prog]"
             )
         else:
             vol = bed_volume if bed_mode != "duck" else min(bed_volume, 0.2)
@@ -1300,19 +1334,22 @@ async def _mix_timeline_audio(
     )
 
 
-async def _compose_video_duration(src: str) -> float:
-    """Use the first video's duration (Matroska stores it as a stream tag)."""
+async def _compose_video_duration(src: str, *, stream: str = "v:0") -> float:
+    """Use the first video's duration (Matroska stores it as a stream tag).
+
+    `stream` is an ffprobe stream specifier; "V:0" skips attached pictures.
+    """
     out = await runner.run_stdout(
-        [FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
+        [FFPROBE, "-v", "error", "-select_streams", stream, "-show_entries",
          "stream=duration:stream_tags=DURATION:format=duration", "-of", "json", src],
         timeout=60,
     )
     try:
         payload = json.loads(out)
-        stream = payload["streams"][0]
-        value = stream.get("duration")
+        first = payload["streams"][0]
+        value = first.get("duration")
         if value in (None, "N/A"):
-            tag = stream.get("tags", {}).get("DURATION")
+            tag = first.get("tags", {}).get("DURATION")
             if tag is not None:
                 hours, minutes, seconds = map(float, tag.split(":"))
                 value = hours * 3600 + minutes * 60 + seconds

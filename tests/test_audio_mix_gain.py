@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import json
 import math
 import shutil
 import subprocess
@@ -131,14 +132,23 @@ async def test_replace_gain_and_source_suppression(client, signals, tmp_path, so
 
 @pytest.mark.parametrize("source", ["source.mp4", "source.wav"])
 @pytest.mark.parametrize("music,duration", [("short.wav", 1), ("long.wav", 4)])
-async def test_replace_duration_unchanged(client, signals, tmp_path, source, music, duration):
+async def test_replace_duration(client, signals, tmp_path, source, music, duration):
     job, pid, primary = await _submit(client, signals, source, 0.5, music=music)
     path = tmp_path / ("mixed.mp4" if source.endswith(".mp4") else "mixed.m4a")
     asset = await _published(client, job, pid, primary, path)
-    expected = min(2, duration) if source.endswith(".mp4") else duration
-    # Stream-copy video can leave a packet/reorder tail under -shortest.
-    tail_tolerance = 0.3 if source.endswith(".mp4") else 0.05
-    assert expected - 0.05 <= asset["duration_seconds"] <= expected + tail_tolerance
+    # A video keeps its own 2 s: a shorter replacement is padded with silence and
+    # a longer one trimmed (the 1 s replacement used to cut the video to 1 s).
+    # Audio-only media still become the replacement, as long as it is.
+    expected = 2 if source.endswith(".mp4") else duration
+    assert expected - 0.05 <= asset["duration_seconds"] <= expected + 0.05
+    if source.endswith(".mp4"):
+        streams = json.loads(_run([
+            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
+            "-of", "json", str(path),
+        ]))["streams"]
+        lengths = {s["codec_type"]: float(s["duration"]) for s in streams}
+        assert lengths["video"] == pytest.approx(2, abs=0.05)
+        assert lengths["audio"] == pytest.approx(2, abs=0.05)
 
 
 @pytest.mark.parametrize("mode", ["mix", "duck"])
@@ -187,15 +197,43 @@ async def test_replace_filter_failure_publishes_nothing(client, signals, monkeyp
 
 
 @pytest.mark.parametrize("apply_gain", [True, False])
+async def test_replacement_on_video_keeps_the_video_length(monkeypatch, apply_gain):
+    commands = []
+    async def yes(path):
+        return True
+    async def video_seconds(path, *, stream="v:0"):
+        assert stream == "V:0"  # the first real video, never cover art
+        return 2.5
+    async def capture(args, **kwargs):
+        commands.append(args)
+    monkeypatch.setattr(ffmpeg, "_has_video", yes)
+    monkeypatch.setattr(ffmpeg, "_compose_video_duration", video_seconds)
+    monkeypatch.setattr(ffmpeg.runner, "run", capture)
+    await ffmpeg.audio_mix("source", "music", "output.mp4", music_volume=0.5,
+                           mode="replace", apply_replace_gain=apply_gain)
+    command = commands[0]
+    assert "-shortest" not in command
+    assert command[command.index("-c:v") + 1] == "copy"
+    assert command[command.index("-map") + 1] == "0:V"
+    fit = "apad=whole_dur=2.5,atrim=duration=2.5"
+    expected = f"[1:a]volume=0.5,{fit}[a]" if apply_gain else f"[1:a]{fit}[a]"
+    assert command[command.index("-filter_complex") + 1] == expected
+
+
+@pytest.mark.parametrize("apply_gain", [True, False])
 async def test_replacement_policy_is_explicit(monkeypatch, apply_gain):
+    """Audio-only media: the replacement is the whole result, as before."""
     commands = []
     async def has_audio(path):
         return True
+    async def no_video(path):
+        return False
     async def capture(args, **kwargs):
         commands.append(args)
     monkeypatch.setattr(ffmpeg, "_has_audio", has_audio)
+    monkeypatch.setattr(ffmpeg, "_has_video", no_video)
     monkeypatch.setattr(ffmpeg.runner, "run", capture)
-    await ffmpeg.audio_mix("source", "music", "output.mp4", music_volume=0.5,
+    await ffmpeg.audio_mix("source", "music", "output.m4a", music_volume=0.5,
                            mode="replace", apply_replace_gain=apply_gain)
     command = commands[0]
     assert "-shortest" in command
