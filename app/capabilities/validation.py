@@ -78,9 +78,21 @@ def _check_time_interval(value: Mapping[str, Any]) -> None:
 # Asset-independent cross-field rules, applied wherever the schema is enforced
 # (Job admission and Agent plan validation). Source-dependent bounds such as
 # the video duration are checked at admission and again at execution.
+def _check_burn_only_style(value: Mapping[str, Any]) -> None:
+    """Subtitle styling only applies when subtitles are burned into the picture."""
+    from app.capabilities.media_options import SUBTITLE_STYLE_FIELDS
+
+    styled = [name for name in SUBTITLE_STYLE_FIELDS if name in value]
+    if styled and value.get("mode", "soft") != "burn":
+        raise CapabilityInputValidationError(
+            f"input.{styled[0]}: subtitle styling requires mode 'burn'"
+        )
+
+
 _SEMANTIC_CHECKS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     "video.trim": _check_time_interval,
     "audio.trim": _check_time_interval,
+    "video.subtitle.embed": _check_burn_only_style,
 }
 
 

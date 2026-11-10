@@ -9,15 +9,25 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import re
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from app.capabilities.compose_contract import (
     IMAGE_CLIP_MAX_DURATION_SECONDS,
     IMAGE_CLIP_MAX_PIXELS,
     IMAGE_CLIP_MIN_DURATION_SECONDS,
 )
-from app.capabilities.media_options import VIDEO_QUALITY_CRF, VIDEO_TRANSCODE_OPTIONS
+from app.capabilities.media_options import (
+    SUBTITLE_COLOUR_PATTERN,
+    SUBTITLE_FONTS,
+    SUBTITLE_POSITIONS,
+    SUBTITLE_STYLE_FIELDS,
+    VIDEO_QUALITY_CRF,
+    VIDEO_TRANSCODE_OPTIONS,
+)
 from app.core.errors import ToolError, ValidationError
 from app.models.enums import MediaType
 from app.services.media_metadata import (
@@ -1038,6 +1048,62 @@ def _compose_audio_encode_args(policy: ComposeRenderPolicy | None) -> list[str]:
     return args
 
 
+_ASS_HEX = re.compile(SUBTITLE_COLOUR_PATTERN)
+
+
+def _ass_colour(value: object) -> str:
+    """#RRGGBB -> libass &H00BBGGRR (alpha 00 = opaque)."""
+    if not isinstance(value, str) or not _ASS_HEX.fullmatch(value):
+        raise ValidationError("Subtitle colours must be #RRGGBB")
+    red, green, blue = value[1:3], value[3:5], value[5:7]
+    return f"&H00{blue}{green}{red}".upper()
+
+
+def _bounded_int(value: object, low: int, high: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise ValidationError(f"Subtitle {name} must be an integer from {low} to {high}")
+    return value
+
+
+def subtitle_force_style(style: Mapping[str, Any]) -> str:
+    """libass overrides built only from validated, allowlisted values.
+
+    The result contains letters, digits, '=', ',', '&' and the spaces of the
+    fixed font names, so it is safe inside the single-quoted filter option.
+    """
+    unknown = set(style) - set(SUBTITLE_STYLE_FIELDS)
+    if unknown:
+        raise ValidationError(f"Unknown subtitle style field: {sorted(unknown)[0]}")
+    parts: list[str] = []
+    if "font" in style:
+        if style["font"] not in SUBTITLE_FONTS:
+            raise ValidationError("Unsupported subtitle font")
+        name, bold = SUBTITLE_FONTS[style["font"]]
+        parts += [f"FontName={name}", f"Bold={bold}"]
+    if "font_size" in style:
+        parts.append(f"FontSize={_bounded_int(style['font_size'], 12, 96, 'size')}")
+    if "text_colour" in style:
+        parts.append(f"PrimaryColour={_ass_colour(style['text_colour'])}")
+    if "outline_colour" in style:
+        parts.append(f"OutlineColour={_ass_colour(style['outline_colour'])}")
+    if "outline" in style:
+        parts.append(f"Outline={_bounded_int(style['outline'], 0, 4, 'outline')}")
+    if "position" in style:
+        if style["position"] not in SUBTITLE_POSITIONS:
+            raise ValidationError("Subtitle position must be 'bottom' or 'top'")
+        parts.append(f"Alignment={SUBTITLE_POSITIONS[style['position']]}")
+    if "margin" in style:
+        parts.append(f"MarginV={_bounded_int(style['margin'], 0, 200, 'margin')}")
+    return ",".join(parts)
+
+
+def subtitle_burn_filter(subtitle: str, style: Mapping[str, Any] | None = None) -> str:
+    """The `subtitles` filter; unstyled burns keep the original string exactly."""
+    graph = f"subtitles='{_escape_subs(subtitle)}'"
+    overrides = subtitle_force_style(style) if style else ""
+    return f"{graph}:force_style='{overrides}'" if overrides else graph
+
+
 async def subtitle_embed(
     video: str,
     subtitle: str,
@@ -1045,9 +1111,12 @@ async def subtitle_embed(
     mode: str = "soft",
     *,
     compose_policy: ComposeRenderPolicy | None = None,
+    style: Mapping[str, Any] | None = None,
 ) -> None:
+    if style and mode != "burn":
+        raise ValidationError("Subtitle styling requires burn mode")
     if mode == "burn":
-        args = [*_BASE, "-i", video, "-vf", f"subtitles='{_escape_subs(subtitle)}'"]
+        args = [*_BASE, "-i", video, "-vf", subtitle_burn_filter(subtitle, style)]
         if compose_policy is None:
             args.extend(_PIX)
         else:

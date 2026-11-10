@@ -542,6 +542,23 @@ Key boundaries:
   create-from-template call.
   Published versions are immutable (their hashes are pinned in tests):
   changes go in a new version file.
+- `video.subtitle.embed` (SRT/VTT) adds a selectable track (`mode: "soft"`,
+  the default) or burns subtitles into the picture (`mode: "burn"`, MP4/H.264).
+  Burn mode takes optional styling (MED/030); every field is optional:
+  `font` (`dejavu-sans`, `dejavu-sans-bold`, `dejavu-serif`,
+  `dejavu-serif-bold`), `font_size` (12–96), `text_colour` and
+  `outline_colour` (`#RRGGBB`), `outline` (0–4), `position` (`bottom`/`top`)
+  and `margin` (0–200). Sizes and margins are libass units that scale with the
+  video height (24 is about one twelfth of it). They become a libass
+  `force_style` built only from these validated values; there is no raw
+  style, font name or path. Without styling fields the burn command is
+  exactly as before. Any styling field with `soft` (or no `mode`) is a 422.
+  Example input: `{"subtitle_asset_id": "<id>", "mode": "burn", "font":
+  "dejavu-sans-bold", "font_size": 28, "text_colour": "#FFFFFF",
+  "outline_colour": "#000000", "outline": 2, "position": "bottom", "margin":
+  20}`. Saved compositions and `project.export` do not render subtitles; burn
+  them into a clip, or into the exported video. A burn always produces
+  MP4/H.264, also after an Archival (FFV1) export.
 - Export presets are defined once in `app/composition/export_presets.py`.
   Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
   Social requires `square` (1080×1080) or `portrait` (1080×1920) and

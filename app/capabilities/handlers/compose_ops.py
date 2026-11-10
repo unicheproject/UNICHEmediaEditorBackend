@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.capabilities.context import HandlerResult, JobContext, OutputFile
 from app.capabilities.handlers._util import input_stem, require, require_input
 from app.capabilities.handlers.base import LocalToolHandler
+from app.capabilities.media_options import SUBTITLE_STYLE_FIELDS
 from app.composition.render import compose_request_from_job_context
 from app.core.errors import ValidationError
 from app.models.enums import MediaType
@@ -140,12 +141,13 @@ class VideoSubtitleEmbedHandler(LocalToolHandler):
         mode = ctx.params.get("mode", "soft")
         if mode not in ("soft", "burn"):
             raise ValidationError("mode must be 'soft' or 'burn'")
+        style = {name: ctx.params[name] for name in SUBTITLE_STYLE_FIELDS if name in ctx.params}
         out = OutputFile(
             path=ctx.out_path(f"{input_stem(ctx)}_subtitled.mp4"),
             filename=f"{input_stem(ctx)}_subtitled.mp4",
             media_type=MediaType.video,
         )
-        await ffmpeg.subtitle_embed(video, subs, str(out.path), mode=mode)
+        await ffmpeg.subtitle_embed(video, subs, str(out.path), mode=mode, style=style or None)
         return HandlerResult(
             data={"operation": "video.subtitle.embed", "mode": mode}, outputs=[out]
         )

@@ -65,7 +65,9 @@ REUSE_VERSIONS: dict[str, str] = {
     "video.audio.extract": "1",
     "audio.mix": "1",
     "video.lowerthird": "1",
-    "video.subtitle.embed": "1",
+    # 2: burn mode takes optional styling fields; an older Job could have
+    # carried such keys and ignored them, so its output must not be reused.
+    "video.subtitle.embed": "2",
 }
 
 

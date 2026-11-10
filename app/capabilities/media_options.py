@@ -61,3 +61,28 @@ AUDIO_CONTAINER_DESCRIPTIONS = {
     "flac": "FLAC / lossless audio",
     "ogg": "Ogg / Vorbis or Opus audio",
 }
+
+
+# Burned-in subtitle styling (video.subtitle.embed, mode="burn"). Font IDs map to
+# libass FontName/Bold pairs that fontconfig resolves to the bundled DejaVu files
+# (verified: "DejaVu Serif" + Bold=1 -> DejaVuSerif-Bold.ttf). Sizes and margins
+# are libass script units, scaled with the video height.
+SUBTITLE_FONTS: dict[str, tuple[str, int]] = {
+    "dejavu-sans": ("DejaVu Sans", 0),
+    "dejavu-sans-bold": ("DejaVu Sans", 1),
+    "dejavu-serif": ("DejaVu Serif", 0),
+    "dejavu-serif-bold": ("DejaVu Serif", 1),
+}
+SUBTITLE_FONT_DESCRIPTIONS = {
+    "dejavu-sans": "DejaVu Sans, regular.",
+    "dejavu-sans-bold": "DejaVu Sans, bold.",
+    "dejavu-serif": "DejaVu Serif, regular.",
+    "dejavu-serif-bold": "DejaVu Serif, bold.",
+}
+# force_style reads Alignment in the legacy SSA numbering (measured: 8 renders
+# mid-screen, 6 at the top): 2 = bottom centre, 6 = top centre.
+SUBTITLE_POSITIONS = {"bottom": 2, "top": 6}
+SUBTITLE_STYLE_FIELDS = (
+    "font", "font_size", "text_colour", "outline_colour", "outline", "position", "margin",
+)
+SUBTITLE_COLOUR_PATTERN = "^#[0-9A-Fa-f]{6}$"

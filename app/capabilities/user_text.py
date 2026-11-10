@@ -391,6 +391,20 @@ USER_TEXT: dict[str, UserText] = {
             "mode": "Soft adds subtitles viewers can switch on and off in their "
                     "player; Burn prints them into the picture so they always show, "
                     "on any player or website.",
+            "font": "Burn only. The typeface for the subtitles. Leave empty for the "
+                    "default.",
+            "font_size": "Burn only. How big the text is, from 12 to 96. It grows with "
+                         "the video's height; 24 is about one twelfth of it.",
+            "text_colour": "Burn only. The colour of the letters, for example #FFFFFF "
+                           "for white.",
+            "outline_colour": "Burn only. The colour of the line around the letters, "
+                              "for example #000000 for black.",
+            "outline": "Burn only. How thick the line around the letters is, from 0 "
+                       "(none) to 4.",
+            "position": "Burn only. Show the subtitles at the bottom or the top of "
+                        "the picture.",
+            "margin": "Burn only. How far the subtitles sit from that edge, from 0 to "
+                      "200. It grows with the video's height.",
         },
     },
     "video.compose": {

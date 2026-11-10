@@ -15,6 +15,10 @@ from app.capabilities.media_options import (
     AUDIO_CODEC_DESCRIPTIONS,
     AUDIO_CONTAINER_DESCRIPTIONS,
     AUDIO_TRANSCODE_OPTIONS,
+    SUBTITLE_COLOUR_PATTERN,
+    SUBTITLE_FONT_DESCRIPTIONS,
+    SUBTITLE_FONTS,
+    SUBTITLE_POSITIONS,
     VIDEO_CODEC_DESCRIPTIONS,
     VIDEO_QUALITY_CRF,
     VIDEO_QUALITY_DESCRIPTIONS,
@@ -1188,6 +1192,54 @@ _DETERMINISTIC_SPECS: list[dict] = [
                     "burn": "Render subtitles permanently into the video picture.",
                 },
             },
+            # Optional burn-only styling; omitted fields keep libass defaults.
+            "font": {
+                "type": "string",
+                "title": "Subtitle font",
+                "description": "Burn only. Font of the burned-in subtitles.",
+                "enum": list(SUBTITLE_FONTS),
+                "x-enum-descriptions": SUBTITLE_FONT_DESCRIPTIONS,
+            },
+            "font_size": _integer(
+                "Subtitle size",
+                "Burn only. Text size in libass units, scaled with the video height "
+                "(about 1/12 of the height at 24).",
+                minimum=12,
+                maximum=96,
+            ),
+            "text_colour": _string(
+                "Text colour",
+                "Burn only. Subtitle text colour as #RRGGBB.",
+                pattern=SUBTITLE_COLOUR_PATTERN,
+            ),
+            "outline_colour": _string(
+                "Outline colour",
+                "Burn only. Colour of the outline around the letters, as #RRGGBB.",
+                pattern=SUBTITLE_COLOUR_PATTERN,
+            ),
+            "outline": _integer(
+                "Outline width",
+                "Burn only. Outline thickness; 0 for none.",
+                minimum=0,
+                maximum=4,
+            ),
+            "position": {
+                "type": "string",
+                "title": "Subtitle position",
+                "description": "Burn only. Where the subtitles sit in the picture.",
+                "enum": list(SUBTITLE_POSITIONS),
+                "x-enum-descriptions": {
+                    "bottom": "Centred near the bottom edge.",
+                    "top": "Centred near the top edge.",
+                },
+            },
+            "margin": _integer(
+                "Edge margin",
+                "Burn only. Distance from the chosen edge, in libass units scaled with "
+                "the video height.",
+                minimum=0,
+                maximum=200,
+            ),
         },
         "required": ["subtitle_asset_id"],
     },
