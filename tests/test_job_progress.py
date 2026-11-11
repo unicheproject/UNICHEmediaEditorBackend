@@ -16,6 +16,7 @@ from app.models.enums import JobStatus
 from app.models.job import Job
 from app.services import jobs as jobs_svc
 from app.tools import progress, runner
+from app.tools.demuxers import UNTRUSTED_INPUT
 from tests.test_video_trim import _upload_video
 
 API = "/api/v1"
@@ -103,7 +104,9 @@ async def test_runner_reports_ffmpeg_progress_only_when_tracking(
     async def sink(fraction: float) -> None:
         seen.append(fraction)
 
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", "scale=160:120"]
+    # Every file input carries the demuxer allowlist (Task #18B), as in the app.
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", *UNTRUSTED_INPUT, "-i", str(src),
+           "-vf", "scale=160:120"]
     with progress.tracking(6.0, sink):
         await runner.run([*cmd, str(tmp_path / "tracked.mp4")])
     await runner.run([*cmd, str(tmp_path / "plain.mp4")])

@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.models.asset import Asset
 from app.models.enums import MediaType, TechnicalMetadataStatus
 from app.services.storage import get_storage
+from app.tools.demuxers import UNTRUSTED_INPUT
 from app.tools.geometry import QUARTER_TURN_ORIENTATIONS, is_quarter_turn
 from app.tools.process_policy import media_process
 
@@ -95,7 +96,7 @@ async def probe_video_timeline(
         async with media_process(
             ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_frames",
              "-show_entries", "frame=best_effort_timestamp_time,pkt_duration_time",
-             "-of", "compact=p=0:nk=0", str(path.absolute())],
+             "-of", "compact=p=0:nk=0", *UNTRUSTED_INPUT, "-i", str(path.absolute())],
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         ) as proc:
             assert proc.stdout is not None
@@ -171,7 +172,7 @@ async def probe_first_video_frame(path: Path) -> None:
     output = await _run_probe([
         "ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
         "-show_entries", "frame=best_effort_timestamp_time", "-of", "csv=p=0",
-        str(path.absolute()),
+        *UNTRUSTED_INPUT, "-i", str(path.absolute()),
     ])
     if not output.strip():
         raise MetadataProbeError("no_video_frames")
@@ -457,6 +458,8 @@ async def probe_media(path: Path, media_type: MediaType) -> TechnicalMetadata:
             entries,
             "-of",
             "json",
+            *UNTRUSTED_INPUT,
+            "-i",
             str(path),
         ]
     )

@@ -43,6 +43,7 @@ from app.tools.compose_policy import (
     LOSSLESS_COMPOSE_RENDER_POLICY,
     ComposeRenderPolicy,
 )
+from app.tools.demuxers import UNTRUSTED_INPUT
 from app.tools.export_policy import (
     CompositionPolicyId,
     EffectiveExportSettings,
@@ -76,6 +77,8 @@ async def probe_duration(path: str) -> float:
             "format=duration",
             "-of",
             "json",
+            *UNTRUSTED_INPUT,
+            "-i",
             path,
         ],
         timeout=60,
@@ -135,7 +138,7 @@ async def video_trim(src: str, dst: str, start: float, end: float | None = None)
     effective_end = resolve_trim_window(
         start, end, duration=metadata.duration_seconds, frame_rate=metadata.frame_rate
     )
-    args = [*_BASE, "-i", src, "-ss", str(start)]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src, "-ss", str(start)]
     if effective_end is not None:
         args += ["-to", str(effective_end)]
     stop = effective_end if effective_end is not None else metadata.duration_seconds
@@ -203,7 +206,7 @@ async def video_split(src: str, dst_pattern: str, markers: list[float]) -> list[
     validated = False
     try:
         for path, interval in zip(files, timeline.intervals, strict=True):
-            args = [*_BASE, "-copyts", "-i", src, "-map", "0:v:0"]
+            args = [*_BASE, "-copyts", *UNTRUSTED_INPUT, "-i", src, "-map", "0:v:0"]
             args += [
                 "-vf", f"trim=start_frame={interval.first_frame}:"
                 f"end_frame={interval.first_frame + interval.frame_count},setpts=PTS-STARTPTS",
@@ -257,7 +260,8 @@ async def probe_video_size(path: str) -> tuple[int, int]:
     out = await runner.run_stdout(
         [
             FFPROBE, "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height", "-of", "json", path,
+            "-show_entries", "stream=width,height", "-of", "json", *UNTRUSTED_INPUT, "-i",
+            path,
         ],
         timeout=60,
     )
@@ -273,7 +277,7 @@ async def _has_video(path: str) -> bool:
     out = await runner.run_stdout(
         [
             FFPROBE, "-v", "error", "-select_streams", "V",
-            "-show_entries", "stream=index", "-of", "csv=p=0", path,
+            "-show_entries", "stream=index", "-of", "csv=p=0", *UNTRUSTED_INPUT, "-i", path,
         ],
         timeout=60,
     )
@@ -289,7 +293,7 @@ async def _has_audio(path: str) -> bool:
     out = await runner.run_stdout(
         [
             FFPROBE, "-v", "error", "-select_streams", "a",
-            "-show_entries", "stream=index", "-of", "csv=p=0", path,
+            "-show_entries", "stream=index", "-of", "csv=p=0", *UNTRUSTED_INPUT, "-i", path,
         ],
         timeout=60,
     )
@@ -301,7 +305,8 @@ async def probe_audio_duration(path: str) -> float:
     out = await runner.run_stdout(
         [
             FFPROBE, "-v", "error", "-select_streams", "a:0",
-            "-show_entries", "stream=duration:format=duration", "-of", "json", path,
+            "-show_entries", "stream=duration:format=duration", "-of", "json",
+            *UNTRUSTED_INPUT, "-i", path,
         ],
         timeout=60,
     )
@@ -343,7 +348,7 @@ async def probe_audio_format(path: str) -> AudioFormat:
                 FFPROBE, "-v", "error", "-select_streams", "a:0",
                 "-show_entries",
                 "stream=codec_name,sample_rate,channels,sample_fmt,bit_rate:format=bit_rate",
-                "-of", "json", path,
+                "-of", "json", *UNTRUSTED_INPUT, "-i", path,
             ],
             timeout=60,
         )
@@ -425,7 +430,8 @@ def preserved_audio_args(source: AudioFormat) -> list[str]:
 async def _run_audio_filter(src: str, dst: str, audio_filter: str) -> None:
     source = await probe_audio_format(src)
     await runner.run(
-        [*_BASE, "-i", src, "-filter:a", audio_filter, *preserved_audio_args(source), dst]
+        [*_BASE, *UNTRUSTED_INPUT, "-i", src, "-filter:a", audio_filter,
+         *preserved_audio_args(source), dst]
     )
 
 
@@ -458,7 +464,7 @@ async def video_audio_transform(src: str, dst: str, audio_filter: str) -> None:
         )
     await runner.run(
         [
-            *_BASE, "-i", src,
+            *_BASE, *UNTRUSTED_INPUT, "-i", src,
             "-map", "0:v:0", "-map", "0:a:0",
             "-c:v", "copy", "-c:a", audio_codec, "-b:a", bitrate,
             *_rate_and_layout_args(source, audio_codec),
@@ -474,7 +480,7 @@ async def video_audio_extract(src: str, dst: str) -> None:
         raise ToolError("Cannot extract audio: video has no audio stream")
     await runner.run(
         [
-            *_BASE, "-i", src, "-map", "0:a:0", "-vn", "-sn", "-dn",
+            *_BASE, *UNTRUSTED_INPUT, "-i", src, "-map", "0:a:0", "-vn", "-sn", "-dn",
             "-c:a", "aac", "-b:a", "192k", "-f", "ipod", dst,
         ]
     )
@@ -490,7 +496,7 @@ async def _concat_normalize(
     without sound) still concat with matching stream parameters.
     """
     has_audio = await _has_audio(src)
-    args = [*_BASE, "-i", src]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src]
     if not has_audio:
         args += _ANULL
     audio_in = "0:a:0" if has_audio else "1:a:0"
@@ -565,7 +571,8 @@ async def probe_video_bit_rate(path: str) -> int | None:
         out = await runner.run_stdout(
             [
                 FFPROBE, "-v", "error", "-show_entries",
-                "stream=codec_type,bit_rate:format=bit_rate", "-of", "json", path,
+                "stream=codec_type,bit_rate:format=bit_rate", "-of", "json",
+                *UNTRUSTED_INPUT, "-i", path,
             ],
             timeout=60,
         )
@@ -599,7 +606,7 @@ async def video_transcode(
     *, quality: str | None = None,
 ) -> int | None:
     """Transcode; returns the video bitrate cap applied for "compressed", if any."""
-    args = [*_BASE, "-i", src]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src]
     if video_codec:
         args += ["-c:v", video_codec]
     if audio_codec:
@@ -625,7 +632,7 @@ async def video_transcode(
 
 
 async def video_mute(src: str, dst: str) -> None:
-    await runner.run([*_BASE, "-i", src, "-an", "-c:v", "copy", dst])
+    await runner.run([*_BASE, *UNTRUSTED_INPUT, "-i", src, "-an", "-c:v", "copy", dst])
 
 
 async def probe_display_size(path: str) -> tuple[int, int]:
@@ -637,7 +644,7 @@ async def probe_display_size(path: str) -> tuple[int, int]:
     out = await runner.run_stdout([
         FFPROBE, "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height:stream_side_data=rotation:stream_tags=rotate",
-        "-of", "json", path,
+        "-of", "json", *UNTRUSTED_INPUT, "-i", path,
     ])
     try:
         stream = json.loads(out)["streams"][0]
@@ -659,7 +666,7 @@ async def video_crop(src: str, dst: str, x: int, y: int, width: int, height: int
     output = Path(dst)
     validated = False
     try:
-        await runner.run([*_BASE, "-i", src, "-vf", crop, dst])
+        await runner.run([*_BASE, *UNTRUSTED_INPUT, "-i", src, "-vf", crop, dst])
         if not output.is_file() or output.stat().st_size == 0:
             raise ToolError("Crop output is missing or empty")
         validated = True
@@ -719,7 +726,8 @@ async def video_resize(
     src: str, dst: str, width: int | None = None, height: int | None = None,
     *, fit: str = "stretch",
 ) -> None:
-    await runner.run([*_BASE, "-i", src, "-vf", resize_scale_filter(width, height, fit), dst])
+    await runner.run([*_BASE, *UNTRUSTED_INPUT, "-i", src,
+                      "-vf", resize_scale_filter(width, height, fit), dst])
 
 
 def check_thumbnail_time(timestamp: float, *, duration: float | None) -> None:
@@ -745,11 +753,13 @@ async def video_thumbnail(src: str, dst: str, timestamp: float) -> None:
     output = Path(dst)
     validated = False
     try:
-        await runner.run([*_BASE, "-ss", str(timestamp), "-i", src, "-frames:v", "1", dst])
+        await runner.run([*_BASE, "-ss", str(timestamp), *UNTRUSTED_INPUT, "-i", src,
+                          "-frames:v", "1", dst])
         if not output.is_file() or output.stat().st_size == 0:
             # A time inside the duration but after the last frame's timestamp
             # still shows that last frame; FFmpeg's input seek writes nothing.
-            await runner.run([*_BASE, "-sseof", "-1", "-i", src, "-update", "1", dst])
+            await runner.run([*_BASE, "-sseof", "-1", *UNTRUSTED_INPUT, "-i", src,
+                              "-update", "1", dst])
         if not output.is_file() or output.stat().st_size == 0:
             raise ToolError("Thumbnail extraction produced no image")
         validated = True
@@ -776,7 +786,7 @@ async def audio_trim(src: str, dst: str, start: float, end: float | None = None)
     effective_end = resolve_trim_window(
         start, end, duration=metadata.duration_seconds, frame_rate=None, media="audio",
     )
-    args = [*_BASE, "-i", src, "-ss", str(start)]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src, "-ss", str(start)]
     if effective_end is not None:
         args += ["-to", str(effective_end)]
     stop = effective_end if effective_end is not None else metadata.duration_seconds
@@ -804,7 +814,7 @@ async def audio_trim(src: str, dst: str, start: float, end: float | None = None)
 async def audio_concat(sources: list[str], dst: str) -> None:
     args = [*_BASE]
     for s in sources:
-        args += ["-i", s]
+        args += [*UNTRUSTED_INPUT, "-i", s]
     n = len(sources)
     streams = "".join(f"[{i}:a]" for i in range(n))
     filt = f"{streams}concat=n={n}:v=0:a=1[a]"
@@ -874,7 +884,7 @@ async def video_audio_denoise(src: str, dst: str, strength: float | None) -> Non
 
 
 async def audio_transcode(src: str, dst: str, codec: str | None) -> None:
-    args = [*_BASE, "-i", src]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src]
     if codec:
         args += ["-c:a", codec]
     args.append(dst)
@@ -914,7 +924,7 @@ async def still_to_clip(image: str, dst: str, duration: float, width: int, heigh
     await runner.run(
         [
             *_BASE,
-            "-loop", "1", "-t", _num(duration, "duration"), "-i", image,
+            "-loop", "1", "-t", _num(duration, "duration"), *UNTRUSTED_INPUT, "-i", image,
             *_ANULL,
             "-vf", _scale_pad(width, height),
             *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
@@ -962,7 +972,7 @@ async def kenburns(
 
     await runner.run(
         [
-            *_BASE, "-i", image, *_ANULL,
+            *_BASE, *UNTRUSTED_INPUT, "-i", image, *_ANULL,
             "-vf", vf, "-map", "0:v", "-map", "1:a",
             *_PIX, "-c:v", "libx264", "-c:a", "aac", "-shortest", dst,
         ]
@@ -975,7 +985,8 @@ async def slideshow(
     """Concatenate still images into one video clip (+ silent audio)."""
     args = [*_BASE]
     for img in images:
-        args += ["-loop", "1", "-t", _num(seconds_per_image, "seconds_per_image"), "-i", img]
+        args += ["-loop", "1", "-t", _num(seconds_per_image, "seconds_per_image"),
+                 *UNTRUSTED_INPUT, "-i", img]
     args += _ANULL
     n = len(images)
     sp = _scale_pad(width, height)
@@ -1022,7 +1033,7 @@ async def overlay_lowerthird(
     filt = f"[0:v][1:v]overlay={xy}:enable='between(t,{start},{start + duration})'[v]"
     await runner.run(
         [
-            *_BASE, "-i", video, "-i", overlay_png,
+            *_BASE, *UNTRUSTED_INPUT, "-i", video, *UNTRUSTED_INPUT, "-i", overlay_png,
             "-filter_complex", filt, "-map", "[v]", "-map", "0:a?",
             *_PIX, "-c:a", "copy", dst,
         ]
@@ -1124,7 +1135,7 @@ async def subtitle_embed(
     if subtitle_format is None:
         subtitle_format = await validate_subtitle_file(subtitle)
     if mode == "burn":
-        args = [*_BASE, "-i", video, "-vf", subtitle_burn_filter(subtitle, style)]
+        args = [*_BASE, *UNTRUSTED_INPUT, "-i", video, "-vf", subtitle_burn_filter(subtitle, style)]
         if compose_policy is None:
             args.extend(_PIX)
         else:
@@ -1134,7 +1145,7 @@ async def subtitle_embed(
         await runner.run(args)
     else:  # soft mux
         await runner.run(
-            [*_BASE, "-i", video, "-f", subtitle_format.value, "-i", subtitle,
+            [*_BASE, *UNTRUSTED_INPUT, "-i", video, "-f", subtitle_format.value, "-i", subtitle,
              "-c", "copy", "-c:s", "mov_text", dst]
         )
 
@@ -1159,7 +1170,7 @@ async def audio_mix(
         duration = await _compose_video_duration(media, stream="V:0")
         gain = f"volume={vol}," if apply_replace_gain else ""
         await runner.run(
-            [*_BASE, "-i", media, "-i", music,
+            [*_BASE, *UNTRUSTED_INPUT, "-i", media, *UNTRUSTED_INPUT, "-i", music,
              "-filter_complex", f"[1:a]{gain}{_fit_audio_to(duration)}[a]",
              "-map", "0:V", "-map", "[a]", "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), dst]
@@ -1175,7 +1186,7 @@ async def audio_mix(
             if apply_replace_gain else ["-map", "1:a"]
         )
         await runner.run(
-            [*_BASE, "-i", media, "-i", music,
+            [*_BASE, *UNTRUSTED_INPUT, "-i", media, *UNTRUSTED_INPUT, "-i", music,
              "-map", "0:V?", *replacement, "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
         )
@@ -1188,7 +1199,7 @@ async def audio_mix(
         # instead of -shortest cutting the video where the music ends.
         duration = await _compose_video_duration(media, stream="V:0")
         await runner.run(
-            [*_BASE, "-i", media, "-i", music,
+            [*_BASE, *UNTRUSTED_INPUT, "-i", media, *UNTRUSTED_INPUT, "-i", music,
              "-filter_complex", f"[1:a]volume={vol},{_fit_audio_to(duration)}[a]",
              "-map", "0:V", "-map", "[a]", "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), dst]
@@ -1196,7 +1207,7 @@ async def audio_mix(
         return
     if not has_audio:
         await runner.run(
-            [*_BASE, "-i", media, "-i", music,
+            [*_BASE, *UNTRUSTED_INPUT, "-i", media, *UNTRUSTED_INPUT, "-i", music,
              "-filter_complex", f"[1:a]volume={vol}[a]",
              "-map", "0:V?", "-map", "[a]", "-c:v", "copy",
              *_compose_audio_encode_args(compose_policy), "-shortest", dst]
@@ -1204,7 +1215,7 @@ async def audio_mix(
         return
     filt = f"[1:a]volume={vol}[m];[0:a][m]amix=inputs=2:duration=first[a]"
     await runner.run(
-        [*_BASE, "-i", media, "-i", music,
+        [*_BASE, *UNTRUSTED_INPUT, "-i", media, *UNTRUSTED_INPUT, "-i", music,
          "-filter_complex", filt, "-map", "0:V?", "-map", "[a]",
          "-c:v", "copy", *_compose_audio_encode_args(compose_policy), dst]
     )
@@ -1243,7 +1254,7 @@ async def _normalize_segment(
     audio_stream = "0:a:0" if has_audio else "1:a:0"
     await runner.run(
         [
-            *_BASE, *seek, "-i", src, *audio_input,
+            *_BASE, *seek, *UNTRUSTED_INPUT, "-i", src, *audio_input,
             "-map", "0:v:0", "-map", audio_stream,
             "-vf", _scale_pad(width, height),
             # Pad short soundtracks and retain timestamp gaps. Bound both real
@@ -1321,7 +1332,7 @@ async def _normalize_still(
     await runner.run(
         [
             *_BASE, "-noautorotate", "-loop", "1", "-framerate", "1", "-t", seconds,
-            "-i", src, *_ANULL,
+            *UNTRUSTED_INPUT, "-i", src, *_ANULL,
             "-map", "0:v:0", "-map", "1:a:0",
             "-vf", ",".join(filters),
             "-ar", "44100", "-ac", "2",
@@ -1380,12 +1391,12 @@ async def _mix_timeline_audio(
     visual = await _compose_video_duration(media)
     for clip in clips:
         check_audio_clip_start(clip.timeline_start, visual)
-    args = [*_BASE, "-i", media]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", media]
     graph: list[str] = []
     programme = "0:a"
     first_clip_input = 1
     if bed_path is not None:
-        args += ["-i", bed_path]
+        args += [*UNTRUSTED_INPUT, "-i", bed_path]
         first_clip_input = 2
         if bed_mode == "replace":
             # Unscaled, as composition replacement beds always were.
@@ -1408,7 +1419,7 @@ async def _mix_timeline_audio(
         )
         window = f"start={clip.source_start}" + (f":end={end}" if end is not None else "")
         delay = round(clip.timeline_start * _MIX_RATE)
-        args += ["-i", clip.path]
+        args += [*UNTRUSTED_INPUT, "-i", clip.path]
         graph.append(
             f"[{first_clip_input + index}:a]atrim={window},asetpts=PTS-STARTPTS,"
             f"aresample={_MIX_RATE},aformat=channel_layouts=stereo,"
@@ -1433,7 +1444,8 @@ async def _compose_video_duration(src: str, *, stream: str = "v:0") -> float:
     """
     out = await runner.run_stdout(
         [FFPROBE, "-v", "error", "-select_streams", stream, "-show_entries",
-         "stream=duration:stream_tags=DURATION:format=duration", "-of", "json", src],
+         "stream=duration:stream_tags=DURATION:format=duration", "-of", "json",
+         *UNTRUSTED_INPUT, "-i", src],
         timeout=60,
     )
     try:
@@ -1540,7 +1552,7 @@ async def compose(
 
     # 5. move final result to dst
     if str(current) != dst:
-        await runner.run([*_BASE, "-i", str(current), "-c", "copy", dst])
+        await runner.run([*_BASE, *UNTRUSTED_INPUT, "-i", str(current), "-c", "copy", dst])
 
 
 async def export_delivery_transform(
@@ -1550,7 +1562,7 @@ async def export_delivery_transform(
     if settings.composition_policy != CompositionPolicyId.DEFAULT:
         raise ToolError("Lossless archival settings must render directly through compose")
 
-    args = [*_BASE, "-i", src, "-map", "0:v:0", "-map", "0:a:0?"]
+    args = [*_BASE, *UNTRUSTED_INPUT, "-i", src, "-map", "0:v:0", "-map", "0:a:0?"]
     video_filter: str | None = None
     if settings.target_width is not None and settings.target_height is not None:
         if settings.fit != FitPolicy.PAD:
@@ -1601,7 +1613,7 @@ async def video_export(src: str, dst: str, settings: EffectiveExportSettings) ->
         if settings.composition_policy == CompositionPolicyId.LOSSLESS:
             # The same locked FFV1/FLAC policy project.export's Archival uses.
             await runner.run([
-                *_BASE, "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
+                *_BASE, *UNTRUSTED_INPUT, "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
                 *_compose_encode_args(LOSSLESS_COMPOSE_RENDER_POLICY), "-f", "matroska", dst,
             ])
         else:
@@ -1639,7 +1651,7 @@ async def extract_speech_audio(src: str, dst: str) -> None:
     validated = False
     try:
         await runner.run([
-            *_BASE, "-i", src, "-map", "0:a:0", "-vn", "-ac", "1",
+            *_BASE, *UNTRUSTED_INPUT, "-i", src, "-map", "0:a:0", "-vn", "-ac", "1",
             "-c:a", "aac", "-b:a", "64k", dst,
         ])
         if not output.is_file() or output.stat().st_size == 0:

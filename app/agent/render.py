@@ -435,6 +435,7 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
     """
     from app.core.errors import ToolError
     from app.tools import ffmpeg, imagemagick, runner
+    from app.tools.demuxers import UNTRUSTED_INPUT
 
     operations = typed_operations(group)
     active = [op for op in operations if op is not None]
@@ -448,7 +449,7 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
     if not video_args:
         raise ToolError(f"Agent render does not support the '{output_ext}' container")
 
-    args = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(source)]
+    args = ["ffmpeg", "-y", "-loglevel", "error", *UNTRUSTED_INPUT, "-i", str(source)]
     graph: list[str] = []
     current = "0:v:0"
     audio_current = "0:a:0"
@@ -497,7 +498,7 @@ async def render_group(source: Path, output: Path, work_dir: Path, group: dict[s
                 str(overlay_path), operation.text, operation.caption,
                 background=operation.background, foreground=operation.foreground,
             )
-            args += ["-loop", "1", "-i", str(overlay_path)]
+            args += ["-loop", "1", *UNTRUSTED_INPUT, "-i", str(overlay_path)]
             xy = {
                 "bottom-left": "20:main_h-overlay_h-20",
                 "bottom-center": "(main_w-overlay_w)/2:main_h-overlay_h-20",

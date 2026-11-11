@@ -21,6 +21,7 @@ from app.schemas.job import JobCreate
 from app.services import jobs, media_metadata
 from app.services.storage import LocalStorageService
 from app.tools import ffmpeg, imagemagick, process_policy, runner, waveform
+from app.tools.demuxers import UNTRUSTED_INPUT
 
 
 def python(code: str) -> list[str]:
@@ -162,7 +163,8 @@ async def test_direct_launchers_timeout_and_cancel_reap(
         call = media_metadata.probe_video_timeline(media)
         error = media_metadata.MetadataProbeError
     else:
-        call = media_metadata._run_probe(["ffprobe", str(media)])
+        # Inputs carry the demuxer allowlist, as every application probe does.
+        call = media_metadata._run_probe(["ffprobe", *UNTRUSTED_INPUT, "-i", str(media)])
         error = media_metadata.MetadataProbeError
     task = asyncio.create_task(call)
     await wait_file(ready)

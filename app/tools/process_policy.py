@@ -9,7 +9,9 @@ import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+from app.core.errors import ToolError
 from app.core.logging import get_logger
+from app.tools.demuxers import UnrestrictedInputError, check_input_policy
 
 logger = get_logger(__name__)
 TOOL_PATH = "/usr/local/bin:/usr/bin:/bin"
@@ -96,7 +98,16 @@ def _late_launch_finished(task: asyncio.Task[asyncio.subprocess.Process]) -> Non
 async def media_process(
     args: list[str], *, stdout: int, stderr: int, limit: int = IO_CHUNK_BYTES,
 ) -> AsyncIterator[asyncio.subprocess.Process]:
-    """Argv only, private scratch cwd, explicit env/stdin/session for every tool."""
+    """Argv only, private scratch cwd, explicit env/stdin/session for every tool.
+
+    FFmpeg/FFprobe commands must restrict every file input's demuxers
+    (app.tools.demuxers); one that does not is refused before it starts.
+    """
+    try:
+        check_input_policy(args)
+    except UnrestrictedInputError:
+        logger.error("Refused media command with an unrestricted input: %s", args[:1])
+        raise ToolError("Media processing failed.") from None
     with tempfile.TemporaryDirectory(prefix="media-process-", dir="/tmp") as workspace:
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             *args, stdin=asyncio.subprocess.DEVNULL, stdout=stdout, stderr=stderr,

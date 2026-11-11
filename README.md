@@ -69,8 +69,31 @@ or cancellation terminates the process group (TERM, then KILL after 250 ms)
 and bounds child reaping to one second. Existing operation timeouts remain;
 metadata/frame probes and waveform extraction keep their bounded streaming I/O.
 
-This is not a complete sandbox: native thread cancellation, external media
-references/protocols, resource quotas and deployment isolation remain separate.
+FFmpeg picks a demuxer from a file's contents, not its name. An uploaded
+`.mp4` that is really an HLS playlist used to be opened as HLS, and FFmpeg read
+the local media it pointed to into the output. Every FFmpeg/FFprobe input
+opened from a file now carries `-protocol_whitelist file -format_whitelist
+mov,matroska,avi,mp3,wav,flac,ogg,png_pipe,jpeg_pipe,webp_pipe,tiff_pipe`
+(`app/tools/demuxers.py`). These are the FFmpeg 5.1 demuxers of every accepted
+format; none follows references to other files (mov external tracks are off by
+default). Playlists, concat and `image2` filename patterns are not allowed.
+FFmpeg still picks the demuxer for the contents and then refuses it if it is
+not listed. Only application-built inputs are exempt, through a forced format:
+lavfi sources, the concat lists of the application's own intermediate files,
+and subtitles validated before use. `media_process` refuses any FFmpeg/FFprobe
+command with an input that lacks this, so a new call site cannot omit it. Each
+input's options must contain both settings exactly once with these values
+(FFmpeg uses the last of repeated options); a forced format is exempt only
+alone and only for those trusted inputs. Agent reuse identities (job nodes
+and fused render groups) include `media_input_policy`, so results computed
+before this policy are recomputed once instead of reused.
+Shot detection (OpenCV, which ignores these options) first opens the same file
+with a restricted FFprobe. Uploads are unchanged: such a file gets unavailable
+metadata, and every Job on it fails without an Asset.
+
+This is not a complete sandbox: native thread cancellation, resource quotas
+and deployment isolation remain separate. The libass `subtitles` filter opens
+its file itself, which is safe only because subtitles are validated first.
 
 ## Authentication & authorization
 

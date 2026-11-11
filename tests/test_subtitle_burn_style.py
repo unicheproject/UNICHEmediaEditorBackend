@@ -14,6 +14,7 @@ from app.capabilities import registry
 from app.capabilities.validation import CapabilityInputValidationError, validate_capability_input
 from app.core.errors import ValidationError
 from app.tools import ffmpeg
+from app.tools.demuxers import UNTRUSTED_INPUT
 from tests.test_composition_clip_timing import NEED_FFMPEG
 
 API = "/api/v1"
@@ -172,11 +173,14 @@ async def test_unstyled_commands_are_unchanged(monkeypatch, tmp_path: Path) -> N
     await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="burn")
     await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="burn", style={})
     await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="soft")
-    burn = [*ffmpeg._BASE, "-i", "/v.mp4", "-vf", f"subtitles='{ffmpeg._escape_subs(subs)}'",
+    # The video input carries the demuxer allowlist (Task #18B); the validated
+    # subtitle keeps its forced format.
+    burn = [*ffmpeg._BASE, *UNTRUSTED_INPUT, "-i", "/v.mp4",
+            "-vf", f"subtitles='{ffmpeg._escape_subs(subs)}'",
             "-pix_fmt", "yuv420p", "/o.mp4"]
     assert commands[0] == burn and commands[1] == burn
     # Soft mode now forces the validated demuxer (Task #17C); otherwise unchanged.
-    assert commands[2] == [*ffmpeg._BASE, "-i", "/v.mp4", "-f", "srt", "-i", subs,
+    assert commands[2] == [*ffmpeg._BASE, *UNTRUSTED_INPUT, "-i", "/v.mp4", "-f", "srt", "-i", subs,
                            "-c", "copy", "-c:s", "mov_text", "/o.mp4"]
     with pytest.raises(ValidationError, match="burn mode"):
         await ffmpeg.subtitle_embed("/v.mp4", subs, "/o.mp4", mode="soft",

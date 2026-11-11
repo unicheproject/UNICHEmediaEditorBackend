@@ -26,6 +26,7 @@ from app.models.job import Job
 from app.services import jobs as jobs_svc
 from app.services.agent import list_plan_attempts
 from app.services.assets import ensure_asset_binary_available, get_asset
+from app.tools.demuxers import MEDIA_INPUT_POLICY
 
 # Explicit policy: only these local, single-Asset-output handlers have been
 # reviewed for same-plan retry reuse. Changing output semantics requires a
@@ -208,6 +209,8 @@ async def build_execution_identity(
             "primary_input": primary,
             "parameters": canonical_params,
             "output_policy_version": version,
+            # Results from before FFmpeg input confinement never match (Task #18D).
+            "media_input_policy": MEDIA_INPUT_POLICY,
         })
     except (TypeError, ValueError):
         # Unexpected/non-JSON parameters must not make reuse less conservative.
@@ -226,6 +229,7 @@ def render_group_identity(
             "project_id": str(project_id),
             "optimizer_version": optimizer_version,
             "group_fingerprint": group["identity_hash"],
+            "media_input_policy": MEDIA_INPUT_POLICY,
         })
     except (TypeError, ValueError):
         return None

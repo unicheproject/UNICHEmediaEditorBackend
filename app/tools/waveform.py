@@ -10,6 +10,7 @@ from app.schemas.waveform import (
     WAVEFORM_SAMPLE_RATE,
     WaveformAvailable,
 )
+from app.tools.demuxers import UNTRUSTED_INPUT
 from app.tools.process_policy import media_process
 
 WAVEFORM_TIMEOUT_SECONDS = 120.0
@@ -68,7 +69,7 @@ async def generate_waveform(path: Path) -> WaveformAvailable:
     """Decode fixed-rate mono signed PCM incrementally, killing the child on all exits."""
     args = [
         "ffmpeg", "-nostdin", "-v", "error", "-threads", "1", "-filter_threads", "1",
-        "-i", str(path.absolute()), "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
+        *UNTRUSTED_INPUT, "-i", str(path.absolute()), "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
         str(WAVEFORM_SAMPLE_RATE), "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1",
     ]
     accumulator = EnvelopeAccumulator()

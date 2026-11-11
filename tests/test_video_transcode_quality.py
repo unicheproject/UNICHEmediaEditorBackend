@@ -24,6 +24,7 @@ from app.core.errors import ToolError
 from app.models.asset import Asset
 from app.models.job import Job
 from app.tools import ffmpeg, runner
+from app.tools.demuxers import UNTRUSTED_INPUT
 
 API = "/api/v1"
 LEVELS = ("high", "balanced", "compressed")
@@ -227,7 +228,8 @@ async def test_omitted_quality_retains_exact_legacy_command(monkeypatch, video_c
     run = AsyncMock()
     monkeypatch.setattr(runner, "run", run)
     await ffmpeg.video_transcode("/input.mp4", "/output.mkv", video_codec, audio_codec)
-    expected = ["ffmpeg", "-y", "-loglevel", "error", "-i", "/input.mp4"]
+    # The input carries the demuxer allowlist (Task #18B).
+    expected = ["ffmpeg", "-y", "-loglevel", "error", *UNTRUSTED_INPUT, "-i", "/input.mp4"]
     if video_codec:
         expected += ["-c:v", video_codec]
     if audio_codec:
@@ -247,7 +249,7 @@ async def test_quality_reaches_encoder_without_audio_or_geometry_changes(
     if codec == "libvpx-vp9":
         settings += ["-b:v", "0"]
     run.assert_awaited_once_with([
-        "ffmpeg", "-y", "-loglevel", "error", "-i", "/input.mp4",
+        "ffmpeg", "-y", "-loglevel", "error", *UNTRUSTED_INPUT, "-i", "/input.mp4",
         "-c:v", codec, "-c:a", "aac", *settings, "/output.mkv",
     ])
 
