@@ -86,3 +86,29 @@ SUBTITLE_STYLE_FIELDS = (
     "font", "font_size", "text_colour", "outline_colour", "outline", "position", "margin",
 )
 SUBTITLE_COLOUR_PATTERN = "^#[0-9A-Fa-f]{6}$"
+
+
+# Title-card and lower-third typography (media.titlecard, video.lowerthird).
+# The same four font ids as burned subtitles, each mapped to one installed
+# DejaVu file (fonts-dejavu-core); users never pass a font name or path.
+_DEJAVU = "/usr/share/fonts/truetype/dejavu"
+TEXT_FONT_FILES: dict[str, str] = {
+    "dejavu-sans": f"{_DEJAVU}/DejaVuSans.ttf",
+    "dejavu-sans-bold": f"{_DEJAVU}/DejaVuSans-Bold.ttf",
+    "dejavu-serif": f"{_DEJAVU}/DejaVuSerif.ttf",
+    "dejavu-serif-bold": f"{_DEJAVU}/DejaVuSerif-Bold.ttf",
+}
+DEFAULT_TEXT_FONT = "dejavu-sans"
+assert set(TEXT_FONT_FILES) == set(SUBTITLE_FONTS)
+# #RGB, #RRGGBB or a plain colour name; no expressions, brackets or protocols.
+TEXT_COLOUR_PATTERN = "^(?:#[0-9A-Fa-f]{3}|#[0-9A-Fa-f]{6}|[A-Za-z]+)$"
+TITLECARD_MAX_SIDE = 3840
+TITLECARD_MAX_PIXELS = 3840 * 2160
+TITLECARD_TEXT_MAX_LENGTH = 500
+TITLECARD_FONT_SIZE = (12, 400)
+LOWERTHIRD_TEXT_MAX_LENGTH = 200
+LOWERTHIRD_CAPTION_MAX_LENGTH = 300
+LOWERTHIRD_TEXT_SIZE = (12, 64)
+LOWERTHIRD_CAPTION_SIZE = (10, 48)
+TEXT_ALIGNS = ("left", "center", "right")
+VERTICAL_ALIGNS = ("top", "middle", "bottom")

@@ -81,6 +81,11 @@ class ImageKenburnsHandler(LocalToolHandler):
         )
 
 
+# Optional typography forwarded to the renderers; nothing else is passed on.
+_TITLE_TYPOGRAPHY = ("font", "font_size", "text_align", "vertical_align")
+_LOWERTHIRD_TYPOGRAPHY = ("font", "text_size", "caption_size")
+
+
 class MediaTitlecardHandler(LocalToolHandler):
     capability_id = "media.titlecard"
 
@@ -93,6 +98,7 @@ class MediaTitlecardHandler(LocalToolHandler):
             str(png), str(text), width=w, height=h,
             background=ctx.params.get("background", "#101418"),
             foreground=ctx.params.get("foreground", "#ffffff"),
+            **{name: ctx.params[name] for name in _TITLE_TYPOGRAPHY if name in ctx.params},
         )
         out = _video_out(ctx, "titlecard")
         await ffmpeg.still_to_clip(str(png), str(out.path), duration=duration, width=w, height=h)
@@ -116,6 +122,8 @@ class VideoLowerthirdHandler(LocalToolHandler):
             str(caption) if caption else None,
             background=ctx.params.get("background", "#101418"),
             foreground=ctx.params.get("foreground", "#ffffff"),
+            **{name: ctx.params[name] for name in _LOWERTHIRD_TYPOGRAPHY
+               if name in ctx.params},
         )
         out = OutputFile(
             path=ctx.out_path(f"{input_stem(ctx)}_lowerthird.mp4"),

@@ -67,7 +67,9 @@ REUSE_VERSIONS: dict[str, str] = {
     # video's duration (Task #15B); attached cover art is no longer treated as
     # video. Outputs made before these fixes must not be reused as equivalent.
     "audio.mix": "2",
-    "video.lowerthird": "1",
+    # 2: text prints literally (%, backslash, a leading @); colours are #RGB,
+    # #RRGGBB or names; text that would be clipped fails instead.
+    "video.lowerthird": "2",
     # 2: burn mode takes optional styling fields; an older Job could have
     # carried such keys and ignored them, so its output must not be reused.
     # 3: subtitle content is validated first; older versions could turn

@@ -586,6 +586,34 @@ Key boundaries:
   an unchecked file: binary data could be taken for MPEG-TS and keep libass
   busy until the 600 s runner timeout. An invalid file fails the Job with a
   plain message and no Asset (not a 422 at submission).
+- Title cards (`media.titlecard`) and lower thirds (`video.lowerthird`) take
+  optional typography (MED/030). Both take `font`: `dejavu-sans`,
+  `dejavu-sans-bold`, `dejavu-serif` or `dejavu-serif-bold`, each mapped to
+  one installed DejaVu file; no font name or path is ever passed through.
+  - Title card: `font_size` (12–400 px), `text_align`
+    (`left`/`center`/`right`) and `vertical_align` (`top`/`middle`/`bottom`).
+    Without `font_size` the text is sized to fill the card, as before. With
+    it, the size is kept exactly, and the Job fails if a word is wider than
+    the card or the text is taller than it.
+  - Lower third: `text_size` (12–64, default 36) and `caption_size` (10–48,
+    default 22) on the unchanged 640×160 banner. The caption moves down
+    with a bigger name.
+  - Text that would run past the banner, or a name that would overlap the
+    caption, now fails the Job instead of being clipped. This applies to
+    requests without styling too.
+  - Text prints exactly as typed: `%` (for example `%w`), backslashes and a
+    leading `@` used to be interpreted by ImageMagick. Real newlines still
+    break lines.
+  - Colours (`background`, `foreground`) must be `#RGB`, `#RRGGBB` or a
+    colour name (letters only); expressions such as `rgb(...)` or `red[..]`
+    get 422.
+  - Limits: title text up to 500 characters, name 200, caption 300. A title
+    card is at most 3840 px per side and 3840×2160 in area (portrait allowed).
+  - Without new fields, ordinary text renders pixel-identically. Lower thirds
+    are still not scaled to small videos.
+  - Agent: styled lower-third steps run as normal Jobs, not fused, so no
+    field is dropped. The fused render version and the `video.lowerthird`
+    reuse version were bumped.
 - Export presets are defined once in `app/composition/export_presets.py`.
   Web fits without upscaling inside 1920×1080 (CRF 22, AAC 128 kbps stereo);
   Social requires `square` (1080×1080) or `portrait` (1080×1920) and

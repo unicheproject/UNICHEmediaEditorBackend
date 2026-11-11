@@ -15,10 +15,21 @@ from app.capabilities.media_options import (
     AUDIO_CODEC_DESCRIPTIONS,
     AUDIO_CONTAINER_DESCRIPTIONS,
     AUDIO_TRANSCODE_OPTIONS,
+    LOWERTHIRD_CAPTION_MAX_LENGTH,
+    LOWERTHIRD_CAPTION_SIZE,
+    LOWERTHIRD_TEXT_MAX_LENGTH,
+    LOWERTHIRD_TEXT_SIZE,
     SUBTITLE_COLOUR_PATTERN,
     SUBTITLE_FONT_DESCRIPTIONS,
     SUBTITLE_FONTS,
     SUBTITLE_POSITIONS,
+    TEXT_ALIGNS,
+    TEXT_COLOUR_PATTERN,
+    TEXT_FONT_FILES,
+    TITLECARD_FONT_SIZE,
+    TITLECARD_MAX_SIDE,
+    TITLECARD_TEXT_MAX_LENGTH,
+    VERTICAL_ALIGNS,
     VIDEO_CODEC_DESCRIPTIONS,
     VIDEO_QUALITY_CRF,
     VIDEO_QUALITY_DESCRIPTIONS,
@@ -1079,7 +1090,10 @@ _DETERMINISTIC_SPECS: list[dict] = [
         "primary_asset": PrimaryAssetApplicability.FORBIDDEN,
         "project_context": ProjectContextApplicability.REQUIRED,
         "properties": {
-            "text": _string("Text", "Text rendered on the title card."),
+            "text": _string(
+                "Text", "Text rendered on the title card.",
+                maxLength=TITLECARD_TEXT_MAX_LENGTH,
+            ),
             "duration": _number(
                 "Duration",
                 "Title-card duration.",
@@ -1089,26 +1103,68 @@ _DETERMINISTIC_SPECS: list[dict] = [
             ),
             "width": _integer(
                 "Width",
-                "Output video width.",
+                "Output video width. Width x height is at most 3840x2160 in area.",
                 default=1920,
                 minimum=1,
+                maximum=TITLECARD_MAX_SIDE,
                 **{"x-unit": "pixels"},
             ),
             "height": _integer(
                 "Height",
-                "Output video height.",
+                "Output video height. Width x height is at most 3840x2160 in area.",
                 default=1080,
                 minimum=1,
+                maximum=TITLECARD_MAX_SIDE,
                 **{"x-unit": "pixels"},
             ),
             "background": _string(
                 "Background colour",
-                "ImageMagick colour used for the background.",
+                "Background colour as #RGB, #RRGGBB or a colour name.",
                 default="#101418",
+                pattern=TEXT_COLOUR_PATTERN,
             ),
             "foreground": _string(
-                "Text colour", "ImageMagick colour used for the text.", default="#ffffff"
+                "Text colour", "Text colour as #RGB, #RRGGBB or a colour name.",
+                default="#ffffff", pattern=TEXT_COLOUR_PATTERN,
             ),
+            # Optional typography; omitted fields keep the automatic layout.
+            "font": {
+                "type": "string",
+                "title": "Font",
+                "description": "Font of the title text.",
+                "enum": list(TEXT_FONT_FILES),
+                "x-enum-descriptions": SUBTITLE_FONT_DESCRIPTIONS,
+            },
+            "font_size": _integer(
+                "Font size",
+                "Exact text size in pixels. Without it the text is sized to fill the "
+                "card; with it, text that does not fit fails instead of being cut.",
+                minimum=TITLECARD_FONT_SIZE[0],
+                maximum=TITLECARD_FONT_SIZE[1],
+                **{"x-unit": "pixels"},
+            ),
+            "text_align": {
+                "type": "string",
+                "title": "Horizontal alignment",
+                "description": "Horizontal placement of the text lines.",
+                "enum": list(TEXT_ALIGNS),
+                "x-enum-descriptions": {
+                    "left": "Lines start at the left edge.",
+                    "center": "Lines are centred.",
+                    "right": "Lines end at the right edge.",
+                },
+            },
+            "vertical_align": {
+                "type": "string",
+                "title": "Vertical alignment",
+                "description": "Vertical placement of the text block.",
+                "enum": list(VERTICAL_ALIGNS),
+                "x-enum-descriptions": {
+                    "top": "At the top of the card.",
+                    "middle": "In the middle of the card.",
+                    "bottom": "At the bottom of the card.",
+                },
+            },
         },
         "required": ["text"],
     },
@@ -1123,8 +1179,13 @@ _DETERMINISTIC_SPECS: list[dict] = [
         ),
         "media": _V,
         "properties": {
-            "text": _string("Name", "Primary lower-third text."),
-            "caption": _string("Caption", "Optional secondary lower-third text."),
+            "text": _string(
+                "Name", "Primary lower-third text.", maxLength=LOWERTHIRD_TEXT_MAX_LENGTH
+            ),
+            "caption": _string(
+                "Caption", "Optional secondary lower-third text.",
+                maxLength=LOWERTHIRD_CAPTION_MAX_LENGTH,
+            ),
             "start": _number(
                 "Start time",
                 "Time at which the overlay appears.",
@@ -1153,11 +1214,35 @@ _DETERMINISTIC_SPECS: list[dict] = [
             },
             "background": _string(
                 "Background colour",
-                "ImageMagick colour used for the label background.",
+                "Banner colour as #RGB, #RRGGBB or a colour name.",
                 default="#101418",
+                pattern=TEXT_COLOUR_PATTERN,
             ),
             "foreground": _string(
-                "Text colour", "ImageMagick colour used for the text.", default="#ffffff"
+                "Text colour", "Text colour as #RGB, #RRGGBB or a colour name.",
+                default="#ffffff", pattern=TEXT_COLOUR_PATTERN,
+            ),
+            # Optional typography; text that does not fit the banner fails.
+            "font": {
+                "type": "string",
+                "title": "Font",
+                "description": "Font of the name and caption.",
+                "enum": list(TEXT_FONT_FILES),
+                "x-enum-descriptions": SUBTITLE_FONT_DESCRIPTIONS,
+            },
+            "text_size": _integer(
+                "Name size",
+                "Size of the name in pixels (36 when omitted).",
+                minimum=LOWERTHIRD_TEXT_SIZE[0],
+                maximum=LOWERTHIRD_TEXT_SIZE[1],
+                **{"x-unit": "pixels"},
+            ),
+            "caption_size": _integer(
+                "Caption size",
+                "Size of the caption in pixels (22 when omitted).",
+                minimum=LOWERTHIRD_CAPTION_SIZE[0],
+                maximum=LOWERTHIRD_CAPTION_SIZE[1],
+                **{"x-unit": "pixels"},
             ),
         },
         "required": ["text"],

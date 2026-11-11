@@ -361,6 +361,14 @@ USER_TEXT: dict[str, UserText] = {
                           "such as #101418.",
             "foreground": "Text colour, as a name such as white or a code such as "
                           "#ffffff.",
+            "font": "The typeface of the title. Leave empty for the default.",
+            "font_size": "Leave empty to make the text as large as fits. With a "
+                         "size (12 to 400), text that does not fit is not cut off: "
+                         "the title card fails, so you can shorten the text.",
+            "text_align": "Line up the text on the left, in the centre or on the "
+                          "right.",
+            "vertical_align": "Place the text at the top, in the middle or at the "
+                              "bottom of the card.",
         },
     },
     "video.lowerthird": {
@@ -378,6 +386,11 @@ USER_TEXT: dict[str, UserText] = {
                           "#101418.",
             "foreground": "Text colour, as a name such as white or a code such as "
                           "#ffffff.",
+            "font": "The typeface of the name and caption. Leave empty for the "
+                    "default.",
+            "text_size": "How big the name is, from 12 to 64 (36 if empty). Text "
+                         "that does not fit the banner is not cut off: the job fails.",
+            "caption_size": "How big the caption is, from 10 to 48 (22 if empty).",
         },
     },
     "video.subtitle.embed": {

@@ -15,7 +15,9 @@ from typing import Any
 
 from app.agent.schemas import Plan, PlanStep, is_step_ref, step_ref_id
 
-OPTIMIZER_VERSION = "agent-video-render-v1"
+# v2: fused lower thirds print text literally and reject clipped text
+# (Task #16C-B); renders and approvals from v1 are not reused.
+OPTIMIZER_VERSION = "agent-video-render-v2"
 _ADAPTERS = {"video.trim", "video.resize", "video.crop", "video.lowerthird"}
 _SUPPORTED_CONTAINERS = {"mp4", "m4v", "mov", "mkv", "webm", "avi"}
 _ADAPTER_PARAMS = {

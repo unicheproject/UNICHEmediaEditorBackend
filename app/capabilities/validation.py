@@ -89,10 +89,25 @@ def _check_burn_only_style(value: Mapping[str, Any]) -> None:
         )
 
 
+def _check_titlecard_area(value: Mapping[str, Any]) -> None:
+    """Each side is capped by the schema; the area (3840x2160) is checked here."""
+    from app.capabilities.media_options import TITLECARD_MAX_PIXELS
+
+    width, height = value.get("width", 1920), value.get("height", 1080)
+    if (
+        isinstance(width, int) and isinstance(height, int)
+        and width * height > TITLECARD_MAX_PIXELS
+    ):
+        raise CapabilityInputValidationError(
+            "input.width: a title card can have at most 3840x2160 pixels in area"
+        )
+
+
 _SEMANTIC_CHECKS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     "video.trim": _check_time_interval,
     "audio.trim": _check_time_interval,
     "video.subtitle.embed": _check_burn_only_style,
+    "media.titlecard": _check_titlecard_area,
 }
 
 

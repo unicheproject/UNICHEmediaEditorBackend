@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from pathlib import Path
 
+from app.capabilities.media_options import (
+    DEFAULT_TEXT_FONT,
+    LOWERTHIRD_CAPTION_SIZE,
+    LOWERTHIRD_TEXT_SIZE,
+    TEXT_ALIGNS,
+    TEXT_COLOUR_PATTERN,
+    TEXT_FONT_FILES,
+    TITLECARD_FONT_SIZE,
+    TITLECARD_MAX_PIXELS,
+    TITLECARD_MAX_SIDE,
+    VERTICAL_ALIGNS,
+)
 from app.core.errors import ToolError, ValidationError
 from app.tools import runner
 from app.tools.geometry import QUARTER_TURN_ORIENTATIONS, check_crop_rectangle
@@ -12,8 +25,68 @@ from app.tools.geometry import QUARTER_TURN_ORIENTATIONS, check_crop_rectangle
 CONVERT = "convert"
 IDENTIFY = "identify"
 
-# Bundled in the Docker image via fonts-dejavu-core.
-DEFAULT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+# Bundled in the Docker image via fonts-dejavu-core. A font is always passed:
+# without -font, convert falls back to the policy's missing font and aborts.
+DEFAULT_FONT = TEXT_FONT_FILES[DEFAULT_TEXT_FONT]
+_COLOUR = re.compile(TEXT_COLOUR_PATTERN)
+# (vertical, horizontal) -> caption gravity; the default keeps "center".
+_TITLE_GRAVITY = {
+    ("top", "left"): "NorthWest", ("top", "center"): "North", ("top", "right"): "NorthEast",
+    ("middle", "left"): "West", ("middle", "center"): "center", ("middle", "right"): "East",
+    ("bottom", "left"): "SouthWest", ("bottom", "center"): "South",
+    ("bottom", "right"): "SouthEast",
+}
+# Lower-third layout (640x160 banner): the name's box starts at +20+16 and
+# the caption at +20+72 for the default 36-point name.
+_LT_X, _LT_TOP, _LT_TEXT, _LT_CAPTION = 20, 16, 36, 22
+_MEASURE_TIMEOUT = 30.0
+
+
+def im_text(text: str) -> str:
+    """User text as literal ImageMagick text (caption:, label:, -annotate).
+
+    ImageMagick expands %-escapes (e.g. %w, %[fx:...]), backslash escapes and a
+    leading @ (read text from a file) in these arguments. Doubling % and \\ and
+    escaping a leading @ makes them print as typed; real newlines still break
+    lines. Apply exactly once, where the argument is built.
+    """
+    escaped = text.replace("\\", "\\\\").replace("%", "%%")
+    return "\\" + escaped if escaped.startswith("@") else escaped
+
+
+def _colour(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _COLOUR.fullmatch(value):
+        raise ValidationError(f"{name} must be #RGB, #RRGGBB or a colour name")
+    return value
+
+
+def _font_file(font: object) -> str:
+    if font is None:
+        return DEFAULT_FONT
+    if not isinstance(font, str) or font not in TEXT_FONT_FILES:
+        raise ValidationError("Unsupported font")
+    return TEXT_FONT_FILES[font]
+
+
+def _size(value: object, bounds: tuple[int, int], name: str) -> int:
+    low, high = bounds
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise ValidationError(f"{name} must be an integer from {low} to {high}")
+    return value
+
+
+async def _label_box(text: str, font: str, size: int) -> tuple[int, int]:
+    """Width and height of the text box -annotate draws (font metrics)."""
+    out = await runner.run_stdout(
+        [CONVERT, "-font", font, "-pointsize", str(size), f"label:{im_text(text)}",
+         "-format", "%w %h", "info:"],
+        timeout=_MEASURE_TIMEOUT,
+    )
+    try:
+        width, height = (int(part) for part in out.split())
+    except ValueError:
+        raise ToolError("Text could not be measured") from None
+    return width, height
 
 
 def _int(value: object, name: str) -> str:
@@ -222,15 +295,63 @@ async def render_text_card(
     height: int,
     background: str = "#101418",
     foreground: str = "#ffffff",
-    font: str | None = DEFAULT_FONT,
+    font: str | None = None,
+    font_size: int | None = None,
+    text_align: str | None = None,
+    vertical_align: str | None = None,
 ) -> None:
-    """Render centered, word-wrapped text onto a solid background PNG."""
-    # `caption:` auto-wraps and auto-sizes text to the given canvas size.
-    args = [CONVERT, "-size", f"{_int(width, 'width')}x{_int(height, 'height')}"]
-    args += ["-background", background, "-fill", foreground, "-gravity", "center"]
-    if font:
-        args += ["-font", font]
-    args += [f"caption:{text}", dst]
+    """Render word-wrapped text onto a solid background PNG.
+
+    Without font_size, `caption:` sizes the text to fill the canvas (unchanged
+    behaviour). With it, that exact size is used and text that would not fit
+    the canvas is rejected instead of being clipped.
+    """
+    w, h = int(_int(width, "width")), int(_int(height, "height"))
+    if w > TITLECARD_MAX_SIDE or h > TITLECARD_MAX_SIDE or w * h > TITLECARD_MAX_PIXELS:
+        raise ValidationError("Title card is larger than 3840 pixels or 3840x2160 in area")
+    horizontal = "center" if text_align is None else text_align
+    vertical = "middle" if vertical_align is None else vertical_align
+    if horizontal not in TEXT_ALIGNS or vertical not in VERTICAL_ALIGNS:
+        raise ValidationError("Unsupported title alignment")
+    font_file = _font_file(font)
+    args = [CONVERT, "-size", f"{w}x{h}"]
+    args += ["-background", _colour(background, "Background colour"),
+             "-fill", _colour(foreground, "Text colour"),
+             "-gravity", _TITLE_GRAVITY[(vertical, horizontal)], "-font", font_file]
+    if font_size is not None:
+        size = _size(font_size, TITLECARD_FONT_SIZE, "Font size")
+        # caption: wraps at spaces but cuts a word wider than the card (measured),
+        # so every word is measured first, in a single call.
+        words = sorted(set(text.split()))
+        if words:
+            widths = await runner.run_stdout(
+                [CONVERT, "-font", font_file, "-pointsize", str(size),
+                 *(f"label:{im_text(word)}" for word in words),
+                 "-format", "%w\n", "info:"],
+                timeout=_MEASURE_TIMEOUT,
+            )
+            measured = widths.split()
+            if len(measured) != len(words) or not all(v.isdigit() for v in measured):
+                raise ToolError("Title text could not be measured")
+            if max(int(v) for v in measured) > w:
+                raise ValidationError(
+                    "A word in the title is too wide for the card at this font size; "
+                    "use a smaller size"
+                )
+        needed = await runner.run_stdout(
+            [CONVERT, "-size", f"{w}x", "-font", font_file, "-pointsize", str(size),
+             f"caption:{im_text(text)}", "-format", "%h", "info:"],
+            timeout=_MEASURE_TIMEOUT,
+        )
+        if not needed.strip().isdigit():
+            raise ToolError("Title text could not be measured")
+        if int(needed) > h:
+            raise ValidationError(
+                "The title does not fit on the card at this font size; use a smaller "
+                "size or shorter text"
+            )
+        args += ["-pointsize", str(size)]
+    args += [f"caption:{im_text(text)}", dst]
     await runner.run(args)
 
 
@@ -243,19 +364,45 @@ async def render_lowerthird(
     height: int = 160,
     background: str = "#101418",
     foreground: str = "#ffffff",
-    font: str | None = DEFAULT_FONT,
+    font: str | None = None,
+    text_size: int | None = None,
+    caption_size: int | None = None,
 ) -> None:
     """Render a small solid-background name/caption box PNG (not full-frame) --
-    meant to be overlaid onto an existing video, not to fill it."""
+    meant to be overlaid onto an existing video, not to fill it.
+
+    Text that would run past the banner, or a name that would overlap the
+    caption, is rejected instead of being clipped.
+    """
+    w, h = int(_int(width, "width")), int(_int(height, "height"))
+    font_file = _font_file(font)
+    name_size = _LT_TEXT if text_size is None else _size(
+        text_size, LOWERTHIRD_TEXT_SIZE, "Text size")
+    note_size = _LT_CAPTION if caption_size is None else _size(
+        caption_size, LOWERTHIRD_CAPTION_SIZE, "Caption size")
+    # 72 for the default 36-point name; scales with a chosen name size.
+    caption_top = 72 if text_size is None else _LT_TOP + round(name_size * 14 / 9)
     args = [
         CONVERT,
-        "-size", f"{_int(width, 'width')}x{_int(height, 'height')}",
-        f"xc:{background}", "-gravity", "northwest", "-fill", foreground,
+        "-size", f"{w}x{h}",
+        f"xc:{_colour(background, 'Background colour')}", "-gravity", "northwest",
+        "-fill", _colour(foreground, "Text colour"), "-font", font_file,
     ]
-    if font:
-        args += ["-font", font]
-    args += ["-pointsize", "36", "-annotate", "+20+16", text]
+    name_w, name_h = await _label_box(text, font_file, name_size)
+    if _LT_X + name_w > w or _LT_TOP + name_h > (caption_top if caption else h):
+        raise ValidationError(
+            "The lower-third name does not fit in the banner; shorten it or use a "
+            "smaller text size"
+        )
+    args += ["-pointsize", str(name_size), "-annotate", f"+{_LT_X}+{_LT_TOP}", im_text(text)]
     if caption:
-        args += ["-pointsize", "22", "-annotate", "+20+72", caption]
+        note_w, note_h = await _label_box(caption, font_file, note_size)
+        if _LT_X + note_w > w or caption_top + note_h > h:
+            raise ValidationError(
+                "The lower-third caption does not fit in the banner; shorten it or use "
+                "a smaller caption size"
+            )
+        args += ["-pointsize", str(note_size), "-annotate", f"+{_LT_X}+{caption_top}",
+                 im_text(caption)]
     args.append(dst)
     await runner.run(args)
