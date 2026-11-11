@@ -9,6 +9,7 @@ from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.services.jobs import execute_job
 from app.services.media_metadata import probe_asset_metadata
+from app.services.reconciliation import reconcile_all
 from app.services.temp_assets import cleanup_expired_temp_assets
 from app.services.waveforms import enrich_asset_waveform
 
@@ -41,6 +42,21 @@ async def run_asset_probe(ctx: dict, asset_id: str) -> str:
         status = await probe_asset_metadata(session, uuid.UUID(asset_id))
         await enrich_asset_waveform(session, uuid.UUID(asset_id))
     return status.value if status is not None else "skipped"
+
+
+async def reconcile_abandoned_work(ctx: dict) -> dict[str, int]:
+    """Fail Jobs and Agent plans a dead worker left running (or never queued).
+
+    Errors are logged, never raised: an unavailable database or queue must not
+    stop the worker from starting or the cron from running next time.
+    """
+    try:
+        counts = await reconcile_all(async_session_factory)
+    except Exception as exc:  # noqa: BLE001 - recovery must never crash the worker
+        logger.warning("Abandoned-work recovery did not run (%s)", type(exc).__name__)
+        return {}
+    logger.info("Abandoned-work recovery: %s", counts)
+    return counts
 
 
 async def cleanup_temp_assets(ctx: dict) -> int:

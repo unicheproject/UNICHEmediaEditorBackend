@@ -25,6 +25,11 @@ RUN_JOB_TASK = "run_job"
 RUN_PLAN_TASK = "run_plan"
 RUN_ASSET_PROBE_TASK = "run_asset_probe"
 
+# The arq worker's job timeout (WorkerSettings.job_timeout), the one source of
+# truth: arq cancels every task (run_job, run_plan, cron) after this many
+# seconds, which bounds how long a live worker can keep a Job running.
+WORKER_JOB_TIMEOUT_SECONDS = 1800
+
 # How long cancel_job() waits to hear back from arq before giving up (the DB
 # is still updated immediately by services.jobs.cancel_job regardless).
 CANCEL_TIMEOUT = 5.0
@@ -70,6 +75,29 @@ async def _existing_job_dispatch(pool: ArqRedis, job_id: uuid.UUID) -> DispatchO
     except Exception as exc:  # noqa: BLE001 - uncertain dispatch is compensated by submission
         logger.warning("Could not confirm Job dispatch %s (%s)", job_id, type(exc).__name__)
         return DispatchOutcome.UNKNOWN
+
+
+async def inspect_job_dispatches(
+    job_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, DispatchOutcome]:
+    """Whether arq still holds each Job's run_job task (same rules as dispatch).
+
+    An unreachable queue makes every answer UNKNOWN, never NOT_DISPATCHED.
+    """
+    if not job_ids:
+        return {}
+    try:
+        pool = await get_arq_pool()
+    except Exception as exc:  # noqa: BLE001 - uncertain, not absent
+        logger.warning("Could not open Job queue for inspection (%s)", type(exc).__name__)
+        return dict.fromkeys(job_ids, DispatchOutcome.UNKNOWN)
+    try:
+        return {job_id: await _existing_job_dispatch(pool, job_id) for job_id in job_ids}
+    finally:
+        try:
+            await pool.aclose()
+        except Exception as exc:  # noqa: BLE001 - inspection already finished
+            logger.warning("Could not close Job queue (%s)", type(exc).__name__)
 
 
 async def enqueue_job(job_id: uuid.UUID) -> DispatchOutcome:

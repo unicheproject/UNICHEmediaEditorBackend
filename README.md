@@ -390,9 +390,34 @@ Key boundaries:
   render groups, and `project.export` use the same fences. Waveform enrichment
   runs best-effort after publication. Unpublished objects are removed best-effort;
   abrupt process death or an unverifiable DB failure can leave unreferenced
-  storage and a running Job. This is at-most-one authoritative publication, not
-  exactly-once provider invocation. Stale-running recovery and crash-gap
-  dispatch reconciliation are separate, unsupported mechanisms.
+  storage. This is at-most-one authoritative publication, not exactly-once
+  provider invocation.
+- **Abandoned work is recovered, not retried** (`app/services/reconciliation.py`).
+  A worker killed outright (SIGKILL, OOM, crash, host restart) used to leave its
+  Job `running` forever: arq redelivers the task, but the claim only accepts
+  `queued`. arq cancels every task after the worker's job timeout
+  (`WORKER_JOB_TIMEOUT_SECONDS`, 1800 s), so a Job or Agent attempt started
+  more than that plus 190 s ago (arq's 10 s in-progress margin and a 180 s
+  grace) cannot belong to a live worker. Such Jobs become `failed` ("The worker
+  stopped before this job finished. Please run it again."). Such Agent plans
+  become `failed` with their attempt, the active attempt is cleared, and they
+  can be approved again; completed steps stay reusable. A Job still `queued`
+  10 minutes after creation fails with the dispatch message only when arq
+  definitely no longer holds its task; an unreachable or uncertain queue leaves
+  it alone. Progress inactivity is never used. Recovery runs at worker startup
+  and every 5 minutes (arq cron, one run per time), in short conditional
+  updates. Workers publish, report progress and finish only while their Job is
+  still `running`, and an Agent executor writes plan/attempt state only while
+  its attempt is still the plan's active, running attempt. So a late worker or
+  executor cannot overwrite a recovery, a newer attempt, or each other.
+  Running work counts as abandoned 1990 s after `started_at`, and recovery
+  runs every 5 minutes, so under normal conditions it is recovered about 33–38
+  minutes after it started. It can take longer if the worker, its schedule,
+  the database or the queue is delayed or unavailable; this is not a
+  guaranteed upper bound. Nothing is retried or requeued automatically.
+  Recovery deletes nothing: unreferenced
+  storage from a crash and `/tmp` work directories remain, as do approved plans
+  whose task was never queued.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
 - Capability library records include canonical `layer` values

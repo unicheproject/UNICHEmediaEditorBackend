@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import inspect as orm_inspect
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -95,7 +97,57 @@ def _consumed_step_ids(plan: Plan) -> set[str]:
     return consumed
 
 
+class StaleAttemptError(Exception):
+    """This executor no longer owns the plan: it was recovered or retried."""
+
+
+async def _require_ownership(
+    session: AsyncSession, plan_row: AgentPlan, attempt: AgentPlanAttempt,
+) -> None:
+    """Before writing plan/attempt state, confirm this attempt still owns them.
+
+    Reads the stored rows (locked on PostgreSQL) without flushing this
+    executor's pending changes, so recovery or a newer attempt is never
+    overwritten; on loss of ownership the pending changes are discarded.
+    """
+    # Primary keys from the identity map: reading an expired attribute would
+    # trigger a lazy load, which an async session cannot do.
+    plan_identity = orm_inspect(plan_row).identity
+    attempt_identity = orm_inspect(attempt).identity
+    if plan_identity is None or attempt_identity is None:
+        raise StaleAttemptError("unknown attempt")
+    plan_id, attempt_id = plan_identity[0], attempt_identity[0]
+    with session.no_autoflush:
+        owner = (await session.execute(
+            select(AgentPlan.status, AgentPlan.active_attempt_id)
+            .where(AgentPlan.id == plan_id)
+            .with_for_update()
+        )).one_or_none()
+        attempt_status = await session.scalar(
+            select(AgentPlanAttempt.status)
+            .where(AgentPlanAttempt.id == attempt_id)
+            .with_for_update()
+        )
+    if (
+        owner is None or owner.status != AgentPlanStatus.running
+        or owner.active_attempt_id != attempt_id or attempt_status != "running"
+    ):
+        await session.rollback()
+        raise StaleAttemptError(str(attempt_id))
+
+
 async def execute_plan(
+    session: AsyncSession, plan_id: uuid.UUID, attempt_id: uuid.UUID | None
+) -> AgentPlan:
+    try:
+        return await _execute_plan(session, plan_id, attempt_id)
+    except StaleAttemptError as exc:
+        logger.warning("Agent plan %s attempt %s lost ownership; nothing written", plan_id, exc)
+        await session.rollback()
+        return await agent_svc.get_plan(session, plan_id)
+
+
+async def _execute_plan(
     session: AsyncSession, plan_id: uuid.UUID, attempt_id: uuid.UUID | None
 ) -> AgentPlan:
     claimed = (
@@ -125,6 +177,7 @@ async def execute_plan(
         plan_row.execution_summary = copy.deepcopy(summary)
         attempt.execution_summary = copy.deepcopy(summary)
         flag_modified(plan_row, "execution_summary")
+        await _require_ownership(session, plan_row, attempt)
         await session.commit()
 
     try:
@@ -277,6 +330,8 @@ async def _save_running_attempt(
     session: AsyncSession, plan_row: AgentPlan, attempt: AgentPlanAttempt,
     step_runs: list[dict], summary: dict | None,
 ) -> None:
+    # First, before snapshot_plan_attempt flushes this executor's changes.
+    await _require_ownership(session, plan_row, attempt)
     plan_row.step_runs = list(step_runs)
     if summary is not None:
         plan_row.execution_summary = copy.deepcopy(summary)
@@ -294,6 +349,9 @@ async def _finish_attempt(
     status: str, error: str | None, step_runs: list[dict] | None = None,
     summary: dict | None = None,
 ) -> None:
+    # First, before snapshot_plan_attempt flushes this executor's changes;
+    # the row locks taken here last until the commit below.
+    await _require_ownership(session, plan_row, attempt)
     now = datetime.now(UTC)
     plan_row.active_attempt_id = None
     plan_row.step_runs = list(step_runs if step_runs is not None else plan_row.step_runs)
@@ -691,6 +749,7 @@ async def _execute_render_group(
                 node.update(job_id=str(job.id), status=job.status.value,
                             output_asset_id=output_asset_id)
         flag_modified(plan_row, "execution_summary")
+        await _require_ownership(session, plan_row, attempt)
         await session.commit()
         raise
     except Exception as exc:  # noqa: BLE001 - persist physical group failure
