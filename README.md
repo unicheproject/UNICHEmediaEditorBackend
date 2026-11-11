@@ -415,9 +415,34 @@ Key boundaries:
   minutes after it started. It can take longer if the worker, its schedule,
   the database or the queue is delayed or unavailable; this is not a
   guaranteed upper bound. Nothing is retried or requeued automatically.
-  Recovery deletes nothing: unreferenced
-  storage from a crash and `/tmp` work directories remain, as do approved plans
-  whose task was never queued.
+  An approved Agent plan whose `run_plan` task never reached the queue, was
+  lost from it, or failed before claiming the attempt used to stay `approved`
+  for ever, and approval accepts only proposed or failed plans. When its
+  active attempt is more than 10 minutes old and arq confirms that the task is
+  no longer queued, deferred or in progress (a stored result counts as gone),
+  the plan and that attempt become `failed` together ("The execution task was
+  not available. Please approve the plan again."), and the plan can be
+  approved again as usual. An attempt becomes eligible 10 minutes after
+  approval and recovery runs every 5 minutes, so under normal conditions this
+  happens about 10–15 minutes after approval. It needs a reachable queue and
+  the periodic recovery; a large backlog of approved attempts, delayed runs or
+  service interruptions make it take longer, and it is not a guaranteed upper
+  bound. A task still held by the queue keeps its plan approved however old it
+  is. Plans approved before attempts existed (no active attempt) have no known
+  task and are left alone. Each run inspects at most 200 approved attempts, a
+  few at a time, under one 15 s budget that starts before the Redis connection
+  is opened and covers every lookup; whatever is not answered in time, and any
+  Redis error, counts as uncertain, and nothing is recovered on an uncertain
+  answer. The next run continues after the last attempt inspected, so with
+  continuous runs, attempts that stay legitimately queued delay later ones by
+  at most a few runs instead of hiding them. That position is kept in the
+  worker process: a worker restart starts the scan again from the oldest
+  attempt, and frequent restarts or a changing set of candidates can delay a
+  later attempt further. Opening the queue for Job recovery is bounded too
+  (10 s); before, a Redis that accepted connections but never answered could
+  stall recovery indefinitely. Each recovery pass runs even if another one
+  fails. Recovery deletes nothing: unreferenced storage from a crash and `/tmp`
+  work directories remain.
 - **Capabilities are code-defined** in `app/capabilities/definitions.py` and
   exposed read-only via the API — they are not database rows.
 - Capability library records include canonical `layer` values

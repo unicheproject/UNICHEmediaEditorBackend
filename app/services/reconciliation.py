@@ -18,19 +18,21 @@ Why failing them is safe:
   late worker therefore cannot overwrite a recovery, and two recoveries
   cannot conflict.
 
-Recovered work is failed, never retried automatically. Queued Jobs are
-failed only after a grace period and only when arq definitely no longer
-holds their task; an unreachable or uncertain queue leaves them untouched.
+Recovered work is failed, never retried automatically. Queued Jobs and
+approved Agent attempts are failed only after a grace period and only when arq
+definitely no longer holds their task; an unreachable or uncertain queue
+leaves them untouched.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -42,7 +44,9 @@ from app.services.jobs import DISPATCH_FAILURE_MESSAGE
 from app.workers.queue import (
     WORKER_JOB_TIMEOUT_SECONDS,
     DispatchOutcome,
+    PlanAttempt,
     inspect_job_dispatches,
+    inspect_plan_dispatches,
 )
 
 logger = get_logger(__name__)
@@ -56,8 +60,26 @@ BATCH_SIZE = 200
 
 JOB_INTERRUPTED = "The worker stopped before this job finished. Please run it again."
 PLAN_INTERRUPTED = "The worker stopped before this plan finished. Please run it again."
+PLAN_TASK_UNAVAILABLE = (
+    "The execution task was not available. Please approve the plan again."
+)
 
 DispatchInspector = Callable[[list[uuid.UUID]], Awaitable[dict[uuid.UUID, DispatchOutcome]]]
+PlanDispatchInspector = Callable[
+    [list[PlanAttempt]], Awaitable[dict[PlanAttempt, DispatchOutcome]]
+]
+
+
+@dataclass
+class ScanCursor:
+    """Where the next approved-attempt scan resumes, so a full batch of
+    attempts that are legitimately still queued cannot hide later ones."""
+
+    position: tuple[datetime, uuid.UUID] | None = None
+
+
+# One per worker process; it starts again from the oldest after a restart.
+APPROVED_PLAN_CURSOR = ScanCursor()
 
 
 def running_cutoff(now: datetime) -> datetime:
@@ -168,21 +190,127 @@ async def recover_queued_jobs(
     return _rows(result), uncertain
 
 
+async def recover_unqueued_plans(
+    session_factory: async_sessionmaker[AsyncSession],
+    now: datetime,
+    inspect: PlanDispatchInspector,
+    cursor: ScanCursor,
+) -> tuple[int, int]:
+    """approved -> failed for attempts whose run_plan task arq no longer holds.
+
+    Candidates are a plan and its active attempt, both still approved, the
+    attempt created more than QUEUED_GRACE ago. Plans without an active
+    attempt (approved before attempts existed) have no known task id and are
+    never candidates. Batches advance through the candidates with `cursor`
+    and start over after the last one. Returns (recovered, left_uncertain).
+    No transaction is open while the queue is inspected.
+    """
+    cutoff = now - QUEUED_GRACE
+    query = (
+        select(AgentPlanAttempt.plan_id, AgentPlanAttempt.id, AgentPlanAttempt.created_at)
+        .join(AgentPlan, AgentPlan.id == AgentPlanAttempt.plan_id)
+        .where(
+            AgentPlanAttempt.status == "approved",
+            AgentPlanAttempt.created_at < cutoff,
+            AgentPlan.status == AgentPlanStatus.approved,
+            AgentPlan.active_attempt_id == AgentPlanAttempt.id,
+        )
+    )
+    if cursor.position is not None:
+        after_created, after_id = cursor.position
+        query = query.where(or_(
+            AgentPlanAttempt.created_at > after_created,
+            and_(AgentPlanAttempt.created_at == after_created, AgentPlanAttempt.id > after_id),
+        ))
+    async with session_factory() as session:
+        rows = (await session.execute(
+            query.order_by(AgentPlanAttempt.created_at, AgentPlanAttempt.id).limit(BATCH_SIZE)
+        )).all()
+    cursor.position = (rows[-1].created_at, rows[-1].id) if len(rows) == BATCH_SIZE else None
+    if not rows:
+        return 0, 0
+    pairs = [(row.plan_id, row.id) for row in rows]
+    outcomes = await inspect(pairs)
+    uncertain = sum(1 for pair in pairs
+                    if outcomes.get(pair, DispatchOutcome.UNKNOWN) == DispatchOutcome.UNKNOWN)
+    recovered = 0
+    for plan_id, attempt_id in pairs:
+        if outcomes.get((plan_id, attempt_id)) != DispatchOutcome.NOT_DISPATCHED:
+            continue
+        # Plan first, then attempt: the same order as the worker's claim, so a
+        # concurrent claim waits on (or wins) the plan row and only one side
+        # changes the pair. Both change together or not at all.
+        async with session_factory() as session:
+            plan = await session.execute(
+                update(AgentPlan)
+                .where(
+                    AgentPlan.id == plan_id,
+                    AgentPlan.status == AgentPlanStatus.approved,
+                    AgentPlan.active_attempt_id == attempt_id,
+                )
+                .values(status=AgentPlanStatus.failed, error=PLAN_TASK_UNAVAILABLE,
+                        active_attempt_id=None)
+                .execution_options(synchronize_session=False)
+            )
+            if _rows(plan) != 1:
+                await session.rollback()
+                continue
+            attempt = await session.execute(
+                update(AgentPlanAttempt)
+                .where(
+                    AgentPlanAttempt.id == attempt_id,
+                    AgentPlanAttempt.status == "approved",
+                    AgentPlanAttempt.created_at < cutoff,
+                )
+                .values(status="failed", error=PLAN_TASK_UNAVAILABLE, finished_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            if _rows(attempt) != 1:
+                await session.rollback()
+                continue
+            await session.commit()
+            recovered += 1
+    return recovered, uncertain
+
+
 async def reconcile_all(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     now: datetime | None = None,
     inspect: DispatchInspector = inspect_job_dispatches,
+    inspect_plans: PlanDispatchInspector = inspect_plan_dispatches,
+    plan_cursor: ScanCursor | None = None,
 ) -> dict[str, int]:
-    """One bounded recovery pass: running Jobs, then plans, then queued Jobs."""
+    """One bounded recovery run: running Jobs, running plans, queued Jobs,
+    then approved plans. A pass that fails is logged and the others still run.
+    """
     moment = now or datetime.now(UTC)
-    async with session_factory() as session:
-        running_jobs = await recover_running_jobs(session, moment)
-    async with session_factory() as session:
-        plans = await recover_running_plans(session, moment)
-    queued_jobs, uncertain = await recover_queued_jobs(session_factory, moment, inspect)
-    counts = {"running_jobs": running_jobs, "plans": plans, "queued_jobs": queued_jobs,
-              "queued_uncertain": uncertain}
-    if running_jobs or plans or queued_jobs or uncertain:
+    cursor = APPROVED_PLAN_CURSOR if plan_cursor is None else plan_cursor
+    counts = {"running_jobs": 0, "plans": 0, "queued_jobs": 0, "queued_uncertain": 0,
+              "approved_plans": 0, "approved_uncertain": 0}
+
+    async def running_jobs() -> None:
+        async with session_factory() as session:
+            counts["running_jobs"] = await recover_running_jobs(session, moment)
+
+    async def running_plans() -> None:
+        async with session_factory() as session:
+            counts["plans"] = await recover_running_plans(session, moment)
+
+    async def queued_jobs() -> None:
+        counts["queued_jobs"], counts["queued_uncertain"] = await recover_queued_jobs(
+            session_factory, moment, inspect)
+
+    async def approved_plans() -> None:
+        counts["approved_plans"], counts["approved_uncertain"] = await recover_unqueued_plans(
+            session_factory, moment, inspect_plans, cursor)
+
+    for name, recovery in (("running Jobs", running_jobs), ("running plans", running_plans),
+                           ("queued Jobs", queued_jobs), ("approved plans", approved_plans)):
+        try:
+            await recovery()
+        except Exception as exc:  # noqa: BLE001 - one failing pass must not block the others
+            logger.warning("Recovery of %s did not run (%s)", name, type(exc).__name__)
+    if any(counts.values()):
         logger.warning("Recovered abandoned work: %s", counts)
     return counts
