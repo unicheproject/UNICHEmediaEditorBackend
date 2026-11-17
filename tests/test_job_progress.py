@@ -164,7 +164,9 @@ async def test_video_job_reports_intermediate_progress(
     job = await _run(client, "video.resize", aid, {"height": 120})
     assert recorded_progress, "no intermediate progress was reported"
     assert recorded_progress == sorted(recorded_progress)
-    assert all(jobs_svc.PROGRESS_START < v < 100 for v in recorded_progress)
+    # The first FFmpeg report can land below one step (value 15); the real sink
+    # drops it, but this recorder sees it, so the start value is allowed.
+    assert all(jobs_svc.PROGRESS_START <= v < 100 for v in recorded_progress)
     assert recorded_progress[-1] == 94  # 0.99 of the 15..95 processing range
     assert job["progress"] == 100
 
